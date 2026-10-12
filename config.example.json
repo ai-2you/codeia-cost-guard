@@ -1,5 +1,6 @@
 {
   "tema": "sistema",
+  "nan_api_key": "",
   "limite_hora_tokens": 8000000,
   "limite_5h_tokens": 0,
   "limite_semana_tokens": 0,
@@ -65,8 +66,15 @@
       "limite_semana_tokens": 0,
       "tipo": "suscripcion",
       "limite_mes_tokens": 0,
-      "fuente": "https://nan.builders/",
-      "nota": "Membresia de inferencia de 70 EUR/mes (NaN Builders). La cuota de tokens no esta publicada: fuera del cluster premium no hay contador; dentro, el tope es el mensual que marque la membresia."
+      "uso_api": "nan",
+      "cuotas_mes": {
+        "deepseek-v4-flash": 3000000000,
+        "glm5.3-flash": 2000000000,
+        "mimo-v2.6-flash": 1000000000,
+        "qwen3.8-flash": 500000000
+      },
+      "fuente": "https://api.nan.builders/v1/usage",
+      "nota": "uso_api=nan: el consumo por modelo se lee en vivo de GET https://api.nan.builders/v1/usage (el contador real de NaN, incluye web/nube/otras maquinas). Cuotas mensuales publicadas: DeepSeek V4-Flash 3 B, GLM 5.3 Flash 2 B, MiMo V2.6 Flash 1 B, Qwen 3.8 Flash 500 M. La API key se coge de NAN_API_KEY (entorno) o de nan_api_key abajo; no la metas en el repo."
     },
     {
       "nombre": "OpenCode Go",

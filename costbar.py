@@ -13,7 +13,7 @@ Uso:
     ./venv/bin/python costbar.py --print      # imprime el informe y sale (sin GUI)
     ./venv/bin/python costbar.py              # icono en la barra de menus
 """
-import collections, datetime, glob, hashlib, json, os, re, sqlite3, subprocess, sys, time, urllib.parse
+import collections, datetime, glob, hashlib, json, os, re, sqlite3, ssl, subprocess, sys, time, urllib.parse, urllib.request
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 HOME = os.path.expanduser("~")
@@ -25,6 +25,11 @@ PI_DIR = f"{HOME}/.pi/agent/sessions"   # sesiones de pi (JSONL); ver parsear_pi
 # OpenCode no va aqui: guarda su consumo en SQLite (ver leer_bases()), no en .jsonl/.json;
 # barrer su carpeta solo encontraba auth.json (credenciales) y diffs internos, sin datos de uso.
 DIAS = 31
+# NaN publica el consumo real (server-side) por fecha y modelo: para su cuota es la fuente que manda,
+# porque los logs locales no ven lo que corrio en la nube ni en otra maquina.
+NAN_USO_URL = "https://api.nan.builders/v1/usage"
+NAN_USO_CACHE = f"{AQUI}/logs/nan_uso.json"
+NAN_USO_TTL = 300           # segundos: /usage permite 30 rpm, con refrescar cada 5 min sobra
 VENTANA_H = 5               # ventana de 5 horas de las suscripciones
 VERSION_ESTADO = 10         # subir cuando cambie el formato del cache: obliga a reescanear
 
@@ -165,7 +170,8 @@ def proveedores_de(c, modelos=()):
         salida.append({"nombre": str(p.get("nombre") or "?"),
                        "modelos": [str(m).lower() for m in (p.get("modelos") or [])],
                        "limite_5h_tokens": p.get("limite_5h_tokens") or 0,
-                       "limite_semana_tokens": p.get("limite_semana_tokens") or 0})
+                       "limite_semana_tokens": p.get("limite_semana_tokens") or 0,
+                       "cuotas_mes": {str(k).lower(): (v or 0) for k, v in (p.get("cuotas_mes") or {}).items()}})
     # lo que no este declarado en config.json aparece solo, agrupado por familia de modelo
     auto = collections.defaultdict(set)
     for m in modelos:
@@ -177,7 +183,7 @@ def proveedores_de(c, modelos=()):
         auto[familia_de(m)].add(corto(m))
     for fam, ms in sorted(auto.items()):
         salida.append({"nombre": fam, "modelos": sorted(ms), "auto": True,
-                       "limite_5h_tokens": 0, "limite_semana_tokens": 0})
+                       "limite_5h_tokens": 0, "limite_semana_tokens": 0, "cuotas_mes": {}})
     return salida
 
 
@@ -342,6 +348,85 @@ def cfg():
         except Exception:
             pass
     return d
+
+
+def clave_nan():
+    """API key de NaN, por orden: entorno NAN_API_KEY -> config.json (nan_api_key) -> fichero de clave.
+
+    Lo recomendado es la variable de entorno: config.json esta versionado en el repo, asi que una
+    clave ahi acabaria en el historial de git. Tambien vale ~/.config/nan/api_key.
+    """
+    for v in (os.environ.get("NAN_API_KEY") or "", cfg().get("nan_api_key") or ""):
+        v = str(v).strip()
+        if v:
+            return v
+    for ruta in (f"{HOME}/.config/nan/api_key", f"{HOME}/.nan/api_key"):
+        try:
+            v = open(ruta, encoding="utf-8").read().strip()
+            if v:
+                return v
+        except Exception:
+            pass
+    return ""
+
+
+def _contexto_ssl():
+    """El Python de python.org en macOS no trae el almacen de certificados del sistema.
+
+    Sin esto, /usage falla con CERTIFICATE_VERIFY_FAILED. Se prueba certifi y, si no, el bundle
+    que macOS deja en /etc/ssl/cert.pem. Nunca se desactiva la verificacion.
+    """
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+    for cafile in ("/etc/ssl/cert.pem", "/usr/local/etc/openssl/cert.pem", "/opt/homebrew/etc/openssl/cert.pem"):
+        if os.path.exists(cafile):
+            try:
+                return ssl.create_default_context(cafile=cafile)
+            except Exception:
+                pass
+    return ssl.create_default_context()
+
+
+def uso_nan(inicio_mes):
+    """Consumo real de NaN en el periodo de facturacion, {modelo: total_tokens} o None.
+
+    GET /v1/usage devuelve el contador de NaN: es lo que consume de verdad tu cuota (incluye web,
+    nube y otras maquinas). Se cachea en disco para no pasar de 30 rpm (el icono y el panel
+    refrescan cada minuto); si la red falla, se usa el ultimo dato bueno y, si no hay, None para
+    que el panel caiga a los logs locales.
+    """
+    key = clave_nan()
+    if not key:
+        return None
+    ahora = time.time()
+    try:
+        cache = json.load(open(NAN_USO_CACHE, encoding="utf-8"))
+    except Exception:
+        cache = {}
+    if cache.get("inicio_mes") == inicio_mes and (ahora - (cache.get("ts") or 0)) < NAN_USO_TTL:
+        return cache.get("por_modelo")
+    try:
+        req = urllib.request.Request(
+            f"{NAN_USO_URL}?start_date={inicio_mes}",
+            headers={"Authorization": f"Bearer {key}", "User-Agent": "CostBar/1.0",
+                     "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=6, context=_contexto_ssl()) as resp:
+            d = json.loads(resp.read().decode("utf-8"))
+        por_modelo = {str(m.get("model") or "").lower(): int(m.get("total_tokens") or 0)
+                      for m in ((d.get("totals") or {}).get("by_model") or [])}
+        try:
+            os.makedirs(os.path.dirname(NAN_USO_CACHE), exist_ok=True)
+            json.dump({"ts": ahora, "inicio_mes": inicio_mes, "por_modelo": por_modelo},
+                      open(NAN_USO_CACHE, "w", encoding="utf-8"))
+        except Exception:
+            pass
+        return por_modelo
+    except Exception as e:
+        log(f"nan /usage: {type(e).__name__}: {e}")
+        return cache.get("por_modelo") if cache.get("inicio_mes") == inicio_mes else None
 
 
 def leer_estado():
@@ -609,7 +694,7 @@ def leer_bases():
                 pass
         return m.strip()
 
-    def mete(proyecto, plan, ts, modelo, gi, go, cr, cw):
+    def mete(proyecto, plan, ts, modelo, gi, go, cr, cw, n=1):
         if not ts or len(str(ts)) < 10:
             return
         ts = a_local(ts)
@@ -617,7 +702,7 @@ def leer_bases():
         k = limpia_modelo(modelo) or "sin-modelo"
         a = proy["dia"][ts[:10]][k]
         a[0] += gi; a[1] += go; a[2] += cr; a[3] += cw
-        proy["turnos"][ts[:10]] += 1
+        proy["turnos"][ts[:10]] += n
         if len(ts) >= 13:
             tok = gi + go + cr + cw
             proy["horas"][ts[:13]]["tok"] += tok
@@ -639,22 +724,50 @@ def leer_bases():
         trozos = [x for x in (partes or "").split("/") if x]
         return "/".join(trozos[-n:]) if trozos else ""
 
-    # OpenCode: cada sesion lleva su directorio
+    def _prov_de_sesion(m):
+        """En el respaldo, session.model es un JSON con providerID; de ahi sale el plan."""
+        if (m or "").strip().startswith("{"):
+            try:
+                return json.loads(m).get("providerID") or ""
+            except Exception:
+                return ""
+        return ""
+
+    # OpenCode: se lee MENSAJE a mensaje (trae el uso del turno y su hora). El total de la sesion
+    # vive en la tabla session, pero su time_created es cuando ARRANCO la sesion: si se cerraba el
+    # calculo con eso, todo el trabajo nuevo de una sesion larga se fechaba en su hora de inicio y
+    # no entraba en la ventana de 5 h ni en el dia. La suma de mensajes cuadra exacta con el total
+    # de la sesion (verificado: 0 desajustes en 626 sesiones), asi que es equivalente y ademas
+    # correcto en el tiempo.
     for ruta in (f"{HOME}/.local/share/opencode/opencode.db", f"{HOME}/.local/share/opencode/opencode-.db"):
         if not os.path.exists(ruta):
             continue
         try:
             con = sqlite3.connect(f"file:{ruta}?mode=ro", uri=True)
-            filas = list(con.execute("select model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, time_created, directory from session"))
+            try:
+                filas = list(con.execute("""
+                    select s.directory,
+                           json_extract(msg.data, '$.providerID'),
+                           json_extract(msg.data, '$.modelID'),
+                           min(msg.time_created),
+                           sum(coalesce(json_extract(msg.data, '$.tokens.input'), 0)),
+                           sum(coalesce(json_extract(msg.data, '$.tokens.output'), 0)),
+                           sum(coalesce(json_extract(msg.data, '$.tokens.cache.read'), 0)),
+                           sum(coalesce(json_extract(msg.data, '$.tokens.cache.write'), 0)),
+                           count(*)
+                    from message msg join session s on s.id = msg.session_id
+                    where json_extract(msg.data, '$.modelID') is not null
+                    group by s.directory, 2, 3, msg.time_created / 3600000"""))
+                fuente = "mensajes"
+            except sqlite3.Error:
+                # respaldo: OpenCode sin tabla/uso por mensaje -> total de sesion (fecha de arranque)
+                filas = [(direc, _prov_de_sesion(m), m, creado, ti, to, tcr, tcw, 1)
+                         for m, ti, to, tcr, tcw, creado, direc in con.execute(
+                             "select model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, time_created, directory from session")]
+                fuente = "sesiones"
             con.close()
-            for m, ti, to, tcr, tcw, creado, direc in filas:
-                prov = ""
-                if (m or "").strip().startswith("{"):
-                    try:
-                        prov = json.loads(m).get("providerID") or ""
-                    except Exception:
-                        prov = ""
-                mete(f"OpenCode · {ultimos(direc) or 'sin proyecto'}", prov, hora(creado), m, ti or 0, to or 0, tcr or 0, tcw or 0)
+            for direc, prov, m, creado, ti, to, tcr, tcw, n in filas:
+                mete(f"OpenCode · {ultimos(direc) or 'sin proyecto'}", prov, hora(creado), m, ti or 0, to or 0, tcr or 0, tcw or 0, n or 1)
             nombres.append(f"OpenCode ({len(filas)})")
             break
         except Exception as e:
@@ -765,6 +878,7 @@ def agregar(vistos, nuevos=0):
     desde = time.strftime("%Y-%m-%d", time.localtime(time.time() - DIAS * 86400))
     hace7 = time.strftime("%Y-%m-%d", time.localtime(time.time() - 6 * 86400))
     hace30 = time.strftime("%Y-%m-%d", time.localtime(time.time() - 29 * 86400))
+    inicio_mes = time.strftime("%Y-%m-01")       # las cuotas mensuales (NaN SOTA) resetean el dia 1
     dias = collections.defaultdict(vacio)
     modelos_hoy = collections.defaultdict(vacio)
     modelos_mes = collections.defaultdict(vacio)
@@ -881,6 +995,74 @@ def agregar(vistos, nuevos=0):
     for _m, _d in _tok.items():
         if _d:
             modelo_prov[_m] = max(_d, key=_d.get)
+    # Cuota mensual por modelo. Para un plan con uso_api (NaN) la fuente es su endpoint /usage, que
+    # es el contador real; para el resto, los logs locales. Se calcula por proveedor.
+    _vivo_nan = {}
+
+    def _vivo_de(_cf):
+        if str(_cf.get("uso_api") or "").lower() != "nan":
+            return None
+        if "nan" not in _vivo_nan:
+            _vivo_nan["nan"] = uso_nan(inicio_mes)
+        return _vivo_nan["nan"]
+
+    def _cuotas_de(_nombre, _cf, _vivo):
+        _cuotas = _cf.get("cuotas_mes") or {}
+        # Solo los planes que declaran cuotas (o leen su consumo de una API) listan modelos sin tope.
+        _con_cuotas = bool(_cuotas) or _vivo is not None or str(_cf.get("uso_api") or "").lower() == "nan"
+        if not _con_cuotas:
+            return None, None
+        # consumo del mes segun los logs locales (para los modelos que la API no reporte)
+        _local = {}
+        for _m, _ds in (cruce.get(_nombre) or {}).items():
+            _t = sum(_v for _d, _v in _ds.items() if _d >= inicio_mes)
+            if _t:
+                _local[_m] = _t
+        _mc = []
+        _cubiertos = set()
+
+        def _cubre(_m):
+            _ml = _m.lower()
+            return _ml in _cubiertos or any(_ml == c or c in _ml for c in _cubiertos)
+
+        for _pat, _lim in _cuotas.items():
+            if not _lim:
+                continue
+            _patl = str(_pat).lower()
+            _tot = 0
+            if _vivo is not None:
+                for _m, _t in _vivo.items():
+                    if _patl == _m or _patl in _m:
+                        _tot += _t
+                        _cubiertos.add(_m)
+            else:
+                for _m, _t in _local.items():
+                    if _patl == _m.lower() or _patl in _m.lower():
+                        _tot += _t
+                        _cubiertos.add(_m.lower())
+            _mc.append({"modelo": str(_pat), "mes": int(_tot), "limite": int(_lim),
+                        "pct": round(100.0 * _tot / _lim, 1), "fuente": "api" if _vivo is not None else "logs"})
+        # Modelos del plan SIN tope publicado (no-SOTA): se listan con su consumo del mes, marcados
+        # "sin_tope". Primero los que si reporta la API; luego los que solo ven los logs locales
+        # (p. ej. qwen3.6, que NaN responde pero su /usage no contabiliza).
+        if _vivo is not None:
+            for _m, _t in _vivo.items():
+                if not _t or _cubre(_m):
+                    continue
+                _mc.append({"modelo": _m, "mes": int(_t), "limite": 0, "pct": None,
+                            "sin_tope": True, "fuente": "api"})
+                _cubiertos.add(_m.lower())
+        for _m, _t in _local.items():
+            if not _t or _cubre(_m):
+                continue
+            _mc.append({"modelo": _m, "mes": int(_t), "limite": 0, "pct": None,
+                        "sin_tope": True, "fuente": "logs"})
+            _cubiertos.add(_m.lower())
+        if not _mc:
+            return None, None
+        _mc.sort(key=lambda z: (-(z["pct"] if z.get("pct") is not None else -1), -z["mes"]))
+        return _mc, ("api" if _vivo is not None else "logs")
+
     for _n, _pr in (provs_out or {}).items():
         _cf = next((x for x in (cfg().get("proveedores") or []) if x["nombre"] == _n), {})
         _t5 = next((v for kk, v in _pr.items() if isinstance(v, (int, float)) and ("5h" in kk.lower() or "cinco" in kk.lower())), 0)
@@ -889,6 +1071,26 @@ def agregar(vistos, nuevos=0):
         _pr["tipo"] = _cf.get("tipo") or ("suscripcion" if (_l5 or _ls) else "pago_por_uso")
         _pr["pct_5h"] = round(100.0 * _t5 / _l5, 1) if _l5 else 0
         _pr["pct_semana"] = round(100.0 * _ts / _ls, 1) if _ls else 0
+        _mc, _cfuente = _cuotas_de(_n, _cf, _vivo_de(_cf))
+        if _mc:
+            _pr["modelos_cuota"] = _mc
+            _pr["cuota_fuente"] = _cfuente
+    # Aunque no haya uso local (p. ej. todo corrio en la nube), la cuota de NaN sale igual: la
+    # publica su API. Sin esto, un mes sin logs locales dejaria la seccion de cuotas vacia.
+    for _pcf in (cfg().get("proveedores") or []):
+        _nombre = str(_pcf.get("nombre") or "")
+        _vivo = _vivo_de(_pcf)
+        if not _nombre or _vivo is None:
+            continue
+        _mc, _cfuente = _cuotas_de(_nombre, _pcf, _vivo)
+        if not _mc:
+            continue
+        _pn = plan_final(_nombre, [x["nombre"] for x in provs])
+        _pr = provs_out.get(_pn) or {"cinco_h": 0, "semana": 0, "hoy": 0, "mes": 0, "modelos": [],
+                                     "pct_5h": 0.0, "pct_semana": 0.0, "tipo": "suscripcion"}
+        _pr["modelos_cuota"] = _mc
+        _pr["cuota_fuente"] = _cfuente
+        provs_out[_pn] = _pr
     return {"hoy": dias.get(hoy, vacio()), "ayer": dias.get(ayer, vacio()), "semana": semana, "mes": mes,
             "modelos_mes": dict(modelos_mes),
             "modelo_dia": {m: dict(v) for m, v in modelo_dia.items()},
@@ -937,6 +1139,11 @@ def informa(r):
          "planes: " + " · ".join(f"{n}: 5h {fmt_tok(x['cinco_h'])}" + (f" ({x['pct_5h']:.0f} %)" if x["pct_5h"] else "") + f" · sem {fmt_tok(x['semana'])}" for n, x in r["proveedores"].items() if x["cinco_h"] or x["semana"]),
          "proyectos (mes): " + " · ".join(f"{k}: {fmt_tok(v['tok'])}" for k, v in sorted(r["proyectos"].items(), key=lambda x: -x[1]["tok"])[:5]),
          f"equivalente API (informativo): {h['usd']:.2f} USD hoy · {r['semana']['usd']:.0f} USD en 7 dias"]
+    cuotas = [f"{mc['modelo']} {fmt_tok(mc['mes'])}" + (f"/{fmt_tok(mc['limite'])} ({mc['pct']:.0f} %)" if mc.get("limite") else (" (sin tope" + (", solo logs" if mc.get("fuente") == "logs" else "") + ")"))
+              for _n, x in r["proveedores"].items() for mc in (x.get("modelos_cuota") or [])]
+    if cuotas:
+        _en_vivo = any(x.get("cuota_fuente") == "api" for x in r["proveedores"].values() if x.get("modelos_cuota"))
+        L.append("cuotas mes" + (" (en vivo, API NaN)" if _en_vivo else "") + ": " + " · ".join(cuotas))
     return "\n".join(L)
 
 
@@ -998,7 +1205,7 @@ def servir():
                 try:
                     est = leer_estado()
                     est["version"] = 0                 # fuerza reescaneo con la config nueva
-                    escribir_estado(est)
+                    guardar_estado(est)
                 except Exception:
                     pass
                 log("configuracion guardada desde el panel")

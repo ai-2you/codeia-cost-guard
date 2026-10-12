@@ -139,13 +139,20 @@ function tablaPlanes(){
     const v = x => k==="nombre" ? x[0].toLowerCase() : (x[1][k]||0);
     return (v(a) > v(b) ? 1 : v(a) < v(b) ? -1 : 0) * s; });
   const cab = [["nombre","Plan"],["cinco_h","5 h"],["semana","Semana"],["mes","Mes"],["hoy","Hoy"]];
+  const cuotas = [];
+  filas.forEach(([n,x]) => (x.modelos_cuota||[]).forEach(mc => cuotas.push({plan:n, fuente:x.cuota_fuente||"logs", ...mc})));
+  cuotas.sort((a,b) => ((b.pct??-1) - (a.pct??-1)) || (b.mes - a.mes));
+  const enVivo = cuotas.some(c=>c.fuente==="api");
+  const bloqueCuotas = cuotas.length ? `<h3 style="margin:18px 0 6px">Cuotas mensuales por modelo <span class="sub" style="font-weight:400">· mes natural (día 1) contra el tope de config.json${enVivo?" · consumo en vivo (API NaN)":" · de tus logs"}</span></h3>
+    <table><tr><th style="text-align:left">Modelo</th><th style="text-align:left">Plan</th><th style="text-align:right">Mes</th><th style="text-align:right">Tope</th><th style="text-align:right">Consumido</th></tr>
+    ${cuotas.map(c=>`<tr><td>${c.modelo} ${c.fuente==="api"?'<span class="auto">en vivo</span>':(c.sin_tope&&c.plan?'<span class="auto">solo logs</span>':'')}</td><td style="color:var(--suave)">${c.plan}</td><td style="text-align:right">${fmt(c.mes)}</td><td style="text-align:right">${c.limite?fmt(c.limite):"—"}</td><td style="text-align:right">${c.pct!=null?c.pct+" %":"sin tope"}</td></tr>`).join("")}</table>` : "";
   return `<section><h2>Por plan (proveedor) <span style="text-transform:none;letter-spacing:0">· pulsa una cabecera para ordenar</span></h2><table>
   <tr>${cab.map(c=>{const act=orden[0]===c[0];const f=act?(orden[1]<0?"▼":"▲"):"↕";
     return `<th class="${act?"act":""}" onclick="setOrden('${c[0]}')">${c[1]} <span class="f">${f}</span></th>`;}).join("")}<th>Modelos</th></tr>
   ${filas.map(([n,x],i)=>`<tr><td><span class="punto" style="background:${colorI(i)}"></span>${n}${x.auto?"<span class='auto'>auto</span>":""}</td>
     <td>${fmt(x.cinco_h)}${x.pct_5h?" ("+x.pct_5h+" %)":""}</td><td>${fmt(x.semana)}${x.pct_semana?" ("+x.pct_semana+" %)":""}</td>
     <td>${fmt(x.mes)}</td><td>${fmt(x.hoy)}</td><td style="color:var(--suave);font-size:11.5px">${(x.modelos||[]).join(", ")||"-"}</td></tr>`).join("")}
-  </table>${(D.limites.limite_5h_tokens||D.limites.limite_semana_tokens)?"":"<p class='sub' style='margin:10px 0 0'>Los planes con etiqueta <span class='auto'>auto</span> salen solos de tus logs. Para agrupar modelos o poner cuota, edita config.json; con la cuota aparece el % consumido.</p>"}</section>`;
+  </table>${(D.limites.limite_5h_tokens||D.limites.limite_semana_tokens)?"":"<p class='sub' style='margin:10px 0 0'>Los planes con etiqueta <span class='auto'>auto</span> salen solos de tus logs. Para agrupar modelos o poner cuota, edita config.json; con la cuota aparece el % consumido.</p>"}${bloqueCuotas}</section>`;
 }
 
 /* --- por dia: pestañas de vista + clic/arrastre para seleccionar un dia o tramo --- */
