@@ -185,14 +185,14 @@ real y corto (30–90 días), sin geolocalización fina. Nombres de cliente pers
 4. **Caducidad de IPs de atacantes:** 90 días, configurable.
 5. **Orden:** fase 0 ya, en una rama aparte (`feat/fase0-seguridad-y-conteo`).
 
-## Decisiones de la fase 1 (cerradas el 2026-10-14, salvo la 6)
+## Decisiones de la fase 1 (cerradas el 2026-10-14)
 1. **Regla de conflicto:** el máximo gana (upsert monótono). ✔
 2. **Dependencias:** `cryptography` fijada con hashes (y `tzdata` en Windows). ✔
 3. **Python mínimo 3.11** (README actualizado al implementar). ✔
 4. **Copias automáticas:** cifrado a destinatario con la clave privada fuera del equipo. ✔
 5. **Hermes:** **cuentan** las tareas auxiliares (`session_model_usage`). Sus cifras suben entre un 17 % y un 47 %
    frente a `sessions`; va a la lista de divergencias aceptadas de la sombra y a las notas de versión. ✔
-6. **Quién escribe cuando la barra está cerrada:** pendiente de confirmar (recomendado: el CLI toma el relevo).
+6. **Quién escribe cuando la barra está cerrada:** el CLI (o el panel) toma el relevo solo si la barra lleva un rato sin latido, y nunca a la vez que ella. ✔ (opción A)
 7. **Ruta de los datos:** el **directorio estándar de datos de aplicación de cada sistema**, no el checkout ni la
    carpeta de código: macOS `~/Library/Application Support/CostGuard`, Windows `%LOCALAPPDATA%\CostGuard`, Linux
    `~/.local/share/costguard` (o `$XDG_DATA_HOME`). `rutas.DATOS` apunta ahí; el checkout de desarrollo no escribe sin
