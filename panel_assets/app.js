@@ -24,7 +24,9 @@ function etiquetaDia(d){ const hoy=dias[dias.length-1], ayer=dias[dias.length-2]
 const planes = () => Object.keys(D.proveedores);
 function cambiarTema(){const r=document.documentElement,n=r.getAttribute("data-tema")==="claro"?"oscuro":"claro";
   r.setAttribute("data-tema",n);localStorage.setItem("tema",n);document.getElementById("tema").textContent=n==="claro"?"Modo oscuro":"Modo claro";}
-if(localStorage.getItem("tema"))document.documentElement.setAttribute("data-tema",localStorage.getItem("tema"));
+// tu eleccion si la hay; si no, la apariencia del sistema (como el desplegable de la barra)
+document.documentElement.setAttribute("data-tema",localStorage.getItem("tema")||(matchMedia("(prefers-color-scheme: dark)").matches?"oscuro":"claro"));
+addEventListener("DOMContentLoaded",()=>{const b=document.getElementById("tema");if(b)b.textContent=document.documentElement.getAttribute("data-tema")==="claro"?"Modo oscuro":"Modo claro";});
 
 /* --- que dias entran en un periodo (hoy/semana/mes/todo/N) --- */
 function diasParaPeriodo(p, verN){
@@ -209,7 +211,7 @@ function tablaMatriz(){
   const cab = "<tr><th>Modelo</th>"+ult.map(d=>`<th>${d.slice(8)}</th>`).join("")+`<th>Total ${plan==="todos"?"":"("+plan+")"}</th></tr>`;
   const filas = modelos.map(m => {
     const celdas = ult.map(d => { const v=diaModelo(m,d), f=max?v/max:0;
-      const st = v?`background:rgba(174,0,255,${(0.12+f*0.8).toFixed(2)});color:${f>0.55?"#fff":"var(--texto)"}`:"";
+      const st = v?`background:rgba(48,209,88,${(0.12+f*0.8).toFixed(2)});color:${f>0.55?"#0b0b0c":"var(--texto)"}`:"";
       return `<td class="${v?"":"cero"}" style="${st}" title="${fmt(v)}">${v?fmt(v).replace(" ",""):"-"}</td>`; }).join("");
     return `<tr><td>${m}</td>${celdas}<td>${fmt(mm[m])}</td></tr>`; }).join("");
   return `<div class="mat"><table>${cab}${filas}</table></div>`;

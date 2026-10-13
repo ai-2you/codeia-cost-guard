@@ -32,35 +32,55 @@
     }).catch(e => dest.replaceChildren(h("section", {}, h("p", {}, "No pude leer los ajustes: " + e.message + ". Ábrelo desde el icono de la barra de menús (http://127.0.0.1), no como fichero."))));
   }
 
+  /* fila de clave en el Llavero: `cuerpo` identifica la cuenta ({proveedor} o {cuenta}); `info` lleva clave_guardada */
+  function filaClave(cuerpo, info, etiqueta){
+    const msg = h("span", {class: "msg"});
+    const clave = h("input", {type: "password", autocomplete: "off", placeholder: info.clave_guardada ? "•••••••• (guardada; escribe otra para cambiarla)" : etiqueta});
+    const quitar = h("button", {hidden: !info.clave_guardada, onclick: () => envia(true)}, "Quitar");
+    const estado = h("span", {class: "chip " + (info.clave_guardada ? "ok" : "")}, info.clave_guardada ? "● clave en el Llavero" : "sin clave");
+    function envia(borrar){
+      if (!borrar && !clave.value.trim()) { msg.className = "msg err"; msg.textContent = "Pega primero la clave."; return; }
+      post("/clave", Object.assign({}, cuerpo, {clave: clave.value.trim(), borrar})).then(j => {
+        msg.className = "msg " + (j.ok ? "ok" : "err"); msg.textContent = j.ok ? (borrar ? "Clave borrada." : "Clave guardada.") : j.error;
+        if (j.ok) { clave.value = ""; info.clave_guardada = !borrar; quitar.hidden = borrar; estado.className = "chip " + (borrar ? "" : "ok"); estado.textContent = borrar ? "sin clave" : "● clave en el Llavero"; }
+      }).catch(e => { msg.className = "msg err"; msg.textContent = String(e); });
+    }
+    return {estado, fila: A.keychain ? h("div", {class: "clave"}, clave, h("button", {onclick: () => envia(false)}, "Guardar clave"), quitar, msg)
+      : h("p", {class: "ayuda"}, "El Llavero solo existe en macOS: usa la variable de entorno del proveedor.")};
+  }
+
   function proveedor(p){
     const info = A.proveedores.find(x => x.nombre === p.nombre) || {};
     const campo = (et, input) => h("label", {}, et, input);
     const num = (k) => h("input", {class: "num-in", "data-k": k, value: p[k] || 0, inputmode: "numeric"});
     const cuotas = h("textarea", {rows: 4, "data-k": "cuotas_mes", placeholder: "modelo = tokens, uno por línea"},
       Object.entries(p.cuotas_mes || {}).map(([m, v]) => m + " = " + v).join("\n"));
-    const msg = h("span", {class: "msg"});
-    const clave = h("input", {type: "password", autocomplete: "off", placeholder: info.clave_guardada ? "•••••••• (guardada; escribe otra para cambiarla)" : "API key del proveedor"});
-    const estado = h("span", {class: "chip " + (info.clave_guardada ? "ok" : "")}, info.clave_guardada ? "● clave en el Keychain" : "sin clave");
-    const accion = (borrar) => () => {
-      if (!borrar && !clave.value.trim()) { msg.className = "msg err"; msg.textContent = "Pega primero la clave."; return; }
-      post("/clave", {proveedor: p.nombre, clave: clave.value.trim(), borrar}).then(j => {
-        msg.className = "msg " + (j.ok ? "ok" : "err"); msg.textContent = j.ok ? (borrar ? "Clave borrada." : "Clave guardada.") : j.error;
-        if (j.ok) { clave.value = ""; info.clave_guardada = !borrar; estado.className = "chip " + (borrar ? "" : "ok"); estado.textContent = borrar ? "sin clave" : "● clave en el Keychain"; clave.placeholder = borrar ? "API key del proveedor" : "•••••••• (guardada; escribe otra para cambiarla)"; }
-      }).catch(e => { msg.className = "msg err"; msg.textContent = String(e); });
-    };
+    const k = filaClave({proveedor: p.nombre}, info, "API key del proveedor");
     const api = info.api_soportada
       ? h("label", {style: "flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;color:var(--texto)"},
           h("input", {type: "checkbox", "data-k": "uso_api", checked: !!p.uso_api}), "Leer el consumo real por API (cuota en vivo)")
       : h("span", {class: "chip aviso"}, "consumo por API aún no soportado: se mide con los logs");
     return h("div", {class: "prov", "data-nombre": p.nombre},
-      h("div", {class: "prov-cab"}, h("strong", {}, p.nombre), estado, api),
+      h("div", {class: "prov-cab"}, h("strong", {}, p.nombre), k.estado, api),
       h("div", {class: "campos"},
         campo("Modelos que cuentan (separados por coma)", h("input", {class: "ancho", "data-k": "modelos", value: (p.modelos || []).join(", ")})),
         campo("Límite 5 h (tokens)", num("limite_5h_tokens")), campo("Límite semanal", num("limite_semana_tokens")), campo("Límite mensual", num("limite_mes_tokens")),
         info.api_soportada ? campo("Cuotas mensuales por modelo", cuotas) : null),
-      A.keychain ? h("div", {class: "clave"}, clave, h("button", {onclick: accion(false)}, "Guardar clave"),
-        info.clave_guardada ? h("button", {onclick: accion(true)}, "Quitar") : null, msg)
-        : h("p", {class: "ayuda"}, "El Keychain solo existe en macOS: usa la variable de entorno del proveedor (p. ej. NAN_API_KEY)."));
+      k.fila);
+  }
+
+  function servidor(s, i){
+    const info = (A.paneles || {})[s.nombre];
+    const f = (et, k, ph) => h("label", {}, et, h("input", {class: "ancho", "data-s": i, "data-k": k, value: s[k] == null ? "" : s[k], placeholder: ph || ""}));
+    const panel = h("select", {"data-s": i, "data-k": "panel"}, ...[["", "ninguno"], ["dokploy", "Dokploy"], ["easypanel", "Easypanel"]].map(([v, t]) => h("option", {value: v, selected: (s.panel || "") === v}, t)));
+    const k = info ? filaClave({cuenta: info.cuenta}, info, "API key del panel (solo lectura)") : null;
+    return h("div", {class: "prov", "data-servidor": i},
+      h("div", {class: "prov-cab"}, h("strong", {}, s.nombre || "(sin nombre)"), k ? k.estado : null,
+        h("button", {onclick: () => { leer(); A.config.servidores.splice(i, 1); $("vista-ajustes").replaceChildren(...pinta()); }}, "Quitar servidor")),
+      h("div", {class: "campos"}, f("Nombre", "nombre", "produccion"), f("SSH (usuario@IP)", "ssh", "infobar@203.0.113.10"), f("SSH admin (botón Terminal)", "ssh_admin", "tuusuario@203.0.113.10"),
+        f("Puerto SSH", "puerto", "22"), h("label", {}, "Panel", panel), f("URL del panel (https)", "panel_url", "https://dokploy.example.com"),
+        h("label", {}, "Webs a medir (una por línea, máx. 4)", h("textarea", {rows: 3, "data-s": i, "data-k": "webs"}, (s.webs || []).join("\n")))),
+      k ? k.fila : (s.panel ? h("p", {class: "ayuda"}, "Guarda los ajustes y aquí podrás poner la clave del panel.") : null));
   }
 
   function pinta(){
@@ -95,9 +115,16 @@
               h("td", {}, h("input", {class: "num-in", "data-proy": k, "data-c": "presupuesto_mes_tokens", value: e.presupuesto_mes_tokens || 0, inputmode: "numeric"})),
               h("td", {}, h("input", {type: "checkbox", "data-proy": k, "data-c": "oculto", checked: !!e.oculto}))); }))
           : h("p", {class: "vacio"}, "Aún no hay proyectos detectados.")),
+      h("section", {}, h("h2", {}, "Servidores (VPS)"),
+        h("p", {class: "ayuda"}, "Monitor por SSH de solo lectura: CPU, memoria, disco, servicios, intentos de acceso, fail2ban, puertos abiertos y protección. Para dar de alta uno nuevo, ejecuta una vez ", h("code", {}, "infobar/remoto/alta-servidor.sh usuario@IP"), " (crea el usuario de solo lectura en el servidor) y añádelo aquí. Guía: docs/guia-servidores.md."),
+        ...(c.servidores || []).map(servidor),
+        h("div", {class: "prov-cab", style: "margin-top:8px"}, h("button", {onclick: () => { leer(); (c.servidores = c.servidores || []).push({nombre: "", ssh: ""}); $("vista-ajustes").replaceChildren(...pinta()); }}, "Añadir servidor")),
+        h("div", {class: "campos", style: "margin-top:10px"},
+          h("label", {}, "IPs conocidas (coma): una sesión desde otra sale en ámbar", h("input", {class: "ancho", id: "g-ips", value: (c.ips_conocidas || []).join(", ")})),
+          h("label", {}, "Revisión normal (s)", h("input", {class: "num-in", id: "g-int-n", value: c.intervalo_normal_s || "", placeholder: "300", inputmode: "numeric"})),
+          h("label", {}, "Revisión en incidencia (s)", h("input", {class: "num-in", id: "g-int-i", value: c.intervalo_incidencia_s || "", placeholder: "60", inputmode: "numeric"})))),
       h("section", {}, h("h2", {}, "General"),
         h("div", {class: "campos"},
-          h("label", {}, "Tema", h("select", {id: "g-tema"}, ...["sistema", "claro", "oscuro"].map(t => h("option", {value: t, selected: (c.tema || "sistema") === t}, t)))),
           h("label", {}, "Alerta de ritmo por hora (tokens)", h("input", {class: "num-in", id: "g-hora", value: c.limite_hora_tokens || 0, inputmode: "numeric"})),
           h("label", {}, "Modelos a ignorar (coma)", h("input", {class: "ancho", id: "g-ignorar", value: (c.ignorar || []).join(", ")})))),
       h("div", {class: "guardar"}, h("button", {class: "primario", onclick: guardar}, "Guardar ajustes"), h("span", {id: "msg-guardar", class: "msg"}))
@@ -123,7 +150,23 @@
     const py = Object.assign({}, c.proyectos); raiz.querySelectorAll("[data-proy]").forEach(i => { const e = py[i.dataset.proy] = py[i.dataset.proy] || {};
       e[i.dataset.c] = i.dataset.c === "oculto" ? i.checked : (i.dataset.c === "alias" ? i.value.trim() : entero(i.value)); });
     c.proyectos = py;
-    if ($("g-tema")) { c.tema = $("g-tema").value; c.limite_hora_tokens = entero($("g-hora").value); c.ignorar = lista($("g-ignorar").value); }
+    if (c.servidores) {
+      raiz.querySelectorAll("[data-servidor]").forEach(div => {
+        const s = c.servidores[+div.dataset.servidor]; if (!s) return;
+        div.querySelectorAll("[data-k]").forEach(i => {
+          const k = i.dataset.k, v = i.value.trim();
+          if (k === "webs") { const w = v.split("\n").map(x => x.trim()).filter(Boolean); if (w.length) s.webs = w; else delete s.webs; }
+          else if (k === "puerto") { if (v) s.puerto = parseInt(v, 10) || v; else delete s.puerto; }
+          else if (v || k === "nombre" || k === "ssh") s[k] = v; else delete s[k];
+        });
+        if (!s.panel) delete s.panel_url;
+      });
+    }
+    if ($("g-ips")) {
+      const ips = lista($("g-ips").value); if (ips.length || c.ips_conocidas) c.ips_conocidas = ips;
+      [["g-int-n", "intervalo_normal_s"], ["g-int-i", "intervalo_incidencia_s"]].forEach(([id, k]) => { const v = entero($(id).value); if (v) c[k] = v; else delete c[k]; });
+    }
+    if ($("g-hora")) { c.limite_hora_tokens = entero($("g-hora").value); c.ignorar = lista($("g-ignorar").value); }
   }
 
   function guardar(){

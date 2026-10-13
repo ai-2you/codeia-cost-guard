@@ -9,10 +9,16 @@ REGLAS=0; [ "${1:-}" = "--reglas" ] && REGLAS=1
 
 echo "-> Copiando a $DESTINO"
 mkdir -p "$DESTINO/logs"
-for f in costbar.py ajustes.py barra.py popover.py panel.py costbar.css analizar_gasto.py \
+for f in costbar.py barra.py popover.py panel.py analizar_gasto.py \
          precio_astra.py instalar_reglas_globales.py GUIA.md AGENTS-snippet.md; do
   [ -f "$AQUI/$f" ] && cp "$AQUI/$f" "$DESTINO/$f"
 done
+# el motor vive en el paquete infobar/ (costbar.py solo es la entrada): sin el, nada arranca
+mkdir -p "$DESTINO/infobar"
+cp "$AQUI"/infobar/*.py "$DESTINO/infobar/"
+# scripts que se instalan en los servidores (alta-servidor.sh los copia desde aqui)
+mkdir -p "$DESTINO/infobar/remoto"
+cp "$AQUI"/infobar/remoto/*.sh "$DESTINO/infobar/remoto/" && chmod 755 "$DESTINO"/infobar/remoto/*.sh
 if [ -d "$AQUI/panel_assets" ]; then
   mkdir -p "$DESTINO/panel_assets"
   for f in "$AQUI"/panel_assets/*.css "$AQUI"/panel_assets/*.js "$AQUI"/panel_assets/*.html; do
@@ -20,7 +26,12 @@ if [ -d "$AQUI/panel_assets" ]; then
   done
 fi
 # config.json no se pisa: si ya existe trae tus cuotas y notas por proveedor (como state.json)
-[ -f "$DESTINO/config.json" ] || cp "$AQUI/config.json" "$DESTINO/config.json"
+# (config.json no esta en el repo: si no tienes uno propio, se parte de config.example.json)
+if [ ! -f "$DESTINO/config.json" ]; then
+  if [ -f "$AQUI/config.json" ]; then cp "$AQUI/config.json" "$DESTINO/config.json"
+  else cp "$AQUI/config.example.json" "$DESTINO/config.json"; fi
+  chmod 600 "$DESTINO/config.json"
+fi
 [ -f "$DESTINO/state.json" ] || echo "{}" > "$DESTINO/state.json"
 
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -49,8 +60,20 @@ if [ "$(uname -s)" = "Darwin" ]; then
   <key>StandardErrorPath</key><string>$DESTINO/logs/barra.err</string>
 </dict></plist>
 PLIST
-  launchctl bootout "gui/$(id -u)/dev.codeia.costguard" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load "$PLIST" 2>/dev/null || true
+  # parar la copia anterior y esperar a que macOS la descargue de verdad: si se vuelve a cargar
+  # enseguida, launchctl responde "Bootstrap failed: 5" y la app se quedaba sin arrancar
+  SERV="gui/$(id -u)/dev.codeia.costguard"
+  launchctl bootout "$SERV" 2>/dev/null || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do launchctl print "$SERV" >/dev/null 2>&1 || break; sleep 1; done
+  for intento in 1 2 3 4 5; do
+    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null && break
+    sleep 2
+  done
+  if launchctl print "$SERV" >/dev/null 2>&1; then
+    echo "-> arrancada (y arrancara sola al iniciar sesion)"
+  else
+    echo "AVISO: no se pudo arrancar. Prueba: launchctl bootstrap gui/$(id -u) $PLIST"
+  fi
   echo ""
   echo "Listo: mira la barra de menus (icono con la cifra de las ultimas 5 h)."
   echo "  Log:     $DESTINO/logs/barra.log"
