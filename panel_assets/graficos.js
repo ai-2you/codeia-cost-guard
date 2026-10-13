@@ -3,7 +3,8 @@
    Los elementos clicables llevan data-k="<clave>"; quien los use (app.js) pone
    los listeners despues de insertar el HTML — aqui no hay onclick ni fetch. */
 
-const COLORES = ["#ae00ff","#ff008c","#12b886","#4c6ef5","#f59f00","#e8590c","#0ca678","#7048e8","#d6336c","#1098ad"];
+// sin morados: verde terminal y naranja Opus primero, luego colores de sistema de macOS
+const COLORES = ["#30d158","#e0876a","#0a84ff","#64d2ff","#ffd60a","#ff9f0a","#66d4cf","#ff375f","#ac8e68","#8e8e93"];
 function colorI(i){ return COLORES[i % COLORES.length]; }
 
 /* --- barras horizontales (la vista clasica, con divs) --- */
@@ -115,7 +116,7 @@ function calendario(dias, opts={}){
   const celdas = dias.map(([f, v]) => {
     const frac = v / max;
     const sel = opts.seleccionadas && opts.seleccionadas.has(f) ? " sel" : "";
-    const bg = v ? `background:rgba(174,0,255,${(0.12 + frac * 0.8).toFixed(2)})` : "";
+    const bg = v ? `background:rgba(48,209,88,${(0.12 + frac * 0.8).toFixed(2)})` : "";
     const dia = new Date(f + "T12:00:00").getDate();
     return `<div class="celda${sel}" style="${bg}" data-k="${f}" title="${f}: ${fmt(v)}">${dia}</div>`;
   }).join("");
