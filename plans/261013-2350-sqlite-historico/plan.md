@@ -185,17 +185,20 @@ real y corto (30–90 días), sin geolocalización fina. Nombres de cliente pers
 4. **Caducidad de IPs de atacantes:** 90 días, configurable.
 5. **Orden:** fase 0 ya, en una rama aparte (`feat/fase0-seguridad-y-conteo`).
 
-## Decisiones pendientes antes de codificar la fase 1 (ronda 2)
-1. **Regla de conflicto:** máximo gana (recomendado) o última gana.
-2. **Dependencias:** `cryptography` (y `tzdata` en Windows), sí/no. Sin ella no hay export cifrado ("no se hace
-   cifrado casero mientras tanto").
-3. **Python mínimo 3.11** (recomendado) o seguir en 3.9 sin `STRICT`.
-4. **Copias automáticas:** cifrado a destinatario con la clave privada fuera del equipo (recomendado) o passphrase en cada copia.
-5. **Hermes:** ¿cuentan las tareas auxiliares de `session_model_usage` (+17–47 % frente a `sessions`)?
-6. **Quién escribe sin la barra:** el CLI toma el relevo si no hay latido (recomendado) o nadie.
-7. **Ruta de la base en desarrollo:** directorio de datos de la instalación (recomendado) o el checkout.
-8. **`proyecto_raw`:** recortar `Users/<x>` (recomendado) o dejarlo tal cual.
-9. **Sombra:** 7 días incluyendo el 25-10-2026 (recomendado).
+## Decisiones de la fase 1 (cerradas el 2026-10-14, salvo la 6)
+1. **Regla de conflicto:** el máximo gana (upsert monótono). ✔
+2. **Dependencias:** `cryptography` fijada con hashes (y `tzdata` en Windows). ✔
+3. **Python mínimo 3.11** (README actualizado al implementar). ✔
+4. **Copias automáticas:** cifrado a destinatario con la clave privada fuera del equipo. ✔
+5. **Hermes:** **cuentan** las tareas auxiliares (`session_model_usage`). Sus cifras suben entre un 17 % y un 47 %
+   frente a `sessions`; va a la lista de divergencias aceptadas de la sombra y a las notas de versión. ✔
+6. **Quién escribe cuando la barra está cerrada:** pendiente de confirmar (recomendado: el CLI toma el relevo).
+7. **Ruta de los datos:** el **directorio estándar de datos de aplicación de cada sistema**, no el checkout ni la
+   carpeta de código: macOS `~/Library/Application Support/CostGuard`, Windows `%LOCALAPPDATA%\CostGuard`, Linux
+   `~/.local/share/costguard` (o `$XDG_DATA_HOME`). `rutas.DATOS` apunta ahí; el checkout de desarrollo no escribe sin
+   `COSTGUARD_DATOS`. ✔ (propuesta del dueño, coincide con la recomendación del red team).
+8. **`proyecto_raw`:** se recorta `Users/<usuario>`, con migración de las claves de `config.proyectos`. ✔
+9. **Sombra:** 7 días incluyendo el cambio de hora del 25-10-2026. ✔
 
 ## Puerta de verificación (cada fase)
 Pre-mortem → red team → cambios al plan → informe en `plans/reports/` → solo entonces código. Tras
