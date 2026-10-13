@@ -46,6 +46,9 @@ CLIFF = 272_000
 PUERTO = 47391              # panel/configurador local: un puerto alto que casi nada usa
 
 
+import ajustes
+
+
 def corto(m):
     """claude-sonnet-5 -> sonnet-5 · gpt-5.6-terra -> terra · claude-haiku-4-5-20251001 -> haiku-4-5"""
     m = re.sub(r"-\d{8}$", "", (m or "?"))
@@ -351,12 +354,12 @@ def cfg():
 
 
 def clave_nan():
-    """API key de NaN, por orden: entorno NAN_API_KEY -> config.json (nan_api_key) -> fichero de clave.
+    """API key de NaN, por orden: entorno NAN_API_KEY -> Keychain (la guarda el panel) -> config.json (nan_api_key) -> fichero.
 
     Lo recomendado es la variable de entorno: config.json esta versionado en el repo, asi que una
     clave ahi acabaria en el historial de git. Tambien vale ~/.config/nan/api_key.
     """
-    for v in (os.environ.get("NAN_API_KEY") or "", cfg().get("nan_api_key") or ""):
+    for v in (os.environ.get("NAN_API_KEY") or "", ajustes.leer_clave("nan"), cfg().get("nan_api_key") or ""):
         v = str(v).strip()
         if v:
             return v
@@ -895,9 +898,13 @@ def agregar(vistos, nuevos=0):
     proy_cruce = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(int)))
     modelo_prov = {}
     origenes = collections.defaultdict(int)
+    proys_raw = collections.defaultdict(int)       # tokens 30 d por nombre detectado (para el configurador)
+    conf = cfg()
     ahora = time.time()
     ignora = [str(x).lower() for x in (cfg().get("ignorar") or ["synthetic", "<synthetic>", "sin-modelo"])]
     for f, r in vistos.items():
+        proy_raw = r.get("proyecto", "otros")
+        proy_n, proy_oculto = ajustes.nombre_proyecto(proy_raw, conf)
         for d, mods in r.get("dia", {}).items():
             if not d or d < desde:
                 continue
@@ -921,7 +928,8 @@ def agregar(vistos, nuevos=0):
                         modelos_hoy[m]["usd"] += (max(v[0] - v[2], 0) * t[0] * (2 if over else 1)
                                                   + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
                                                   + v[1] * t[1] * (1.5 if over else 1)) / 1e6
-                suma(proys[r.get("proyecto", "otros")], v)
+                if not proy_oculto:
+                    suma(proys[proy_n], v)
                 plan_f = r.get("plan")
                 fiable = bool(plan_f) and modelo_nativo(plan_f, m)
                 pn = plan_final(proveedor_de(m, provs, plan_f, fiable), [x["nombre"] for x in provs])
@@ -931,8 +939,11 @@ def agregar(vistos, nuevos=0):
                 tokv = v[0] + v[1] + v[2] + v[3]
                 cruce[pn][corto(m)][d] += tokv
                 origenes[str(r.get("plan") or "(sin origen)")] += tokv
-                proy_prov[pn][r.get("proyecto", "otros")] += tokv
-                proy_cruce[pn][r.get("proyecto", "otros")][d] += tokv
+                if d >= hace30:
+                    proys_raw[proy_raw] += tokv
+                if not proy_oculto:
+                    proy_prov[pn][proy_n] += tokv
+                    proy_cruce[pn][proy_n][d] += tokv
                 if d >= hace7:
                     pp["semana"] += tokv
                 if d >= hace30:
@@ -1104,7 +1115,7 @@ def agregar(vistos, nuevos=0):
             "proy_prov": {n: dict(v) for n, v in proy_prov.items()},
             "proy_cruce": {n: {p: dict(dd) for p, dd in mm.items()} for n, mm in proy_cruce.items()},
         "modelo_prov": modelo_prov,
-        "origenes": dict(origenes),
+        "origenes": dict(origenes), "proyectos_origen": dict(proys_raw),
         "config": cfg(),
             "cache_pct_hoy": pct(dias.get(hoy, vacio())), "nuevos": nuevos,
             "limites": c, "fuentes": len(vistos)}
@@ -1155,7 +1166,6 @@ def servir():
     import http.server, socketserver, threading
 
     base = os.path.dirname(os.path.abspath(__file__))
-    cfg_ini = json.dumps(cfg(), indent=2, ensure_ascii=False)
 
     class H(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -1168,7 +1178,19 @@ def servir():
             self.end_headers()
             self.wfile.write(cuerpo)
 
+        def _json(self, codigo, obj):
+            self._manda(codigo, json.dumps(obj, ensure_ascii=False).encode(), "application/json; charset=utf-8")
+
+        def _permitida(self, post):
+            if ajustes.peticion_permitida(self.headers.get("Host"), self.headers.get("Origin"),
+                                          self.headers.get("Content-Type"), PUERTO, post):
+                return True
+            self._manda(403, b"no", "text/plain")
+            return False
+
         def do_GET(self):
+            if not self._permitida(False):
+                return
             ruta = self.path.split("?")[0]
             if ruta in ("/", "/panel.html"):
                 try:
@@ -1177,41 +1199,63 @@ def servir():
                     self._manda(200, open(f"{base}/panel.html", "rb").read(), "text/html; charset=utf-8")
                 except Exception as e:
                     self._manda(500, str(e).encode(), "text/plain")
-            elif ruta == "/origenes":
+            elif ruta == "/ajustes":
                 try:
                     r = escanear()
-                    self._manda(200, json.dumps({"origenes": r.get("origenes", {}),
-                                                 "planes": [p["nombre"] for p in (cfg().get("proveedores") or [])],
-                                                 "config": cfg()}, ensure_ascii=False).encode(), "application/json; charset=utf-8")
+                    c = cfg()
+                    provs = [{"nombre": p["nombre"], "clave_guardada": ajustes.clave_guardada(p["nombre"]),
+                              "api_soportada": ajustes.api_soportada(p)} for p in (c.get("proveedores") or [])]
+                    self._json(200, {"config": c, "origenes": r.get("origenes", {}), "proyectos": r.get("proyectos_origen", {}),
+                                     "proveedores": provs, "keychain": sys.platform == "darwin"})
                 except Exception as e:
-                    self._manda(500, json.dumps({"error": str(e)}).encode(), "application/json")
-            elif ruta == "/config.json":
-                self._manda(200, open(f"{base}/config.json", "rb").read(), "application/json; charset=utf-8")
+                    self._json(500, {"error": str(e)})
             else:
                 self._manda(404, b"no", "text/plain")
 
         def do_POST(self):
-            n = int(self.headers.get("Content-Length") or 0)
+            if not self._permitida(True):
+                return
+            ruta = self.path.split("?")[0]
             try:
-                nuevo = json.loads(self.rfile.read(n).decode("utf-8"))
-                if not isinstance(nuevo, dict):
-                    raise ValueError("no es un objeto")
-                if "proveedores" not in nuevo or "aliases" not in nuevo:
-                    raise ValueError("faltan campos (proveedores / aliases)")
-                if os.path.exists(f"{base}/config.json"):
-                    import shutil as _sh
-                    _sh.copy(f"{base}/config.json", f"{base}/config.json.bak")
-                json.dump(nuevo, open(f"{base}/config.json", "w", encoding="utf-8"), indent=2, ensure_ascii=False)
-                try:
-                    est = leer_estado()
-                    est["version"] = 0                 # fuerza reescaneo con la config nueva
-                    guardar_estado(est)
-                except Exception:
-                    pass
-                log("configuracion guardada desde el panel")
-                self._manda(200, b'{"ok":true}', "application/json")
+                n = int(self.headers.get("Content-Length") or 0)
+                if n > 1_000_000:
+                    raise ValueError("cuerpo demasiado grande")
+                cuerpo = json.loads(self.rfile.read(n).decode("utf-8"))
+                if ruta == "/guardar":
+                    nuevo = ajustes.validar(cuerpo, cfg())
+                    if os.path.exists(f"{base}/config.json"):
+                        import shutil as _sh
+                        _sh.copy(f"{base}/config.json", f"{base}/config.json.bak")
+                    json.dump(nuevo, open(f"{base}/config.json", "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+                    self._reescanear("configuracion guardada desde el panel")
+                elif ruta == "/clave":
+                    nombre = str(cuerpo.get("proveedor") or "").strip()
+                    if nombre not in [p.get("nombre") for p in (cfg().get("proveedores") or [])]:
+                        raise ValueError("proveedor desconocido")
+                    if cuerpo.get("borrar"):
+                        ajustes.borrar_clave(nombre)
+                    else:
+                        ajustes.guardar_clave(nombre, cuerpo.get("clave"))
+                    try:
+                        os.remove(f"{base}/logs/nan_uso.json")      # que la cache de la API no oculte la clave nueva
+                    except OSError:
+                        pass
+                    self._reescanear(f"clave de {nombre} {'borrada' if cuerpo.get('borrar') else 'guardada'} (Keychain)")
+                else:
+                    self._manda(404, b"no", "text/plain")
+                    return
+                self._json(200, {"ok": True})
             except Exception as e:
-                self._manda(400, json.dumps({"ok": False, "error": str(e)}).encode(), "application/json")
+                self._json(400, {"ok": False, "error": str(e)})
+
+        def _reescanear(self, msg):
+            try:
+                est = leer_estado()
+                est["version"] = 0                 # fuerza reescaneo con la config nueva
+                guardar_estado(est)
+            except Exception:
+                pass
+            log(msg)
 
     class S(socketserver.ThreadingTCPServer):
         allow_reuse_address = True

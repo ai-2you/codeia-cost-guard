@@ -1,0 +1,139 @@
+/* Pestaña Ajustes: edita config.json por /ajustes, /guardar y /clave del servidor local.
+   Todo se construye con el DOM (nunca innerHTML con datos): los nombres de proyecto vienen de los logs. */
+(function(){
+  let A = null, enAjustes = false;
+  const $ = id => document.getElementById(id);
+  const fmt = v => { v = +v || 0; const u = ["","K","M","B"]; let i = 0; while (v >= 1000 && i < 3) { v /= 1000; i++; } return (i ? v.toFixed(1) : v) + (u[i] ? " " + u[i] : ""); };
+  function h(tag, attrs, ...hijos){
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (k === "class") e.className = v; else if (k.startsWith("on")) e[k] = v; else if (v === true) e.setAttribute(k, ""); else if (v !== false && v != null) e.setAttribute(k, v);
+    }
+    for (const c of hijos.flat()) if (c != null) e.append(c.nodeType ? c : document.createTextNode(c));
+    return e;
+  }
+  const entero = v => Math.max(0, parseInt(String(v).replace(/[\s._]/g, ""), 10) || 0);
+  const lista = t => t.split(",").map(x => x.trim()).filter(Boolean);
+  const post = (ruta, cuerpo) => fetch(ruta, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cuerpo)}).then(r => r.json());
+
+  window.vista = function(v){
+    enAjustes = v === "ajustes";
+    $("vista-panel").hidden = enAjustes; $("vista-ajustes").hidden = !enAjustes;
+    $("nav-panel").classList.toggle("on", !enAjustes); $("nav-ajustes").classList.toggle("on", enAjustes);
+    history.replaceState(null, "", enAjustes ? "#ajustes" : location.pathname);
+    if (enAjustes) cargar();
+  };
+
+  function cargar(){
+    const dest = $("vista-ajustes");
+    fetch("/ajustes").then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(d => {
+      A = d; A.config.proveedores = A.config.proveedores || []; A.config.aliases = A.config.aliases || {}; A.config.proyectos = A.config.proyectos || {};
+      dest.replaceChildren(...pinta());
+    }).catch(e => dest.replaceChildren(h("section", {}, h("p", {}, "No pude leer los ajustes: " + e.message + ". Ábrelo desde el icono de la barra de menús (http://127.0.0.1), no como fichero."))));
+  }
+
+  function proveedor(p){
+    const info = A.proveedores.find(x => x.nombre === p.nombre) || {};
+    const campo = (et, input) => h("label", {}, et, input);
+    const num = (k) => h("input", {class: "num-in", "data-k": k, value: p[k] || 0, inputmode: "numeric"});
+    const cuotas = h("textarea", {rows: 4, "data-k": "cuotas_mes", placeholder: "modelo = tokens, uno por línea"},
+      Object.entries(p.cuotas_mes || {}).map(([m, v]) => m + " = " + v).join("\n"));
+    const msg = h("span", {class: "msg"});
+    const clave = h("input", {type: "password", autocomplete: "off", placeholder: info.clave_guardada ? "•••••••• (guardada; escribe otra para cambiarla)" : "API key del proveedor"});
+    const estado = h("span", {class: "chip " + (info.clave_guardada ? "ok" : "")}, info.clave_guardada ? "● clave en el Keychain" : "sin clave");
+    const accion = (borrar) => () => {
+      if (!borrar && !clave.value.trim()) { msg.className = "msg err"; msg.textContent = "Pega primero la clave."; return; }
+      post("/clave", {proveedor: p.nombre, clave: clave.value.trim(), borrar}).then(j => {
+        msg.className = "msg " + (j.ok ? "ok" : "err"); msg.textContent = j.ok ? (borrar ? "Clave borrada." : "Clave guardada.") : j.error;
+        if (j.ok) { clave.value = ""; info.clave_guardada = !borrar; estado.className = "chip " + (borrar ? "" : "ok"); estado.textContent = borrar ? "sin clave" : "● clave en el Keychain"; clave.placeholder = borrar ? "API key del proveedor" : "•••••••• (guardada; escribe otra para cambiarla)"; }
+      }).catch(e => { msg.className = "msg err"; msg.textContent = String(e); });
+    };
+    const api = info.api_soportada
+      ? h("label", {style: "flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;color:var(--texto)"},
+          h("input", {type: "checkbox", "data-k": "uso_api", checked: !!p.uso_api}), "Leer el consumo real por API (cuota en vivo)")
+      : h("span", {class: "chip aviso"}, "consumo por API aún no soportado: se mide con los logs");
+    return h("div", {class: "prov", "data-nombre": p.nombre},
+      h("div", {class: "prov-cab"}, h("strong", {}, p.nombre), estado, api),
+      h("div", {class: "campos"},
+        campo("Modelos que cuentan (separados por coma)", h("input", {class: "ancho", "data-k": "modelos", value: (p.modelos || []).join(", ")})),
+        campo("Límite 5 h (tokens)", num("limite_5h_tokens")), campo("Límite semanal", num("limite_semana_tokens")), campo("Límite mensual", num("limite_mes_tokens")),
+        info.api_soportada ? campo("Cuotas mensuales por modelo", cuotas) : null),
+      A.keychain ? h("div", {class: "clave"}, clave, h("button", {onclick: accion(false)}, "Guardar clave"),
+        info.clave_guardada ? h("button", {onclick: accion(true)}, "Quitar") : null, msg)
+        : h("p", {class: "ayuda"}, "El Keychain solo existe en macOS: usa la variable de entorno del proveedor (p. ej. NAN_API_KEY)."));
+  }
+
+  function pinta(){
+    const c = A.config;
+    const orig = Object.entries(A.origenes).sort((a, b) => b[1] - a[1]);
+    const proy = Object.entries(A.proyectos).sort((a, b) => b[1] - a[1]);
+    const nuevoProv = h("input", {placeholder: "Nombre del proveedor nuevo", id: "nuevo-prov"});
+    return [
+      h("section", {}, h("h2", {}, "Proveedores, planes y claves"),
+        h("p", {class: "ayuda"}, "Cuotas en tokens (0 = sin declarar). Las claves se guardan en el Keychain de macOS, nunca en config.json ni en git."),
+        ...c.proveedores.map(proveedor),
+        h("div", {class: "prov-cab", style: "margin-top:8px"}, nuevoProv, h("button", {onclick: () => {
+          const n = nuevoProv.value.trim(); if (!n) return;
+          if (c.proveedores.some(p => p.nombre === n)) { alert("Ya existe ese proveedor."); return; }
+          leer(); c.proveedores.push({nombre: n, modelos: [], limite_5h_tokens: 0, limite_semana_tokens: 0});
+          A.proveedores.push({nombre: n, clave_guardada: false, api_soportada: n.toLowerCase() === "nan"});
+          $("vista-ajustes").replaceChildren(...pinta());
+        }}, "Añadir proveedor"))),
+      h("section", {}, h("h2", {}, "Origen (según el log) → plan"),
+        h("p", {class: "ayuda"}, "Lo que dice cada log y a qué plan lo asignas. Se aplica en el siguiente refresco."),
+        h("table", {}, h("tr", {}, h("th", {}, "Origen"), h("th", {}, "Tokens 30 d"), h("th", {style: "text-align:left"}, "Plan")),
+          ...orig.map(([k, v]) => h("tr", {}, h("td", {}, h("code", {}, k)), h("td", {}, fmt(v)),
+            h("td", {}, h("input", {class: "ancho", "data-origen": k, value: c.aliases[k] || "", list: "planes", placeholder: "p. ej. NaN, OpenCode Go"})))))),
+      h("datalist", {id: "planes"}, ...c.proveedores.map(p => h("option", {value: p.nombre}))),
+      h("section", {}, h("h2", {}, "Proyectos"),
+        h("p", {class: "ayuda"}, "Renombra, oculta de las listas o pon un presupuesto mensual en tokens (0 = sin presupuesto). Ocultar no cambia los totales."),
+        proy.length ? h("table", {}, h("tr", {}, h("th", {}, "Detectado"), h("th", {}, "Tokens 30 d"), h("th", {style: "text-align:left"}, "Nombre a mostrar"), h("th", {}, "Presupuesto mes"), h("th", {}, "Ocultar")),
+          ...proy.map(([k, v]) => { const e = c.proyectos[k] || {}; const pct = e.presupuesto_mes_tokens ? Math.min(100, v / e.presupuesto_mes_tokens * 100) : 0;
+            return h("tr", {}, h("td", {}, h("code", {}, k)),
+              h("td", {}, fmt(v), e.presupuesto_mes_tokens ? h("div", {class: "pista mini"}, h("span", {class: "barra", style: "width:" + pct + "%"})) : null),
+              h("td", {}, h("input", {class: "ancho", "data-proy": k, "data-c": "alias", value: e.alias || ""})),
+              h("td", {}, h("input", {class: "num-in", "data-proy": k, "data-c": "presupuesto_mes_tokens", value: e.presupuesto_mes_tokens || 0, inputmode: "numeric"})),
+              h("td", {}, h("input", {type: "checkbox", "data-proy": k, "data-c": "oculto", checked: !!e.oculto}))); }))
+          : h("p", {class: "vacio"}, "Aún no hay proyectos detectados.")),
+      h("section", {}, h("h2", {}, "General"),
+        h("div", {class: "campos"},
+          h("label", {}, "Tema", h("select", {id: "g-tema"}, ...["sistema", "claro", "oscuro"].map(t => h("option", {value: t, selected: (c.tema || "sistema") === t}, t)))),
+          h("label", {}, "Alerta de ritmo por hora (tokens)", h("input", {class: "num-in", id: "g-hora", value: c.limite_hora_tokens || 0, inputmode: "numeric"})),
+          h("label", {}, "Modelos a ignorar (coma)", h("input", {class: "ancho", id: "g-ignorar", value: (c.ignorar || []).join(", ")})))),
+      h("div", {class: "guardar"}, h("button", {class: "primario", onclick: guardar}, "Guardar ajustes"), h("span", {id: "msg-guardar", class: "msg"}))
+    ];
+  }
+
+  /* vuelca lo escrito en el formulario a A.config */
+  function leer(){
+    const c = A.config, raiz = $("vista-ajustes");
+    raiz.querySelectorAll(".prov").forEach(div => {
+      const p = c.proveedores.find(x => x.nombre === div.dataset.nombre); if (!p) return;
+      div.querySelectorAll("[data-k]").forEach(i => {
+        const k = i.dataset.k;
+        if (k === "modelos") p.modelos = lista(i.value);
+        else if (k === "uso_api") p.uso_api = i.checked ? "nan" : "";
+        else if (k === "cuotas_mes") { p.cuotas_mes = {}; i.value.split("\n").forEach(l => { const m = l.split("="); if (m.length === 2 && m[0].trim()) p.cuotas_mes[m[0].trim()] = entero(m[1]); }); }
+        else p[k] = entero(i.value);
+      });
+    });
+    // los alias de orígenes que ya no salen en los logs (no hay fila) se conservan tal cual
+    const al = Object.assign({}, c.aliases);
+    raiz.querySelectorAll("[data-origen]").forEach(i => { if (i.value.trim()) al[i.dataset.origen] = i.value.trim(); else delete al[i.dataset.origen]; }); c.aliases = al;
+    const py = Object.assign({}, c.proyectos); raiz.querySelectorAll("[data-proy]").forEach(i => { const e = py[i.dataset.proy] = py[i.dataset.proy] || {};
+      e[i.dataset.c] = i.dataset.c === "oculto" ? i.checked : (i.dataset.c === "alias" ? i.value.trim() : entero(i.value)); });
+    c.proyectos = py;
+    if ($("g-tema")) { c.tema = $("g-tema").value; c.limite_hora_tokens = entero($("g-hora").value); c.ignorar = lista($("g-ignorar").value); }
+  }
+
+  function guardar(){
+    const m = $("msg-guardar"); leer();
+    post("/guardar", A.config).then(j => { m.className = "msg " + (j.ok ? "ok" : "err"); m.textContent = j.ok ? "✓ Guardado. Se aplica en el próximo refresco (≤ 1 min)." : "Error: " + (j.error || "?"); })
+      .catch(e => { m.className = "msg err"; m.textContent = "Error al guardar: " + e; });
+  }
+
+  // el panel se recarga solo cada minuto, salvo que estés editando
+  setInterval(() => { if (!enAjustes) location.reload(); }, 60000);
+  if (location.protocol === "file:") $("nav-ajustes").hidden = true;
+  else if (location.hash === "#ajustes") vista("ajustes");
+})();

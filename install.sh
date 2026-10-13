@@ -9,7 +9,7 @@ REGLAS=0; [ "${1:-}" = "--reglas" ] && REGLAS=1
 
 echo "-> Copiando a $DESTINO"
 mkdir -p "$DESTINO/logs"
-for f in costbar.py barra.py popover.py panel.py costbar.css analizar_gasto.py \
+for f in costbar.py ajustes.py barra.py popover.py panel.py costbar.css analizar_gasto.py \
          precio_astra.py instalar_reglas_globales.py GUIA.md AGENTS-snippet.md; do
   [ -f "$AQUI/$f" ] && cp "$AQUI/$f" "$DESTINO/$f"
 done

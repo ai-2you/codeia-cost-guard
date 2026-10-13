@@ -110,3 +110,26 @@ footer{color:var(--suave);font-size:12px;margin-top:16px} .vacio{color:var(--sua
   .calendario{max-width:100%}
   th,td{padding:6px 6px;white-space:nowrap}
 }
+
+/* --- ajustes --- */
+.nav{display:flex;gap:6px;align-items:center}
+#vista-ajustes section{margin-bottom:14px}
+.ayuda{color:var(--suave);font-size:12.5px;margin:-6px 0 12px}
+input,select,textarea{font:inherit;font-size:13px;padding:6px 9px;border-radius:8px;border:1px solid var(--borde);background:var(--pista);color:var(--texto);max-width:100%}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--marca)}
+input.num-in{width:9.5rem;text-align:right} input.ancho{width:100%}
+#vista-ajustes td,#vista-ajustes th{cursor:default;vertical-align:middle}
+.prov{border-top:1px solid var(--borde);padding:14px 0} .prov:first-of-type{border-top:0}
+.prov-cab{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.prov-cab strong{font-size:15px}
+.campos{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.campos label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--suave);text-transform:uppercase;letter-spacing:.5px}
+.campos label input,.campos label textarea{text-transform:none;letter-spacing:0;color:var(--texto)}
+.clave{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.clave input{width:min(340px,100%)}
+.chip{font-size:11px;border-radius:6px;padding:1px 7px;border:1px solid var(--borde);color:var(--suave)}
+.chip.ok{color:#1a9d55;border-color:#1a9d55} .chip.aviso{color:#c47a00;border-color:#c47a00}
+.guardar{position:sticky;bottom:0;display:flex;gap:12px;align-items:center;padding:12px 0;background:var(--fondo)}
+button.primario{background:linear-gradient(90deg,var(--marca),var(--marca2));color:#fff;border-color:transparent;font-weight:600}
+.msg{font-size:13px} .msg.err{color:#d6336c} .msg.ok{color:#1a9d55}
+.mini{height:8px;margin-top:4px;min-width:110px}
