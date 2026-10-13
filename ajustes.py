@@ -15,6 +15,25 @@ def slug(nombre):
     return re.sub(r"[^a-z0-9]+", "-", str(nombre).lower()).strip("-") or "sin-nombre"
 
 
+def clave_de_api(config, api):
+    """Clave guardada en el Keychain del proveedor que lee esa API (p. ej. api='nan')."""
+    for p in config.get("proveedores") or []:
+        if slug(p.get("nombre", "")) == api or str(p.get("uso_api") or "").lower() == api:
+            v = leer_clave(p["nombre"])
+            if v:
+                return v
+    return ""
+
+
+def escribir_config(ruta, obj):
+    """Escritura atomica: un lector que coincida con el guardado ve el fichero viejo o el nuevo, nunca uno a medias."""
+    import json, os
+    tmp = ruta + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, ruta)
+
+
 def api_soportada(prov):
     return slug(prov.get("nombre", "")) in API_SOPORTADAS or str(prov.get("uso_api") or "").lower() in API_SOPORTADAS
 
@@ -48,7 +67,7 @@ def guardar_clave(nombre, clave):
         raise ValueError("la clave tiene caracteres raros o longitud no valida (8-512, sin espacios ni comillas)")
     p = _security(["-i"], f'add-generic-password -U -s {SERVICIO} -a {slug(nombre)} -w "{clave}"\n')
     if p.returncode != 0:
-        raise ValueError("no pude guardar en el Keychain: " + (p.stderr.strip() or "error desconocido")[:120])
+        raise ValueError("no pude guardar en el Keychain (codigo %d)" % p.returncode)   # sin stderr: podria repetir la clave
 
 
 def borrar_clave(nombre):
@@ -144,8 +163,9 @@ def validar(nuevo, actual):
         res = {}
         for k, v in py.items():
             v = v or {}
-            e = {"alias": str(v.get("alias") or "").strip(), "oculto": bool(v.get("oculto")),
-                 "presupuesto_mes_tokens": _entero(v.get("presupuesto_mes_tokens"), f"proyectos.{k}")}
+            e = dict((actual.get("proyectos") or {}).get(k) or {})      # conserva campos puestos a mano
+            e.update({"alias": str(v.get("alias") or "").strip(), "oculto": bool(v.get("oculto")),
+                      "presupuesto_mes_tokens": _entero(v.get("presupuesto_mes_tokens"), f"proyectos.{k}")})
             if e["alias"] or e["oculto"] or e["presupuesto_mes_tokens"]:
                 res[str(k)] = e
         if res or "proyectos" in out:

@@ -359,7 +359,7 @@ def clave_nan():
     Lo recomendado es la variable de entorno: config.json esta versionado en el repo, asi que una
     clave ahi acabaria en el historial de git. Tambien vale ~/.config/nan/api_key.
     """
-    for v in (os.environ.get("NAN_API_KEY") or "", ajustes.leer_clave("nan"), cfg().get("nan_api_key") or ""):
+    for v in (os.environ.get("NAN_API_KEY") or "", ajustes.clave_de_api(cfg(), "nan"), cfg().get("nan_api_key") or ""):
         v = str(v).strip()
         if v:
             return v
@@ -1218,15 +1218,19 @@ def servir():
             ruta = self.path.split("?")[0]
             try:
                 n = int(self.headers.get("Content-Length") or 0)
-                if n > 1_000_000:
-                    raise ValueError("cuerpo demasiado grande")
+                if not 0 <= n <= 1_000_000:
+                    raise ValueError("cuerpo no valido")
                 cuerpo = json.loads(self.rfile.read(n).decode("utf-8"))
                 if ruta == "/guardar":
-                    nuevo = ajustes.validar(cuerpo, cfg())
+                    try:     # el fichero tal cual, no cfg(): este mezcla valores por defecto que no deben acabar en el repo
+                        en_disco = json.load(open(f"{base}/config.json", encoding="utf-8"))
+                    except (OSError, ValueError):
+                        en_disco = {}
+                    nuevo = ajustes.validar(cuerpo, en_disco)
                     if os.path.exists(f"{base}/config.json"):
                         import shutil as _sh
                         _sh.copy(f"{base}/config.json", f"{base}/config.json.bak")
-                    json.dump(nuevo, open(f"{base}/config.json", "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+                    ajustes.escribir_config(f"{base}/config.json", nuevo)
                     self._reescanear("configuracion guardada desde el panel")
                 elif ruta == "/clave":
                     nombre = str(cuerpo.get("proveedor") or "").strip()
@@ -1330,7 +1334,7 @@ def main():
                 self.r = r
                 h, c5 = r["hoy"], r["cinco_h"]
                 lim5 = r["limites"].get("limite_5h_tokens") or 0
-                alto = r["ritmo"]["tok"] >= r["limites"]["limite_hora_tokens"]
+                alto = bool(r["limites"]["limite_hora_tokens"]) and r["ritmo"]["tok"] >= r["limites"]["limite_hora_tokens"]
                 lim5v = lim5 or 0
                 fraccion = (c5["tok"] / lim5v) if lim5v else (r["ritmo"]["tok"] / (r["limites"]["limite_hora_tokens"] or 1) or 0.34)
                 icono = icono_png(os.path.join(AQUI, "icono.png"), fraccion, self._titulo, color_magnitud(c5["tok"]), alto)

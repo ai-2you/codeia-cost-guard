@@ -17,7 +17,27 @@ def _leer(nombre):
     return open(f"{ASSETS}/{nombre}", encoding="utf-8").read()
 
 
+_PELIGROSOS = str.maketrans({"<": "＜", ">": "＞", '"': "＂", "'": "＇", "&": "＆", "`": "｀"})
+
+
+def _sana(o):
+    """Los nombres de proyecto, modelo y plan salen de logs y rutas ajenas y el panel los pinta como HTML (y
+    embebidos en un <script>). Se cambian los caracteres de marcado por su version de ancho completo en claves
+    y valores: se ven casi igual, y claves y filtros siguen cuadrando porque el cambio es el mismo en todo el panel."""
+    if isinstance(o, str):
+        return o.translate(_PELIGROSOS)
+    if isinstance(o, dict):
+        return {_sana(k): _sana(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_sana(x) for x in o]
+    return o
+
+
 def datos():
+    return _sana(_datos())
+
+
+def _datos():
     r = costbar.escanear()
     def b(x):
         return {"gi": int(x["gi"]), "go": int(x["go"]), "cr": int(x["cr"]), "cw": int(x["cw"]),

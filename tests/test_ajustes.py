@@ -94,5 +94,29 @@ class Claves(unittest.TestCase):
         self.assertFalse(ajustes.api_soportada({"nombre": "OpenRouter"}))
 
 
+class Robustez(unittest.TestCase):
+    def test_proyectos_conserva_campos_a_mano(self):
+        act = {"proveedores": [], "aliases": {}, "proyectos": {"a": {"alias": "x", "nota": "mia"}}}
+        out = ajustes.validar({"proveedores": [], "aliases": {}, "proyectos": {"a": {"alias": "y"}}}, act)
+        self.assertEqual(out["proyectos"]["a"]["nota"], "mia")
+        self.assertEqual(out["proyectos"]["a"]["alias"], "y")
+
+    def test_escritura_atomica(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            ruta = os.path.join(d, "config.json")
+            ajustes.escribir_config(ruta, {"a": "ñ"})
+            self.assertEqual(json.load(open(ruta, encoding="utf-8")), {"a": "ñ"})
+            self.assertEqual(os.listdir(d), ["config.json"])
+
+    def test_panel_neutraliza_marcado_en_nombres(self):
+        import panel
+        sucio = {'<img src=x onerror=1>': {"</script>": ["a&b", "\"'`"]}}
+        txt = repr(panel._sana(sucio))
+        for c in '<>"&`':
+            self.assertNotIn(c, txt.replace("\\", ""))
+        self.assertEqual(panel._sana(5), 5)
+
+
 if __name__ == "__main__":
     unittest.main()
