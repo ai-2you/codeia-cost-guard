@@ -59,41 +59,81 @@ mensajes entre ficheros (6 de 60.636 ids en la muestra) y verificar con la docum
 excluye siempre la caché. **Límite aceptado:** las cookies no se separan por puerto; un servidor ajeno en `127.0.0.1`
 podría leerla (documentado en el README); la solución real es un socket Unix o la aplicación final.
 
-## Fase 1 — almacén de turnos (solo añadir)
-Esquema (SQLite ≥ 3.37, `STRICT`, WAL, `secure_delete=ON`, `foreign_keys=ON`), fichero
-`consumo.sqlite` aparte del futuro `servidores.sqlite`:
+## Fase 1 — almacén de turnos (solo añadir) — v3, tras la segunda ronda
+Informes: `../reports/red-team-fase1-261014.md` y `../reports/pre-mortem-fase1-261014.md`.
 
+**Esquema** (`consumo.sqlite`, aparte del futuro `servidores.sqlite`; `STRICT`):
 ```
-meta(clave, valor)                                   -- version_esquema, version_minima_lector, dispositivo_id
-espacios(id, nombre)                                 -- dueño de cada dato; hoy una sola fila
-fuentes(id, espacio_id, dispositivo_id, tipo, id_fuente, visto_en)   -- id_fuente = hash, sin rutas absolutas
-turnos(clave TEXT PK, espacio_id, fuente_id, hora_utc INTEGER, agente, proveedor, modelo,
-       gi, go, cr, cw, proyecto_raw, productor_version, ...)         -- clave = id de mensaje o hash de contenido
+meta(clave, valor)                          -- version_esquema, version_minima_escritor, productor, dispositivo_id, latido del escritor
+espacios(id, nombre)                        -- dueño de cada dato; hoy una fila
+fuentes(id, espacio_id, dispositivo_id, tipo, id_fuente, visto_en)   -- id_fuente = ruta relativa normalizada o hash; sin rutas absolutas
+turnos(clave TEXT PK, espacio_id, fuente_id, hora_utc INTEGER /*segundos*/, agente, proveedor, modelo,
+       gi, go, cr, cw, proyecto_raw, productor_version)
+anomalias(...)                              -- conflictos, marcas sin zona, deltas negativos; visible en el panel
+horas(...)                                  -- agregado horario materializado en la misma transacción
 ```
-- **Reglas:** `INSERT OR REPLACE` por clave de turno; **nunca `DELETE` por fuente**. El único borrado
-  permitido es el de filas de una versión de productor defectuosa, solo de fuentes que siguen existiendo y
-  tras `backup()`.
-- **Hora en UTC** (entero); lo local se deriva al leer. Fixtures del cambio de hora (29-03-2026 y 25-10-2026) y
-  test "misma salida con otra TZ".
-- **Datos crudos**: `proyecto`, `plan`, alias y `usd` se **derivan al leer**; si se guarda `usd`, en
-  micro-USD con `tarifa_version`.
-- Las agregaciones por hora/día/ventana son vistas o caché derivada y reconstruible.
-- **OpenCode/Hermes:** fuente = sesión con id estable; OpenCode por id de mensaje; averiguar qué es
-  `opencode-.db`; Hermes por delta entre lecturas con firma de cambios.
-- **Construcción inicial:** un único constructor con bloqueo, reanudable por fuente y en lotes cortos, mientras
-  los lectores siguen con `state.json`; se mide en frío y se fija un tope. Solo la barra (proceso dueño) escribe;
-  panel y endpoints son de solo lectura.
-- **Concurrencia:** una conexión por hilo, `busy_timeout` corto, vuelta al último resultado si hay bloqueo.
-- **Copias** con `VACUUM INTO`/`backup()` (nunca copiando el fichero en caliente), con la misma caducidad que
-  los datos personales; copias cifradas con passphrase si salen de `~/.cost-guard`.
-- **Fase 1b en sombra:** N días con el cálculo nuevo en paralelo al actual registrando diferencias; criterio de
-  salida = **prueba diferencial con lista de divergencias aceptadas y firmadas** (no "resultado idéntico":
-  grabaría el error de la fase 0b y no es reproducible porque depende de la hora, de la API de NaN y de logs
-  que cambian). Reloj inyectable en `agregar()`; corpus sintético en `tests/datos/`, nunca capturas reales.
-- **Marcha atrás ensayada** como criterio de salida; `state.json` con doble escritura hasta cerrar la fase.
-- **Huecos:** aviso en el panel de días sin fuentes vistas; revisar `cleanupPeriodDays` de Claude Code
-  mientras dure la migración.
-- Rutas de la base en `rutas.py` y test de aislamiento (nada fuera de `HOME_FALSO`).
+
+**Regla de escritura (decisión crítica de ambos informes):** upsert **monótono**
+(`ON CONFLICT DO UPDATE … SET c = max(c, excluded.c)` por contador; nunca baja un contador ni mueve `hora_utc`), con
+rangos por campo y una fila en `anomalias` cuando cambia el modelo o baja un contador. `INSERT OR REPLACE` queda
+**prohibido**: dejaba que el orden de lectura o una línea inyectada en un `jsonl` decidieran la cifra para siempre.
+Tests en orden directo e inverso y con copia truncada. Nunca `DELETE` por fuente.
+
+**Claves por agente (con prefijo de agente; nunca `requestId`; prohibido filtrar `isSidechain`):**
+- Claude: `message.id`, más `sessionId` si el id no tiene forma de Anthropic (OpenCode y backends no-Anthropic usan
+  `msg_<ms>_<sufijo>` predecible).
+- Codex: `session_id` de la primera `session_meta` + `total_tokens` acumulado (0 colisiones medidas entre ficheros).
+- pi: id de sesión + id de línea. OpenCode: `message.id` en **todas** las `opencode*.db`, con aviso de "fuente callada".
+- Hermes: `session_id` + `model` + `task` + total acumulado; fuente `session_model_usage`; fecha `last_seen`/
+  `last_activity_at`, nunca la de la lectura; deltas negativos descartados y anotados.
+
+**Escritor único y no bloqueo:** se parte `escanear()` en `ingerir()` y `consultar()`; los 8 llamadores pasan a
+`consultar()` (incluido el temporizador de `costbar.py`, que nunca ingiere). Escritor único por arrendamiento/latido
+en `meta` con `BEGIN IMMEDIATE`, sin `fcntl`; el resto abre `mode=ro`. La ingesta va en un hilo propio, separado del
+ciclo de servidores, con lotes de ≤ 200 ms. Criterio: con la base vacía y 4 consultores a la vez, ninguno tarda más
+de 1 s y los servidores siguen entregando. Test: `panel.py` y el servidor no llegan a ningún `INSERT`.
+
+**Conexión y PRAGMA:** una sola función `abrir()` fija `secure_delete`, `foreign_keys`, `journal_size_limit`,
+`busy_timeout` en **cada** conexión (son por conexión), comprueba que `journal_mode` devuelve `wal`, rechaza rutas
+en nube/red y avisa si el volumen ignora la propiedad de ficheros (el disco EVO990 la tiene desactivada); checkpoint
+`TRUNCATE` periódico; sin `max_page_count`; SQLite ≥ 3.37 comprobado al abrir y **Python mínimo 3.11** (README).
+`quick_check` diario, nunca `integrity_check` en la barra.
+
+**Hora:** `hora_utc` en segundos con camino propio `a_epoch_utc` que exige zona; marcas sin zona a cuarentena visible;
+lo local solo en `consultar()`; zona inyectada (no `tzset`); fixtures 29-03-2026 y 25-10-2026 (día de 25 h), tres zonas
+incluida una de media hora.
+
+**Datos y volumen (medido):** ~1,4 M turnos/año; a 3 años ≈ 700 MB y 2 s para consultar todo; `integrity_check` 11 s;
+el reparseo en frío tarda ~14 s. Topes con una base sintética de 3 años: ventana 5 h ≤ 5 ms, 31 días ≤ 50 ms, mensual
+≤ 100 ms, ≤ 1 GB. Lectura **incremental** por desplazamiento (inodo + hash de cabecera, línea partida no avanza),
+≤ 300 ms por vuelta con un fichero vivo de 250 MB. Upsert condicional para no reescribir miles de filas por minuto.
+
+**Export cifrado propio (decisión del dueño: portable a Windows):** dependencia `cryptography` fijada con hashes +
+`scrypt`; formato versionado `.cgx` por trozos con la cabecera como AAD y bandera de último trozo; temporal solo en un
+directorio privado (o `serialize()`) con `temp_store=MEMORY`; la passphrase solo se pide en barra y CLI, nunca en el
+panel web, y no se promete borrado en memoria (imposible en CPython); copias automáticas con **cifrado a destinatario**
+(clave privada fuera del equipo). Criterios de salida: vector de prueba, ida y vuelta, manipulación, truncado y una
+restauración ensayada en Windows.
+
+**Windows:** `infobar/plataforma.py` (cerrojo, rutas, permisos, secretos); datos en `%LOCALAPPDATA%` con aviso si es una
+carpeta sincronizada; `pathlib` en los lectores; `tzdata`; reintentos en `os.replace` y en `BUSY`; tests con rutas
+`ntpath`.
+
+**Ruta de datos:** `rutas.DATOS` independiente de `RAIZ`; el checkout de desarrollo no escribe sin `COSTGUARD_DATOS`;
+`consumo.sqlite*` en `.gitignore` **antes** del primer commit; `rutas.ALMACEN` en `tests/aislamiento.py`.
+`proyecto_raw` recorta `Users/<x>` (con migración de claves de `config.proyectos`).
+
+**Fase 1b en sombra (medible):** las dos rutas salen de la **misma lectura** y solo se comparan días cerrados;
+tolerancia 0 en Codex, pi y OpenCode, y solo categorías firmadas en Claude y Hermes; residuo sin explicar = 0 durante
+7 días seguidos con el contador a cero tras cada divergencia; a los 3 reinicios decide el dueño; eventos obligatorios
+dentro de la ventana: reinicio, guardado de Ajustes, reposo y tres agentes. **El calendario debe incluir el cambio de
+hora del 25-10-2026.**
+
+**Marcha atrás ensayada:** `VERSION_ESTADO` congelado, `olvidar_cache()` sin tocar la base, ingesta mínima también en
+`main` mientras dure la fase, `version_minima_escritor`; ensayo de ida, 48 h de vuelta e ida, comparado con un control.
+Copias con `VACUUM INTO`/backup, con la misma caducidad que los datos personales.
+Limpieza menor: no recorrer los 1.263 `*.json` sueltos de `~/.claude/projects`; el `CLIFF` por turno en Hermes va a
+las divergencias aceptadas.
 
 ## Fase 2 — histórico, presupuestos y exportador
 - Vista histórica en el panel (meses, comparativas, proyección de fin de mes).
@@ -144,6 +184,18 @@ real y corto (30–90 días), sin geolocalización fina. Nombres de cliente pers
 3. **Fase en sombra:** 7 días (propuesta aceptada por defecto; se ajusta si el pre-mortem de la fase 1 lo pide).
 4. **Caducidad de IPs de atacantes:** 90 días, configurable.
 5. **Orden:** fase 0 ya, en una rama aparte (`feat/fase0-seguridad-y-conteo`).
+
+## Decisiones pendientes antes de codificar la fase 1 (ronda 2)
+1. **Regla de conflicto:** máximo gana (recomendado) o última gana.
+2. **Dependencias:** `cryptography` (y `tzdata` en Windows), sí/no. Sin ella no hay export cifrado ("no se hace
+   cifrado casero mientras tanto").
+3. **Python mínimo 3.11** (recomendado) o seguir en 3.9 sin `STRICT`.
+4. **Copias automáticas:** cifrado a destinatario con la clave privada fuera del equipo (recomendado) o passphrase en cada copia.
+5. **Hermes:** ¿cuentan las tareas auxiliares de `session_model_usage` (+17–47 % frente a `sessions`)?
+6. **Quién escribe sin la barra:** el CLI toma el relevo si no hay latido (recomendado) o nadie.
+7. **Ruta de la base en desarrollo:** directorio de datos de la instalación (recomendado) o el checkout.
+8. **`proyecto_raw`:** recortar `Users/<x>` (recomendado) o dejarlo tal cual.
+9. **Sombra:** 7 días incluyendo el 25-10-2026 (recomendado).
 
 ## Puerta de verificación (cada fase)
 Pre-mortem → red team → cambios al plan → informe en `plans/reports/` → solo entonces código. Tras
