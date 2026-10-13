@@ -74,7 +74,7 @@
         "qwen3.8-flash": 500000000
       },
       "fuente": "https://api.nan.builders/v1/usage",
-      "nota": "uso_api=nan: el consumo por modelo se lee en vivo de GET https://api.nan.builders/v1/usage (el contador real de NaN, incluye web/nube/otras maquinas). Cuotas mensuales publicadas: DeepSeek V4-Flash 3 B, GLM 5.3 Flash 2 B, MiMo V2.6 Flash 1 B, Qwen 3.8 Flash 500 M. La API key se coge de NAN_API_KEY (entorno) o de nan_api_key abajo; no la metas en el repo."
+      "nota": "uso_api=nan: el consumo por modelo se lee en vivo de GET https://api.nan.builders/v1/usage (el contador real de NaN, incluye web/nube/otras maquinas). Cuotas mensuales publicadas: DeepSeek V4-Flash 3 B, GLM 5.3 Flash 2 B, MiMo V2.6 Flash 1 B, Qwen 3.8 Flash 500 M. La API key va al Llavero de macOS: python3 costbar.py --clave nan (tambien vale NAN_API_KEY en el entorno). nan_api_key aqui sigue funcionando por compatibilidad, pero no se recomienda."
     },
     {
       "nombre": "OpenCode Go",

@@ -296,10 +296,7 @@ class Barra(NSObject):
             elif zona == "Refrescar":
                 self.repinta()
             elif zona.startswith("tema:"):
-                import json
-                c = json.load(open(CONFIG)) if os.path.exists(CONFIG) else {}
-                c["tema"] = zona[5:]
-                costbar.ajustes.escribir_config(CONFIG, c)
+                costbar.guardar_config({"tema": zona[5:]})     # atomico y por fusion (infobar/config_y_estado)
                 self.muestra()          # instantaneo: los dos temas ya estan renderizados
                 NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(0.5, self, "preparaImagenes:", None, False)
             elif zona == "Salir":

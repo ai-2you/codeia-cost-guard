@@ -13,8 +13,9 @@ import tempfile
 import time
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import costbar
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import aislamiento  # noqa: E402,F401  (HOME y rutas temporales: antes que costbar)
+import costbar  # noqa: E402
 
 
 def _escribir(d, nombre, regs):
@@ -58,6 +59,17 @@ class ALocalTest(TZFix):
     def test_offset_explicito(self):
         self.assertEqual(costbar.a_local("2026-09-27T20:45:08+02:00"), "2026-09-27T20:45:08")
         self.assertEqual(costbar.a_local("2026-09-27T22:45:08+0200"), "2026-09-27T22:45:08")
+
+    def test_offset_corto_y_sin_dos_puntos(self):
+        self.assertEqual(costbar.a_local("2026-09-27T20:45:08+02"), "2026-09-27T20:45:08")
+        self.assertEqual(costbar.a_local("2026-09-27T18:45:08-0000"), "2026-09-27T20:45:08")
+
+    def test_fracciones_irregulares(self):
+        self.assertEqual(costbar.a_local("2026-09-27T20:45:08.34Z"), "2026-09-27T22:45:08")
+        self.assertEqual(costbar.a_local("2026-09-27T20:45:08.343123456Z"), "2026-09-27T22:45:08")
+
+    def test_espacio_en_vez_de_t(self):
+        self.assertEqual(costbar.a_local("2026-09-27 20:45:08Z"), "2026-09-27T22:45:08")
 
     def test_sin_zona_no_toca(self):
         self.assertEqual(costbar.a_local("2026-09-27T22:45:08"), "2026-09-27T22:45:08")
@@ -129,6 +141,19 @@ class ParsearPiTest(TZFix):
         self.assertEqual(set(rec["horas"]), {"2026-09-27T22", "2026-09-27T23"})
         # reasoning (3 x 2 turnos) va con la salida
         self.assertEqual(rec["dia"]["2026-09-27"]["claude-sonnet-5"], [200, 26, 10, 2])
+
+
+class PeriodoTest(TZFix):
+    """escanear(dias=N) acota el informe (antes analizar_gasto.py cambiaba costbar.DIAS)."""
+
+    def test_agregar_respeta_el_periodo(self):
+        hoy = time.strftime("%Y-%m-%d")
+        hace10 = time.strftime("%Y-%m-%d", time.localtime(time.time() - 10 * 86400))
+        reg = lambda d: {"dia": {d: {"claude-sonnet-5": [10, 0, 0, 0]}}, "turnos": {d: 1},
+                         "horas": {}, "proyecto": "p", "plan": "Claude (Max)"}
+        vistos = {"a": reg(hoy), "b": reg(hace10)}
+        self.assertEqual(set(costbar.agregar(vistos, 0, 31)["dias"]), {hoy, hace10})
+        self.assertEqual(set(costbar.agregar(vistos, 0, 7)["dias"]), {hoy})
 
 
 if __name__ == "__main__":
