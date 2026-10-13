@@ -9,12 +9,10 @@ state.json
 estado.json
 logs/
 *.log
-# tu configuracion (planes, servidores): local, nunca en el repo
-config.json
+# copias de seguridad que deja el guardado de la configuracion
 config.json.bak*
 *.lock
 # entorno de Python local para probar la barra desde el repo
 venv/
-# notas personales y el historial de planes: se quedan en tu disco
+# notas personales: se quedan en tu disco
 docs/chuleta-personal.md
-plans/
