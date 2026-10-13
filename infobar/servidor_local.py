@@ -7,9 +7,12 @@ cosas a localhost. Por eso:
   · el POST solo va a /guardar, con Content-Type application/json y Origin exacto del panel (un
     POST "simple" desde otra web no puede poner ese tipo sin preflight, ni falsear Origin);
   · lo que se guarda se FUSIONA con config.json (nunca lo reemplaza) y se valida;
-  · las respuestas nunca llevan claves (lista cerrada de nombres).
+  · las respuestas nunca llevan claves (lista cerrada de nombres);
+  · **sesion obligatoria en todo** (lectura incluida): Host/Origin frenan a las webs del navegador, pero no a
+    otro proceso del Mac. La barra abre el panel con un ticket de un solo uso (en memoria, 60 s) que el servidor
+    cambia por una cookie HttpOnly SameSite=Strict; sin la cookie, nada responde. El ticket no toca el disco.
 """
-import json, os, subprocess, sys, threading, time
+import hmac, json, os, secrets, subprocess, sys, threading, time
 
 from . import ajustes, claves, rutas
 from . import cuota_nan
@@ -24,6 +27,71 @@ PUERTO = 47391              # panel/configurador local: un puerto alto que casi 
 SECRETOS = {"api_key", "apikey", "token", "password", "secret", "clave", "authorization", "private_key"}
 SUFIJOS_SECRETOS = ("_key", "_token", "_secret", "_password")
 MAX_CUERPO = 1_000_000      # bytes: la config cabe de sobra
+COOKIE = "cg_sesion"          # el nombre real lleva el puerto: dos instancias en 127.0.0.1 no se pisan
+TICKET_VIDA_S = 60
+SESION_VIDA_S = 12 * 3600
+MAX_SESIONES = 20
+_SERVIDOR = []              # el servidor que arranco servir(): url_panel() le pide los tickets
+
+
+def nuevo_ticket(srv):
+    """Ticket de un solo uso para abrir el panel; vive en memoria y caduca a los 60 s."""
+    ahora = time.time()
+    with srv.cerrojo:
+        for t in [t for t, exp in srv.tickets.items() if exp < ahora]:
+            del srv.tickets[t]
+        t = secrets.token_urlsafe(24)
+        srv.tickets[t] = ahora + TICKET_VIDA_S
+    return t
+
+
+def _canjea(srv, ticket):
+    """Cambia un ticket valido por una sesion nueva (o None). El ticket se gasta aunque falle lo demas."""
+    ahora = time.time()
+    with srv.cerrojo:
+        exp = srv.tickets.pop(ticket, 0)
+        if exp < ahora:
+            return None
+        for sid in [k for k, e in srv.sesiones.items() if e < ahora]:
+            del srv.sesiones[sid]
+        while len(srv.sesiones) >= MAX_SESIONES:
+            del srv.sesiones[min(srv.sesiones, key=srv.sesiones.get)]
+        sid = secrets.token_urlsafe(32)
+        srv.sesiones[sid] = ahora + SESION_VIDA_S
+        return sid
+
+
+def nombre_cookie(srv):
+    return f"{COOKIE}_{srv.server_address[1]}"
+
+
+def _valor_cookie(cabecera, nombre):
+    """El valor de la cookie `nombre` en la cabecera Cookie, leida a mano: el parser estandar se rinde en la
+    primera cookie ajena mal formada (otra app en 127.0.0.1 puede dejarlas) y bloquearia al usuario."""
+    for trozo in (cabecera or "").split(";"):
+        k, _, v = trozo.strip().partition("=")
+        if k == nombre:
+            return v.strip()
+    return ""
+
+
+def _sesion_valida(srv, cabecera_cookie):
+    valor = _valor_cookie(cabecera_cookie, nombre_cookie(srv)).encode("utf-8", "replace")
+    if not valor:
+        return False
+    ahora, ok = time.time(), False
+    with srv.cerrojo:
+        for sid, exp in srv.sesiones.items():          # sin cortocircuito: tiempo constante frente al numero de sesiones
+            ok |= hmac.compare_digest(sid.encode(), valor) and exp >= ahora
+    return ok
+
+
+def url_panel():
+    """URL para abrir el panel en el navegador, con un ticket de un solo uso si el servidor esta en marcha."""
+    base = f"http://127.0.0.1:{PUERTO}/"
+    if _SERVIDOR:
+        return f"{base}entrar?t={nuevo_ticket(_SERVIDOR[0])}"
+    return base
 
 
 def es_secreto(nombre):
@@ -96,6 +164,11 @@ def crear_servidor(puerto=PUERTO):
             self.send_header("Content-Type", tipo)
             self.send_header("Content-Length", str(len(cuerpo)))
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Frame-Options", "DENY")
+            for k, v in getattr(self, "_extra", []):
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(cuerpo)
 
@@ -111,10 +184,32 @@ def crear_servidor(puerto=PUERTO):
             self._manda(403, b"origen no permitido", "text/plain")
             return False
 
+        def _sesion_ok(self):
+            if _sesion_valida(self.server, self.headers.get("Cookie")):
+                return True
+            self._manda(401, "Sin sesión: abre el panel desde el icono de CostGuard en la barra de menús.".encode(),
+                        "text/plain; charset=utf-8")
+            return False
+
+        def _entrar(self):
+            from urllib.parse import parse_qs, urlsplit
+            t = (parse_qs(urlsplit(self.path).query).get("t") or [""])[0]
+            sid = _canjea(self.server, t)
+            if not sid:
+                return self._manda(401, "Ticket no válido o caducado: abre el panel desde la barra de menús.".encode(),
+                                   "text/plain; charset=utf-8")
+            self._extra = [("Set-Cookie", f"{nombre_cookie(self.server)}={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESION_VIDA_S}"),
+                           ("Location", "/")]
+            self._manda(302, b"", "text/plain")
+
         def do_GET(self):
             if not self._host_ok():
                 return
             ruta = self.path.split("?")[0]
+            if ruta == "/entrar":
+                return self._entrar()
+            if not self._sesion_ok():
+                return
             if ruta in ("/", "/panel.html"):
                 try:
                     # se regenera al abrir: asi el panel siempre lleva los datos de ahora
@@ -179,7 +274,7 @@ def crear_servidor(puerto=PUERTO):
                 return None
 
         def do_POST(self):
-            if not self._host_ok():
+            if not self._host_ok() or not self._sesion_ok():
                 return
             ruta = self.path.split("?")[0]
             if ruta not in ("/guardar", "/clave"):
@@ -231,7 +326,9 @@ def crear_servidor(puerto=PUERTO):
         allow_reuse_address = True
         daemon_threads = True
 
-    return S(("127.0.0.1", puerto), H)
+    srv = S(("127.0.0.1", puerto), H)
+    srv.tickets, srv.sesiones, srv.cerrojo = {}, {}, threading.Lock()
+    return srv
 
 
 def servir():
@@ -253,6 +350,7 @@ def servir():
                 time.sleep(30)
                 continue
             log(f"configurador listo en http://127.0.0.1:{PUERTO}")
+            _SERVIDOR[:] = [srv]
             srv.serve_forever()
             return
 

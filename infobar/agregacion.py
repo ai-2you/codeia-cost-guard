@@ -5,7 +5,7 @@ from . import ajustes
 from .config_y_estado import cfg, guardar_estado, leer_estado
 from .cuota_nan import uso_nan
 from .lectores_logs import FUENTES, NOMBRE_FUENTE, PI_DIR, _dia_hora, _funde, leer_bases, parsear, parsear_pi
-from .planes_y_tarifas import CLIFF, corto, modelo_nativo, plan_final, proveedor_de, proveedores_de, tarifa
+from .planes_y_tarifas import corto, modelo_nativo, plan_final, proveedor_de, proveedores_de, tarifa
 
 
 DIAS = 31                   # periodo por defecto; escanear(dias=N) lo cambia para una pasada
@@ -136,20 +136,15 @@ def agregar(vistos, nuevos=0, periodo=None):
                 suma(dias[d], v)
                 t = tarifa(m)
                 if t:
-                    over = v[0] > CLIFF
-                    dias[d]["usd"] += (max(v[0] - v[2], 0) * t[0] * (2 if over else 1)
-                                       + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
-                                       + v[1] * t[1] * (1.5 if over else 1)) / 1e6
+                    # el recargo por contexto largo (CLIFF) es por turno: sobre sumas diarias no se puede aplicar
+                    dias[d]["usd"] += (v[0] * t[0] + v[2] * t[2] + v[3] * t[3] + v[1] * t[1]) / 1e6
                 if d >= hace30:
                     suma(modelos_mes[m], v)
                     modelo_dia[m][d] += v[0] + v[1] + v[2] + v[3]
                 if d == hoy:
                     suma(modelos_hoy[m], v)
                     if t:
-                        over = v[0] > CLIFF
-                        modelos_hoy[m]["usd"] += (max(v[0] - v[2], 0) * t[0] * (2 if over else 1)
-                                                  + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
-                                                  + v[1] * t[1] * (1.5 if over else 1)) / 1e6
+                        modelos_hoy[m]["usd"] += (v[0] * t[0] + v[2] * t[2] + v[3] * t[3] + v[1] * t[1]) / 1e6
                 if not proy_oculto:
                     suma(proys[proy_n], v)
                 plan_f = r.get("plan")

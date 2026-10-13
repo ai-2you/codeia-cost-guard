@@ -25,9 +25,9 @@ from AppKit import (
     NSEvent, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSImage, NSImageLeft,
     NSImageView, NSMakePoint, NSMakeRect, NSMakeSize, NSMenu, NSMenuItem, NSPopover, NSScreen,
     NSPasteboard, NSPasteboardTypeString, NSProgressIndicator, NSStatusBar, NSVariableStatusItemLength,
-    NSViewController, NSVisualEffectView,
+    NSViewController, NSVisualEffectView, NSWorkspace,
 )
-from Foundation import NSData, NSObject, NSTimer
+from Foundation import NSData, NSObject, NSTimer, NSURL
 from PIL import Image, ImageDraw, ImageFont
 
 import costbar
@@ -315,7 +315,7 @@ class Barra(NSObject):
     def boton(self, texto):
         s = next((x for x in self.servidores() if x["nombre"] == self.servidor_activo()), None)
         if texto == "Abrir panel":
-            self.abre(f"http://127.0.0.1:{costbar.PUERTO}/")
+            self.abre(costbar.url_panel())
         elif texto == "Guía":
             subprocess.Popen(["open", os.path.join(AQUI, "GUIA.md")])
         elif s and texto == "Panel" and s.get("panel_url"):
@@ -330,7 +330,11 @@ class Barra(NSObject):
         if publica and url_valida(url):
             log(f"url rechazada: {url[:80]!r}")
             return
-        subprocess.Popen(["open", url])          # sin esperar: el hilo principal no se bloquea
+        # NSWorkspace y no `open <url>`: los argumentos de un proceso los ve cualquier usuario con `ps`, y la URL del
+        # panel lleva un ticket de entrada de un solo uso
+        nsurl = NSURL.URLWithString_(url)
+        if nsurl is None or not NSWorkspace.sharedWorkspace().openURL_(nsurl):
+            log(f"no se pudo abrir la URL ({url.split('?')[0][:60]})")
 
     @objc.python_method
     def terminal(self, s):
@@ -430,13 +434,14 @@ class Barra(NSObject):
         pb.setString_forType_(f"# {self.servidor_activo()}: que falta para protegerlo\n" + texto, NSPasteboardTypeString)
 
     def panelWeb_(self, _):
-        self.abre(f"http://127.0.0.1:{costbar.PUERTO}/")
+        self.abre(costbar.url_panel())
 
     def salir_(self, _):
         NSApplication.sharedApplication().terminate_(None)
 
 
 def main():
+    costbar.endurecer()       # umask 0077 y permisos de lo que ya habia: todo esto es sensible
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
     barra = Barra.alloc().init()

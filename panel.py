@@ -86,6 +86,7 @@ def construye(d):
 
 
 def main():
+    costbar.endurecer()
     d = datos()
     open(SALIDA, "w", encoding="utf-8").write(construye(d))
     return SALIDA, d["hoy"]["tok"], d["ritmo"]

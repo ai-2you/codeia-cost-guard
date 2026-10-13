@@ -110,6 +110,36 @@ class ParsearTest(TZFix):
         # codex: cached va DENTRO de input -> entrada fresca 100, cache leida 900
         self.assertEqual(r["dia"]["2026-09-27"]["gpt-5"], [100, 100, 900, 0])
 
+    def test_claude_varias_lineas_por_mensaje_cuentan_una_vez_con_la_ultima_salida(self):
+        # Claude Code escribe una linea por bloque (pensamiento, texto, herramienta) con la misma entrada y
+        # cache y la salida creciendo; en segundos distintos. El mensaje real es la ultima linea.
+        uso = lambda out: {"input_tokens": 2, "cache_read_input_tokens": 10179, "cache_creation_input_tokens": 12115, "output_tokens": out}
+        r = costbar.parsear(self._ruta_claude([
+            {"timestamp": "2026-09-27T20:45:08Z", "model": "claude-sonnet-5", "message": {"id": "msg_1", "usage": uso(6)}},
+            {"timestamp": "2026-09-27T20:45:09Z", "model": "claude-sonnet-5", "message": {"id": "msg_1", "usage": uso(6)}},
+            {"timestamp": "2026-09-27T20:45:11Z", "model": "claude-sonnet-5", "message": {"id": "msg_1", "usage": uso(321)}},
+            {"timestamp": "2026-09-27T20:50:00Z", "model": "claude-sonnet-5", "message": {"id": "msg_2", "usage": uso(40)}},
+        ]))
+        self.assertEqual(r["turnos"], {"2026-09-27": 2})
+        self.assertEqual(r["dia"]["2026-09-27"]["claude-sonnet-5"], [4, 361, 20358, 24230])
+
+    def test_claude_lineas_sin_id_siguen_con_la_clave_antigua(self):
+        r = costbar.parsear(self._ruta_claude([
+            {"timestamp": "2026-09-27T20:45:08Z", "model": "claude-sonnet-5", "message": {"usage": {"input_tokens": 10, "output_tokens": 5}}},
+            {"timestamp": "2026-09-27T20:45:08Z", "model": "claude-sonnet-5", "message": {"usage": {"input_tokens": 10, "output_tokens": 5}}},
+        ]))
+        self.assertEqual(r["turnos"], {"2026-09-27": 1})
+
+    def test_coste_no_resta_la_cache_a_la_entrada_fresca(self):
+        r = costbar.parsear(self._ruta_claude([
+            {"timestamp": "2026-09-27T20:45:08Z", "model": "claude-sonnet-5",
+             "message": {"id": "m", "usage": {"input_tokens": 1000, "output_tokens": 100,
+                                              "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}}},
+        ]))
+        t = costbar.tarifa("claude-sonnet-5")
+        esperado = (1000 * t[0] + 100 * t[1] + 5000 * t[2] + 200 * t[3]) / 1e6
+        self.assertAlmostEqual(r["horas"]["2026-09-27T22"]["usd"], esperado, places=9)
+
     def test_turnos_distintos_se_suman(self):
         r = costbar.parsear(self._ruta_claude([
             {"timestamp": "2026-09-27T20:45:08Z", "model": "claude-sonnet-5",

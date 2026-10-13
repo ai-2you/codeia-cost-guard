@@ -112,6 +112,7 @@ class ServidorAjustes(unittest.TestCase):
         cls.srv = servidor_local.crear_servidor(0)
         cls.puerto = cls.srv.server_address[1]
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+        cls.cookie = aislamiento.cookie_de(cls.srv)
 
     @classmethod
     def tearDownClass(cls):
@@ -138,7 +139,7 @@ class ServidorAjustes(unittest.TestCase):
 
     def _pide(self, metodo, ruta, cuerpo=None, origen=True):
         c = http.client.HTTPConnection("127.0.0.1", self.puerto, timeout=30)
-        cab = {"Content-Type": "application/json"}
+        cab = {"Content-Type": "application/json", "Cookie": self.cookie}
         if origen:
             cab["Origin"] = f"http://127.0.0.1:{self.puerto}"
         c.request(metodo, ruta, json.dumps(cuerpo) if cuerpo is not None else None, cab)

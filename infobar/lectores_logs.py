@@ -82,6 +82,27 @@ def parsear(ruta):
         trozos = [x for x in urllib.parse.unquote(ruta.split("/projects/")[-1].split("/")[0]).split("-") if x]
         proy = "/".join(trozos[-3:]) if trozos else "otros"
     modelo = None
+    pend = {}               # Claude Code: id de mensaje -> (ts, modelo, gi, go, cr, cw) de su ultima linea
+
+    def cuenta(ts, k, gi, go, cr, cw):
+        tok = gi + go + cr + cw
+        if len(ts) >= 10:
+            a = dia[ts[:10]][k]
+            a[0] += gi
+            a[1] += go
+            a[2] += cr
+            a[3] += cw
+            turnos[ts[:10]] += 1
+        if len(ts) >= 13:
+            horas[ts[:13]]["tok"] += tok
+            horas[ts[:13]]["mod"][k] += tok
+            t = tarifa(k)
+            if t:
+                over = gi > CLIFF
+                horas[ts[:13]]["usd"] += (gi * t[0] * (2 if over else 1)
+                                          + cr * t[2] * (2 if over else 1) + cw * t[3] * (2 if over else 1)
+                                          + go * t[1] * (1.5 if over else 1)) / 1e6
+
     try:
         fh = open(ruta, encoding="utf-8", errors="ignore")
     except Exception:
@@ -101,7 +122,8 @@ def parsear(ruta):
         uso = _hallar_uso(d)
         if not uso:
             continue
-        if "cached_input_tokens" in uso or "total_tokens" in uso:      # Codex: la cache va dentro de la entrada
+        es_codex = "cached_input_tokens" in uso or "total_tokens" in uso     
+        if es_codex:                                       # Codex: la cache va dentro de la entrada
             cr = uso.get("cached_input_tokens", 0) or 0
             gi = max((uso.get("input_tokens", 0) or 0) - cr, 0)
             cw = uso.get("cache_write_input_tokens", 0) or 0
@@ -110,29 +132,22 @@ def parsear(ruta):
             cr = uso.get("cache_read_input_tokens", uso.get("cachedInputTokens", 0)) or 0
             cw = uso.get("cache_creation_input_tokens", uso.get("cacheWriteInputTokens", 0)) or 0
         go = uso.get("output_tokens", uso.get("outputTokens", 0)) or 0
+        k = modelo or "sin-modelo"
+        mid = (d.get("message") or {}).get("id") if isinstance(d.get("message"), dict) else None
+        if mid and not es_codex:
+            # Claude Code escribe varias lineas por mensaje (una por bloque: pensamiento, texto, herramienta) con la
+            # MISMA entrada y cache y la salida creciendo en streaming: el mensaje real es la ULTIMA linea. Se
+            # guarda por id y se cuenta una sola vez al final del fichero.
+            pend[mid] = (ts, k, gi, go, cr, cw)
+            continue
         # el doble registro de Codex comparte el segundo: incluir el segundo en la clave lo descarta
         clave = f"{modelo}|{ts[:19]}|{gi}|{go}|{cr}|{cw}"
         if clave in vistos:
             continue
         vistos.add(clave)
-        k = modelo or "sin-modelo"
-        tok = gi + go + cr + cw
-        if len(ts) >= 10:
-            a = dia[ts[:10]][k]
-            a[0] += gi
-            a[1] += go
-            a[2] += cr
-            a[3] += cw
-            turnos[ts[:10]] += 1
-        if len(ts) >= 13:
-            horas[ts[:13]]["tok"] += tok
-            horas[ts[:13]]["mod"][k] += tok
-            t = tarifa(k)
-            if t:
-                over = gi > CLIFF
-                horas[ts[:13]]["usd"] += (max(gi - cr, 0) * t[0] * (2 if over else 1)
-                                          + cr * t[2] * (2 if over else 1) + cw * t[3] * (2 if over else 1)
-                                          + go * t[1] * (1.5 if over else 1)) / 1e6
+        cuenta(ts, k, gi, go, cr, cw)
+    for ts, k, gi, go, cr, cw in pend.values():
+        cuenta(ts, k, gi, go, cr, cw)
     fh.close()
     plan = None
     if "/.claude/" in ruta:
@@ -227,7 +242,7 @@ def parsear_pi(ruta):
                 rec["horas"][ts[:13]]["usd"] += costo
             elif (t := tarifa(modelo)):
                 over = gi > CLIFF
-                rec["horas"][ts[:13]]["usd"] += (max(gi - cr, 0) * t[0] * (2 if over else 1)
+                rec["horas"][ts[:13]]["usd"] += (gi * t[0] * (2 if over else 1)
                                                  + cr * t[2] * (2 if over else 1) + cw * t[3] * (2 if over else 1)
                                                  + go * t[1] * (1.5 if over else 1)) / 1e6
     fh.close()
@@ -301,7 +316,7 @@ def leer_bases():
             tr = tarifa(k)
             if tr:
                 over = gi > CLIFF
-                proy["horas"][ts[:13]]["usd"] += (max(gi - cr, 0) * tr[0] * (2 if over else 1)
+                proy["horas"][ts[:13]]["usd"] += (gi * tr[0] * (2 if over else 1)
                                                   + cr * tr[2] * (2 if over else 1) + cw * tr[3] * (2 if over else 1)
                                                   + go * tr[1] * (1.5 if over else 1)) / 1e6
 
@@ -370,7 +385,7 @@ def leer_bases():
             nombres.append(f"OpenCode ({len(filas)})")
             break
         except Exception as e:
-            log(f"opencode {ruta}: {type(e).__name__}: {e}")
+            log(f"opencode: {type(e).__name__}")
     # Hermes: su cwd es el proyecto (Hermes no es un plan, es la app)
     for db in sorted(glob.glob(f"{rutas.HOME}/.hermes/profiles/*/state.db")):
         try:
@@ -382,7 +397,7 @@ def leer_bases():
                 mete(f"Hermes/{perfil}" + (f" · {ultimos(cwd, 1)}" if cwd else ""), burl or bprov or "", hora(ini), m, i or 0, o or 0, cr or 0, cw or 0)
             nombres.append(f"Hermes/{perfil} ({len(filas)})")
         except Exception as e:
-            log(f"hermes {db}: {type(e).__name__}: {e}")
+            log(f"hermes: {type(e).__name__}")
     return proyectos, nombres
 
 

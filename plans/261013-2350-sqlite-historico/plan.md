@@ -52,6 +52,13 @@ Claude Code bajan en torno a un 40 %**; se explica en la interfaz (nota de versi
 **Criterio de salida:** nuevo test de abuso pasa (otro proceso sin cookie recibe 401/403 en todo), permisos
 verificados por test, y el conteo corregido coincide con una cuenta independiente sobre un corpus sintético.
 
+**Resultado de la fase 0 (revisión `../reports/revision-fase0-261014.md`):** corregidos el ticket visible en `ps`
+(la URL se abre con `NSWorkspace`), el parseo de cookies, la cookie por puerto, el recargo `CLIFF` sobre sumas diarias,
+la ruta en logs de Hermes y la purga de renders tras cada pintado. **Aplazado a la fase 1 (consciente):** deduplicar
+mensajes entre ficheros (6 de 60.636 ids en la muestra) y verificar con la documentación de Hermes que su entrada
+excluye siempre la caché. **Límite aceptado:** las cookies no se separan por puerto; un servidor ajeno en `127.0.0.1`
+podría leerla (documentado en el README); la solución real es un socket Unix o la aplicación final.
+
 ## Fase 1 — almacén de turnos (solo añadir)
 Esquema (SQLite ≥ 3.37, `STRICT`, WAL, `secure_delete=ON`, `foreign_keys=ON`), fichero
 `consumo.sqlite` aparte del futuro `servidores.sqlite`:
@@ -126,12 +133,17 @@ turnos(clave TEXT PK, espacio_id, fuente_id, hora_utc INTEGER, agente, proveedor
 Una IP es dato personal (TJUE C-582/14). Base proporcionada: interés legítimo (considerando 49) con plazo
 real y corto (30–90 días), sin geolocalización fina. Nombres de cliente persona física también cuentan.
 
-## Decisiones que necesito del dueño
-1. **¿Aceptas que las cifras de Claude Code bajen en torno a un 40 %** al corregir el conteo (fase 0b)?
-2. **Copias del histórico:** ¿Time Machine cifrado o export cifrado propio?
-3. **Fase 1b en sombra:** ¿cuántos días? (propuesta: 7)
-4. **Caducidad de IPs de atacantes:** ¿90 días? (propuesta) ¿otro plazo?
-5. Orden: ¿fase 0 ya, y sin esperar a que esté el resto del plan cerrado? (recomendado: sí)
+## Decisiones del dueño (cerradas el 2026-10-14)
+1. **Bajada de cifras de Claude Code (~40 %)**: aceptada. Se explica en el README (sección "Cómo cuenta") y en las notas de versión.
+2. **Copias del histórico:** **export cifrado propio** (no Time Machine), porque el producto final tiene que funcionar
+   también en **Windows**. Consecuencias para el diseño: el cifrado del export (passphrase, KDF y AEAD) debe ser
+   portable y no depender de Llavero/Time Machine; la base y las copias no se apoyan en `chmod`/`tmutil`; el
+   almacén de secretos pasa a una interfaz por sistema (Llavero en macOS, Credential Manager en Windows); y los
+   permisos de la fase 0 tienen que tener equivalente por ACL en Windows (hoy `permisos.py` solo actúa en
+   macOS/Linux y deja Windows sin tocar, documentado).
+3. **Fase en sombra:** 7 días (propuesta aceptada por defecto; se ajusta si el pre-mortem de la fase 1 lo pide).
+4. **Caducidad de IPs de atacantes:** 90 días, configurable.
+5. **Orden:** fase 0 ya, en una rama aparte (`feat/fase0-seguridad-y-conteo`).
 
 ## Puerta de verificación (cada fase)
 Pre-mortem → red team → cambios al plan → informe en `plans/reports/` → solo entonces código. Tras
