@@ -157,7 +157,8 @@ Con los límites a 0 se muestran tokens en crudo; al ponerlos aparece el porcent
 ### Cuotas de NaN, en vivo
 
 NaN publica tu consumo real en `GET https://api.nan.builders/v1/usage`. Con `"uso_api": "nan"` en el
-proveedor NaN (ya viene así en `config.json`), el panel y el icono de la barra leen de ahí el consumo
+proveedor NaN (junto con `cuotas_mes`; cópialos de `config.example.json`, tu `config.json` no los trae por
+defecto), el panel y el icono de la barra leen de ahí el consumo
 **mensual por modelo** —incluido lo que corrió en la nube o en otra máquina, que no deja log local— y
 le aplican las cuotas publicadas (DeepSeek V4-Flash 3 B, GLM 5.3 Flash 2 B, MiMo V2.6 Flash 1 B, Qwen
 3.8 Flash 500 M; se resetean el día 1). La API key se coge de la variable de entorno `NAN_API_KEY` (lo
