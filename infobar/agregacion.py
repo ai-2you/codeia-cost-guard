@@ -137,7 +137,7 @@ def agregar(vistos, nuevos=0, periodo=None):
                 t = tarifa(m)
                 if t:
                     over = v[0] > CLIFF
-                    dias[d]["usd"] += (max(v[0] - v[2], 0) * t[0] * (2 if over else 1)
+                    dias[d]["usd"] += (v[0] * t[0] * (2 if over else 1)
                                        + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
                                        + v[1] * t[1] * (1.5 if over else 1)) / 1e6
                 if d >= hace30:
@@ -147,7 +147,7 @@ def agregar(vistos, nuevos=0, periodo=None):
                     suma(modelos_hoy[m], v)
                     if t:
                         over = v[0] > CLIFF
-                        modelos_hoy[m]["usd"] += (max(v[0] - v[2], 0) * t[0] * (2 if over else 1)
+                        modelos_hoy[m]["usd"] += (v[0] * t[0] * (2 if over else 1)
                                                   + v[2] * t[2] * (2 if over else 1) + v[3] * t[3] * (2 if over else 1)
                                                   + v[1] * t[1] * (1.5 if over else 1)) / 1e6
                 if not proy_oculto:
