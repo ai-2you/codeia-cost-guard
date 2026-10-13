@@ -13,7 +13,6 @@ cosas a localhost. Por eso:
     cambia por una cookie HttpOnly SameSite=Strict; sin la cookie, nada responde. El ticket no toca el disco.
 """
 import hmac, json, os, secrets, subprocess, sys, threading, time
-from http.cookies import SimpleCookie
 
 from . import ajustes, claves, rutas
 from . import cuota_nan
@@ -28,7 +27,7 @@ PUERTO = 47391              # panel/configurador local: un puerto alto que casi 
 SECRETOS = {"api_key", "apikey", "token", "password", "secret", "clave", "authorization", "private_key"}
 SUFIJOS_SECRETOS = ("_key", "_token", "_secret", "_password")
 MAX_CUERPO = 1_000_000      # bytes: la config cabe de sobra
-COOKIE = "cg_sesion"
+COOKIE = "cg_sesion"          # el nombre real lleva el puerto: dos instancias en 127.0.0.1 no se pisan
 TICKET_VIDA_S = 60
 SESION_VIDA_S = 12 * 3600
 MAX_SESIONES = 20
@@ -62,17 +61,28 @@ def _canjea(srv, ticket):
         return sid
 
 
+def nombre_cookie(srv):
+    return f"{COOKIE}_{srv.server_address[1]}"
+
+
+def _valor_cookie(cabecera, nombre):
+    """El valor de la cookie `nombre` en la cabecera Cookie, leida a mano: el parser estandar se rinde en la
+    primera cookie ajena mal formada (otra app en 127.0.0.1 puede dejarlas) y bloquearia al usuario."""
+    for trozo in (cabecera or "").split(";"):
+        k, _, v = trozo.strip().partition("=")
+        if k == nombre:
+            return v.strip()
+    return ""
+
+
 def _sesion_valida(srv, cabecera_cookie):
-    try:
-        c = SimpleCookie(cabecera_cookie or "")
-    except Exception:
+    valor = _valor_cookie(cabecera_cookie, nombre_cookie(srv)).encode("utf-8", "replace")
+    if not valor:
         return False
-    if COOKIE not in c:
-        return False
-    ahora, valor, ok = time.time(), c[COOKIE].value, False
+    ahora, ok = time.time(), False
     with srv.cerrojo:
         for sid, exp in srv.sesiones.items():          # sin cortocircuito: tiempo constante frente al numero de sesiones
-            ok |= hmac.compare_digest(sid, valor) and exp >= ahora
+            ok |= hmac.compare_digest(sid.encode(), valor) and exp >= ahora
     return ok
 
 
@@ -188,7 +198,7 @@ def crear_servidor(puerto=PUERTO):
             if not sid:
                 return self._manda(401, "Ticket no válido o caducado: abre el panel desde la barra de menús.".encode(),
                                    "text/plain; charset=utf-8")
-            self._extra = [("Set-Cookie", f"{COOKIE}={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESION_VIDA_S}"),
+            self._extra = [("Set-Cookie", f"{nombre_cookie(self.server)}={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESION_VIDA_S}"),
                            ("Location", "/")]
             self._manda(302, b"", "text/plain")
 

@@ -164,7 +164,9 @@ guardan en el Keychain de macOS, nunca en `config.json` ni en git; de momento so
 consumo por API, para el resto la clave se guarda pero el consumo sigue saliendo de los logs. Solo
 funciona abriendo el panel desde la barra, no como fichero suelto ni con la URL escrita a mano: el panel
 pide una **sesión** (la barra abre un enlace de un solo uso que el servidor local cambia por una cookie), así
-que ningún otro proceso del Mac puede leer tus proyectos ni tus servidores por `http://127.0.0.1`. Todo lo que
+que otro proceso o usuario del Mac no puede leer tus proyectos ni tus servidores por `http://127.0.0.1` sin esa
+sesión. Límite conocido: un programa que ya corra con **tu mismo usuario** y vea el navegador, o el servidor local
+de otra app en `127.0.0.1` (las cookies no se separan por puerto), queda fuera de esta defensa. Todo lo que
 guarda la app queda legible solo para tu usuario (`~/.cost-guard` en 0700, ficheros en 0600).
 
 ### Cuotas de NaN, en vivo

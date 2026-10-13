@@ -9,7 +9,7 @@ medio escribir; las tandas viejas se borran despues.
 """
 import glob, os, shutil, signal, subprocess, tempfile, time
 
-from . import desplegable_agentes, desplegable_servidores, rutas
+from . import desplegable_agentes, desplegable_servidores, permisos, rutas
 from . import geometria_desplegable as G
 from .config_y_estado import log
 
@@ -102,6 +102,7 @@ def renderizar(r, cache, servidores_cfg, solo_servidor=None, previo=None):
                 nuevas += 1
     out["servidores"] = {n: v for n, v in out["servidores"].items()
                          if n in {s["nombre"] for s in servidores_cfg} or (not servidores_cfg and n == "")}
+    permisos.purgar_render()
     return out if nuevas else previo        # si Chrome no pinto nada, el trabajador lo reintentara
 
 

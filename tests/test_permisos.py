@@ -70,6 +70,11 @@ class EndurecerTest(unittest.TestCase):
         self.assertEqual(modo(self.raiz), 0o755)          # no es ~/.cost-guard
         self.assertEqual(modo(f"{self.raiz}/config.json"), 0o600)
 
+    def test_costguard_home_de_otra_ruta_no_cuenta_como_instalacion(self):
+        with mock.patch.dict(os.environ, {"COSTGUARD_HOME": tempfile.mkdtemp(prefix="cg-otra-")}):
+            permisos.endurecer()
+        self.assertEqual(modo(self.raiz), 0o755)
+
     def test_idempotente(self):
         permisos.endurecer()
         permisos.endurecer()

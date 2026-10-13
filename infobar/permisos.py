@@ -17,7 +17,9 @@ FICHEROS = ("config.json", "servidores.json", "state.json", "panel.html", "popov
 
 def _es_instalacion():
     """Solo se cambia el modo del directorio si es la instalacion (~/.cost-guard), nunca un checkout de desarrollo."""
-    return os.path.basename(rutas.RAIZ.rstrip("/")) == ".cost-guard" or bool(os.environ.get("COSTGUARD_HOME"))
+    destino = os.environ.get("COSTGUARD_HOME")
+    return (os.path.basename(rutas.RAIZ.rstrip("/")) == ".cost-guard"
+            or bool(destino and os.path.realpath(destino) == os.path.realpath(rutas.RAIZ)))
 
 
 def _modo(ruta, modo):
@@ -45,15 +47,23 @@ def endurecer():
             _modo(f, 0o600)
     for f in glob.glob(os.path.join(rutas.RAIZ, "config.json.bak.*")) + glob.glob(os.path.join(rutas.RAIZ, "*.lock")):
         _modo(f, 0o600)
-    render = os.path.join(base, "render")
-    if os.path.isdir(render):
-        _modo(render, 0o700)
-        ahora = time.time()
-        for f in glob.glob(os.path.join(render, "*")):
-            try:
-                if ahora - os.stat(f).st_mtime > RENDER_CADUCA_S:
-                    os.remove(f)
-                else:
-                    _modo(f, 0o600)
-            except OSError:
-                pass
+    purgar_render()
+
+
+def purgar_render():
+    """Las imagenes del desplegable llevan host e IPs: privadas y fuera pasada una hora."""
+    if os.name == "nt":
+        return
+    render = os.path.join(os.path.dirname(rutas.LOG), "render")
+    if not os.path.isdir(render):
+        return
+    _modo(render, 0o700)
+    ahora = time.time()
+    for f in glob.glob(os.path.join(render, "*")):
+        try:
+            if ahora - os.stat(f).st_mtime > RENDER_CADUCA_S:
+                os.remove(f)
+            else:
+                _modo(f, 0o600)
+        except OSError:
+            pass

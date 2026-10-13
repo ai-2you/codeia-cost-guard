@@ -52,6 +52,13 @@ Claude Code bajan en torno a un 40 %**; se explica en la interfaz (nota de versi
 **Criterio de salida:** nuevo test de abuso pasa (otro proceso sin cookie recibe 401/403 en todo), permisos
 verificados por test, y el conteo corregido coincide con una cuenta independiente sobre un corpus sintético.
 
+**Resultado de la fase 0 (revisión `../reports/revision-fase0-261014.md`):** corregidos el ticket visible en `ps`
+(la URL se abre con `NSWorkspace`), el parseo de cookies, la cookie por puerto, el recargo `CLIFF` sobre sumas diarias,
+la ruta en logs de Hermes y la purga de renders tras cada pintado. **Aplazado a la fase 1 (consciente):** deduplicar
+mensajes entre ficheros (6 de 60.636 ids en la muestra) y verificar con la documentación de Hermes que su entrada
+excluye siempre la caché. **Límite aceptado:** las cookies no se separan por puerto; un servidor ajeno en `127.0.0.1`
+podría leerla (documentado en el README); la solución real es un socket Unix o la aplicación final.
+
 ## Fase 1 — almacén de turnos (solo añadir)
 Esquema (SQLite ≥ 3.37, `STRICT`, WAL, `secure_delete=ON`, `foreign_keys=ON`), fichero
 `consumo.sqlite` aparte del futuro `servidores.sqlite`:

@@ -27,7 +27,7 @@
 
   function cargar(){
     const dest = $("vista-ajustes");
-    fetch("/ajustes").then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(d => {
+    fetch("/ajustes").then(r => { if (r.status === 401) throw new Error("la sesión ha caducado o no existe (se reinició la barra o pasaron 12 h)"); if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(d => {
       A = d; A.config.proveedores = A.config.proveedores || []; A.config.aliases = A.config.aliases || {}; A.config.proyectos = A.config.proyectos || {};
       dest.replaceChildren(...pinta());
     }).catch(e => dest.replaceChildren(h("section", {}, h("p", {}, "No pude leer los ajustes: " + e.message + ". Ábrelo desde el icono de la barra de menús (hace falta su sesión), no como fichero ni con una URL escrita a mano."))));

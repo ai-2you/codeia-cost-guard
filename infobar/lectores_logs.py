@@ -397,7 +397,7 @@ def leer_bases():
                 mete(f"Hermes/{perfil}" + (f" · {ultimos(cwd, 1)}" if cwd else ""), burl or bprov or "", hora(ini), m, i or 0, o or 0, cr or 0, cw or 0)
             nombres.append(f"Hermes/{perfil} ({len(filas)})")
         except Exception as e:
-            log(f"hermes {db}: {type(e).__name__}: {e}")
+            log(f"hermes: {type(e).__name__}")
     return proyectos, nombres
 
 

@@ -25,9 +25,9 @@ from AppKit import (
     NSEvent, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSImage, NSImageLeft,
     NSImageView, NSMakePoint, NSMakeRect, NSMakeSize, NSMenu, NSMenuItem, NSPopover, NSScreen,
     NSPasteboard, NSPasteboardTypeString, NSProgressIndicator, NSStatusBar, NSVariableStatusItemLength,
-    NSViewController, NSVisualEffectView,
+    NSViewController, NSVisualEffectView, NSWorkspace,
 )
-from Foundation import NSData, NSObject, NSTimer
+from Foundation import NSData, NSObject, NSTimer, NSURL
 from PIL import Image, ImageDraw, ImageFont
 
 import costbar
@@ -330,7 +330,11 @@ class Barra(NSObject):
         if publica and url_valida(url):
             log(f"url rechazada: {url[:80]!r}")
             return
-        subprocess.Popen(["open", url])          # sin esperar: el hilo principal no se bloquea
+        # NSWorkspace y no `open <url>`: los argumentos de un proceso los ve cualquier usuario con `ps`, y la URL del
+        # panel lleva un ticket de entrada de un solo uso
+        nsurl = NSURL.URLWithString_(url)
+        if nsurl is None or not NSWorkspace.sharedWorkspace().openURL_(nsurl):
+            log(f"no se pudo abrir la URL ({url.split('?')[0][:60]})")
 
     @objc.python_method
     def terminal(self, s):

@@ -44,7 +44,7 @@ class SesionTest(unittest.TestCase):
             self.assertNotIn(b"proveedores", cuerpo)
 
     def test_cookie_inventada_o_vacia_rechazada(self):
-        for ck in ("cg_sesion=inventada", "cg_sesion=", "otra=1", "basura"):
+        for ck in (f"cg_sesion_{self.puerto}=inventada", f"cg_sesion_{self.puerto}=", "otra=1", "basura"):
             self.assertEqual(self._pide("GET", "/ajustes", cookie=ck)[0], 401, ck)
 
     def test_ticket_de_un_solo_uso(self):
@@ -86,6 +86,22 @@ class SesionTest(unittest.TestCase):
         for sid in list(self.srv.sesiones):
             self.srv.sesiones[sid] = time.time() - 1
         self.assertEqual(self._pide("GET", "/origenes", cookie=ck)[0], 401)
+
+    def test_cookie_ajena_mal_formada_no_bloquea_la_sesion(self):
+        ck = aislamiento.cookie_de(self.srv)
+        for ajena in ('otra={"a": 1, "b": [2', "x=; y", "z=\"sin cerrar", ""):
+            cabecera = (ajena + "; " if ajena else "") + ck
+            self.assertEqual(self._pide("GET", "/origenes", cookie=cabecera)[0], 200, ajena)
+
+    def test_cookie_no_ascii_o_de_otro_puerto_se_rechaza_sin_error(self):
+        nombre, _, valor = aislamiento.cookie_de(self.srv).partition("=")
+        self.assertEqual(self._pide("GET", "/origenes", cookie=f"{nombre}=ñandú")[0], 401)
+        self.assertEqual(self._pide("GET", "/origenes", cookie=f"cg_sesion_1={valor}")[0], 401)   # otro puerto
+        self.assertEqual(self._pide("GET", "/origenes", cookie=f"cg_sesion={valor}")[0], 401)     # sin puerto
+
+    def test_el_nombre_de_la_cookie_lleva_el_puerto(self):
+        nombre = aislamiento.cookie_de(self.srv).partition("=")[0]
+        self.assertEqual(nombre, f"cg_sesion_{self.puerto}")
 
     def test_url_panel_lleva_un_ticket_valido(self):
         servidor_local._SERVIDOR[:] = [self.srv]
