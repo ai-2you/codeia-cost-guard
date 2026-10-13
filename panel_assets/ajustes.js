@@ -14,7 +14,8 @@
   }
   const entero = v => Math.max(0, parseInt(String(v).replace(/[\s._]/g, ""), 10) || 0);
   const lista = t => t.split(",").map(x => x.trim()).filter(Boolean);
-  const post = (ruta, cuerpo) => fetch(ruta, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cuerpo)}).then(r => r.json());
+  const post = (ruta, cuerpo) => fetch(ruta, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cuerpo)})
+    .then(r => r.ok || r.status === 400 ? r.json() : r.text().then(t => ({ok: false, error: t || ("HTTP " + r.status)})));
 
   window.vista = function(v){
     enAjustes = v === "ajustes";
@@ -29,7 +30,7 @@
     fetch("/ajustes").then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(d => {
       A = d; A.config.proveedores = A.config.proveedores || []; A.config.aliases = A.config.aliases || {}; A.config.proyectos = A.config.proyectos || {};
       dest.replaceChildren(...pinta());
-    }).catch(e => dest.replaceChildren(h("section", {}, h("p", {}, "No pude leer los ajustes: " + e.message + ". Ábrelo desde el icono de la barra de menús (http://127.0.0.1), no como fichero."))));
+    }).catch(e => dest.replaceChildren(h("section", {}, h("p", {}, "No pude leer los ajustes: " + e.message + ". Ábrelo desde el icono de la barra de menús (hace falta su sesión), no como fichero ni con una URL escrita a mano."))));
   }
 
   /* fila de clave en el Llavero: `cuerpo` identifica la cuenta ({proveedor} o {cuenta}); `info` lleva clave_guardada */

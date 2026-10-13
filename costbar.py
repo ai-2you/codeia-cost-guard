@@ -28,12 +28,14 @@ from infobar.formato_e_icono import barra, color_magnitud, fila, fmt_tok, icono_
 from infobar.lectores_logs import a_local, leer_bases, parsear, parsear_pi  # noqa: F401
 from infobar.planes_y_tarifas import (CLIFF, TARIFAS, corto, familia_de, proveedor_de,  # noqa: F401
                                       proveedores_de, tarifa)
-from infobar.servidor_local import PUERTO, servir  # noqa: F401
+from infobar.permisos import endurecer  # noqa: F401
+from infobar.servidor_local import PUERTO, servir, url_panel  # noqa: F401
 
 AQUI = rutas.RAIZ
 
 
 def main():
+    endurecer()
     if "--clave" in sys.argv:
         # python3 costbar.py --clave nan | dokploy:<host> | easypanel:<host>  -> la guarda en el Llavero
         i = sys.argv.index("--clave")

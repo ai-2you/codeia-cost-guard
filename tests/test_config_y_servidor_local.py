@@ -146,6 +146,7 @@ class ServidorLocalTest(LimpiaConfig):
         cls.srv = servidor_local.crear_servidor(0)
         cls.puerto = cls.srv.server_address[1]
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+        cls.cookie = aislamiento.cookie_de(cls.srv)
 
     @classmethod
     def tearDownClass(cls):
@@ -154,7 +155,7 @@ class ServidorLocalTest(LimpiaConfig):
 
     def _pide(self, metodo, ruta, cuerpo=None, cabeceras=None):
         c = http.client.HTTPConnection("127.0.0.1", self.puerto, timeout=30)
-        h = {"Host": f"127.0.0.1:{self.puerto}"}
+        h = {"Host": f"127.0.0.1:{self.puerto}", "Cookie": self.cookie}
         h.update(cabeceras or {})
         datos = json.dumps(cuerpo).encode() if cuerpo is not None else None
         c.request(metodo, ruta, body=datos, headers=h)

@@ -162,7 +162,10 @@ proyectos (renombrar, ocultar de las listas, presupuesto mensual), los servidore
 (`docs/guia-servidores.md`) y la alerta de ritmo. Las **claves de API** se
 guardan en el Keychain de macOS, nunca en `config.json` ni en git; de momento solo NaN tiene lector de
 consumo por API, para el resto la clave se guarda pero el consumo sigue saliendo de los logs. Solo
-funciona abriendo el panel desde la barra (por `http://127.0.0.1`), no como fichero suelto.
+funciona abriendo el panel desde la barra, no como fichero suelto ni con la URL escrita a mano: el panel
+pide una **sesión** (la barra abre un enlace de un solo uso que el servidor local cambia por una cookie), así
+que ningún otro proceso del Mac puede leer tus proyectos ni tus servidores por `http://127.0.0.1`. Todo lo que
+guarda la app queda legible solo para tu usuario (`~/.cost-guard` en 0700, ficheros en 0600).
 
 ### Cuotas de NaN, en vivo
 
@@ -183,8 +186,11 @@ export NAN_API_KEY=sk-tu-clave    # en tu shell (o ~/.zshrc); config.example.jso
 
 Dos formatos distintos, y confundirlos infla los totales (lo aprendimos midiendo):
 
-- **Claude Code**: una línea por respuesta, con `message.usage`. Ahí la entrada y la caché ya vienen
-  separadas.
+- **Claude Code**: Claude Code escribe **varias líneas por mensaje** (una por bloque: pensamiento, texto,
+  herramienta) con la misma entrada y caché y la salida creciendo; el mensaje real es la última línea
+  (`message.id`). Se cuenta **una vez por mensaje**. Hasta la versión de 2026-10-14 se contaban todas las líneas
+  y el consumo de Claude Code salía inflado en torno a un 40 %; si ves que las cifras bajan al actualizar,
+  es esa corrección. La entrada y la caché ya vienen separadas.
 - **Codex** (rollouts): cada turno se escribe **dos veces** (`token_usage_record` y
   `event_msg/token_count`, en el mismo segundo) y el fichero lleva además `total_token_usage`, que es
   **acumulado**. Hay que usar el uso del turno ignorando el acumulado, y tener en cuenta que

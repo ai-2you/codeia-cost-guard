@@ -315,7 +315,7 @@ class Barra(NSObject):
     def boton(self, texto):
         s = next((x for x in self.servidores() if x["nombre"] == self.servidor_activo()), None)
         if texto == "Abrir panel":
-            self.abre(f"http://127.0.0.1:{costbar.PUERTO}/")
+            self.abre(costbar.url_panel())
         elif texto == "Guía":
             subprocess.Popen(["open", os.path.join(AQUI, "GUIA.md")])
         elif s and texto == "Panel" and s.get("panel_url"):
@@ -430,13 +430,14 @@ class Barra(NSObject):
         pb.setString_forType_(f"# {self.servidor_activo()}: que falta para protegerlo\n" + texto, NSPasteboardTypeString)
 
     def panelWeb_(self, _):
-        self.abre(f"http://127.0.0.1:{costbar.PUERTO}/")
+        self.abre(costbar.url_panel())
 
     def salir_(self, _):
         NSApplication.sharedApplication().terminate_(None)
 
 
 def main():
+    costbar.endurecer()       # umask 0077 y permisos de lo que ya habia: todo esto es sensible
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
     barra = Barra.alloc().init()

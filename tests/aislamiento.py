@@ -24,3 +24,16 @@ os.environ.pop("NAN_API_KEY", None)
 from infobar import claves  # noqa: E402
 
 claves.leer_clave = lambda cuenta: ""
+
+
+def cookie_de(srv):
+    """Cookie de sesion valida para un servidor de pruebas (canjea un ticket como haria la barra)."""
+    import http.client
+    from infobar import servidor_local
+    puerto = srv.server_address[1]
+    t = servidor_local.nuevo_ticket(srv)
+    c = http.client.HTTPConnection("127.0.0.1", puerto, timeout=30)
+    c.request("GET", f"/entrar?t={t}", headers={"Host": f"127.0.0.1:{puerto}"})
+    r = c.getresponse()
+    r.read()
+    return r.getheader("Set-Cookie").split(";")[0]

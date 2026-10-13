@@ -385,7 +385,7 @@ def leer_bases():
             nombres.append(f"OpenCode ({len(filas)})")
             break
         except Exception as e:
-            log(f"opencode {ruta}: {type(e).__name__}: {e}")
+            log(f"opencode: {type(e).__name__}")
     # Hermes: su cwd es el proyecto (Hermes no es un plan, es la app)
     for db in sorted(glob.glob(f"{rutas.HOME}/.hermes/profiles/*/state.db")):
         try:

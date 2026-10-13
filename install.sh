@@ -9,6 +9,8 @@ REGLAS=0; [ "${1:-}" = "--reglas" ] && REGLAS=1
 
 echo "-> Copiando a $DESTINO"
 mkdir -p "$DESTINO/logs"
+# todo lo que guarda la app es sensible (proyectos, hosts, IPs): solo tu usuario lo lee
+chmod 700 "$DESTINO" "$DESTINO/logs"
 for f in costbar.py barra.py popover.py panel.py analizar_gasto.py \
          precio_astra.py instalar_reglas_globales.py GUIA.md AGENTS-snippet.md; do
   [ -f "$AQUI/$f" ] && cp "$AQUI/$f" "$DESTINO/$f"
@@ -57,6 +59,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
     <string>$DESTINO/venv/bin/python</string><string>$DESTINO/barra.py</string>
   </array>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>Umask</key><integer>63</integer>
   <key>StandardOutPath</key><string>$DESTINO/logs/barra.log</string>
   <key>StandardErrorPath</key><string>$DESTINO/logs/barra.err</string>
 </dict></plist>
