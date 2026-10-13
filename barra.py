@@ -1,90 +1,67 @@
 #!/usr/bin/env python3
-"""CostBar: icono en la barra de menus con el desplegable en HTML (estilo propio).
+"""infobar: icono en la barra de menus y desplegable "glass" con dos pestanas (Agentes y Servidores).
 
-Por que no usa rumps: rumps esta atado al menu nativo de macOS, y el menu nativo no se puede
-pintar (ni colores, ni tipografia, ni columnas alineadas). Aqui se construye el icono a mano
-con NSStatusItem y el desplegable es un NSPopover con un WKWebView: dentro manda el HTML, asi
-que el estilo es libre. Es el mismo enfoque que usan Stats, Raycast o Bartender.
+El desplegable es un PNG (HTML pintado por Chrome, con tarjetas translucidas) sobre el material
+nativo de macOS (NSVisualEffectView): el escritorio se ve desenfocado detras, como en los
+desplegables del sistema. WKWebView no se usa: dentro del bucle de la app petaba.
+
+Todo lo lento (escanear logs, SSH, Chrome) va en un hilo trabajador (infobar/trabajador_barra.py);
+el hilo principal solo cambia imagenes, asi que el icono y los clics nunca se congelan. Los clics
+se reparten por zonas fijas (infobar/geometria_desplegable.py); el selector de servidor y el menu
+"···" son menus nativos.
 
 Uso:
     ./venv/bin/python barra.py            # icono vivo, clic = desplegable
     ./venv/bin/python barra.py --abre     # ademas abre el desplegable al arrancar (pruebas)
 """
 import os
-import sys
-import re
+import shlex
 import subprocess
 import sys
 
 import objc
 from AppKit import (
-    NSAppearance,
-    NSApplication,
-    NSApplicationActivationPolicyAccessory,
-    NSColor,
-    NSEvent,
-    NSImage,
-    NSMakeRect,
-    NSMakeSize,
-    NSPopover,
-    NSStatusBar,
-    NSVariableStatusItemLength,
-    NSImageView,
-    NSViewController,
+    NSAppearance, NSApplication, NSApplicationActivationPolicyAccessory, NSAttributedString, NSColor,
+    NSEvent, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSImage, NSImageLeft,
+    NSImageView, NSMakePoint, NSMakeRect, NSMakeSize, NSMenu, NSMenuItem, NSPopover, NSScreen,
+    NSPasteboard, NSPasteboardTypeString, NSProgressIndicator, NSStatusBar, NSVariableStatusItemLength,
+    NSViewController, NSVisualEffectView,
 )
-from Foundation import NSData, NSObject, NSTimer, NSURL
+from Foundation import NSData, NSObject, NSTimer
 from PIL import Image, ImageDraw, ImageFont
 
-import costbar   # el motor: aqui solo por el servidor del panel (servir) y su puerto
-
+import costbar
+from infobar import desplegable_png, servidores_ciclo
+from infobar import geometria_desplegable as G
+from infobar.desplegable_agentes import BOTONES as BOTONES_AGENTES
+from infobar.desplegable_servidores import BOTONES as BOTONES_SERVIDORES
+from infobar.servidores import url_valida, errores_servidores
+from infobar.trabajador_barra import Trabajador
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
-PY = sys.executable   # el mismo intérprete que corre esto
-LOG = f"{AQUI}/logs/barra.log"
-CONFIG = f"{AQUI}/config.json"
-
-VIOLETA = (174, 0, 255)
-ROSA = (255, 0, 140)
-SUAVE = (154, 120, 214)
-GRIS = (0, 0, 0, 40)
 ANCHO_ICONO = 74
-
-NAVEGADORES = (
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-)
+MATERIAL_POPOVER = 6        # NSVisualEffectMaterialPopover
+COLOR_PUNTO = {"ambar": (1.0, 0.62, 0.04), "rojo": (1.0, 0.27, 0.23), "gris": (0.56, 0.56, 0.58)}
 
 
 def log(txt):
-    with open(LOG, "a", encoding="utf-8") as f:
-        f.write(f"{subprocess.run(['date', '+%Y-%m-%d %H:%M:%S'], capture_output=True, text=True).stdout.strip()} {txt}\n")
-
-
-def navegador():
-    """El primero que haya instalado: Chrome, Chromium, Brave o Edge."""
-    for ruta in NAVEGADORES:
-        if os.path.exists(ruta):
-            return ruta
-    return None
+    costbar.log(f"barra: {txt}")
 
 
 def tema_preferido():
-    """Lo que diga config.json ('claro' / 'oscuro' / 'sistema'); por defecto 'sistema'."""
+    """'claro' / 'oscuro' / 'sistema' de logs/ui_estado.json (migrado de config.json)."""
     try:
-        import json
-        return (json.load(open(CONFIG)).get("tema") or "sistema").strip().lower()
+        return (costbar.leer_ui().get("tema") or "sistema").strip().lower()
     except Exception:
         return "sistema"
 
 
 def tema_del_sistema():
-    """Apariencia actual de macOS. Sin la clave (modo claro) 'defaults read' falla: es normal."""
+    """Apariencia actual de macOS, sin lanzar procesos (se llama desde el hilo principal)."""
     try:
-        r = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"],
-                           capture_output=True, text=True, timeout=5)
-        return "oscuro" if r.stdout.strip().lower() == "dark" else "claro"
+        from Foundation import NSUserDefaults
+        estilo = NSUserDefaults.standardUserDefaults().stringForKey_("AppleInterfaceStyle")
+        return "oscuro" if str(estilo or "").lower() == "dark" else "claro"
     except Exception:
         return "claro"
 
@@ -94,37 +71,8 @@ def tema_activo():
     return tema_del_sistema() if pref == "sistema" else pref
 
 
-def trocea(txt):
-    """'210,4 M' -> (210.4, 'M')."""
-    m = re.match(r"\s*([\d.,]+)\s*([KMB]?)", str(txt))
-    if not m:
-        return (0.0, "")
-    n = float(m.group(1).replace(".", "").replace(",", "."))
-    return (n, m.group(2) or "")
-
-
-def color_magnitud(u):
-    return {"K": SUAVE, "M": VIOLETA, "B": ROSA}.get(u, VIOLETA)
-
-
-def datos():
-    """Lee el informe del motor y saca lo que necesita el icono."""
-    try:
-        t = subprocess.run([PY, f"{AQUI}/costbar.py", "--print"], capture_output=True, text=True, timeout=300).stdout
-    except Exception as e:
-        log(f"ERROR motor {type(e).__name__}")
-        return None
-    d = {}
-    for clave, pat in (("c5", r"VENTANA 5 H\s+([\d.,]+\s*[KMB]?)"),
-                       ("hoy", r"HOY\s+([\d.,]+\s*[KMB]?)"),
-                       ("turnos", r"HOY\s+[\d.,]+\s*[KMB]? tokens \((\d+)")):
-        m = re.search(pat, t)
-        d[clave] = m.group(1) if m else ""
-    return d
-
-
-def imagen_icono(texto, color, pct):
-    """El icono: barrita de progreso + cifra en el color de su magnitud."""
+def imagen_icono(texto, pct):
+    """El icono: barrita de progreso + cifra. Plantilla: macOS lo pinta blanco o negro segun la barra."""
     escala = 2
     ancho, alto = ANCHO_ICONO * escala, 18 * escala
     im = Image.new("RGBA", (ancho, alto), (0, 0, 0, 0))
@@ -134,7 +82,7 @@ def imagen_icono(texto, color, pct):
     relleno = max(0, min(ancho - 2 * escala, int((ancho - 2 * escala) * pct / 100.0)))
     if relleno > 0:
         d.rounded_rectangle([escala, 4 * escala, escala + relleno, alto - 5 * escala],
-                            radius=3 * escala, fill=(0, 0, 0, 90))      # plantilla: solo cuenta el alfa
+                            radius=3 * escala, fill=(0, 0, 0, 90))
     fuente = None
     for ruta in ("/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc",
                  "/System/Library/Fonts/Helvetica.ttc"):
@@ -144,62 +92,46 @@ def imagen_icono(texto, color, pct):
                 break
             except Exception:
                 continue
-    if fuente is None:
-        fuente = ImageFont.load_default()
+    fuente = fuente or ImageFont.load_default()
     caja = d.textbbox((0, 0), texto, font=fuente)
     d.text(((ancho - (caja[2] - caja[0])) / 2, (alto - (caja[3] - caja[1])) / 2 - caja[1]), texto,
            font=fuente, fill=(0, 0, 0, 255))
-    return im          # RGBA: si se pasa a RGB, lo transparente se vuelve NEGRO
-
-
-def imagen_ns(texto, color, pct):
-    im = imagen_icono(texto, color, pct)
-    ruta = f"{AQUI}/logs/icono.png"
+    ruta = os.path.join(os.path.dirname(costbar.rutas.LOG), "icono.png")
     im.save(ruta)
-    datos_png = open(ruta, "rb").read()
-    img = NSImage.alloc().initWithData_(NSData.dataWithBytes_length_(datos_png, len(datos_png)))
+    datos = open(ruta, "rb").read()
+    img = NSImage.alloc().initWithData_(NSData.dataWithBytes_length_(datos, len(datos)))
     img.setSize_((ANCHO_ICONO, 18))
-    img.setTemplate_(True)    # macOS lo pinta blanco o negro segun la barra, como sus propios iconos
+    img.setTemplate_(True)
+    return img
+
+
+def nsimagen(ruta, ancho, alto):
+    datos = open(ruta, "rb").read()
+    img = NSImage.alloc().initWithData_(NSData.dataWithBytes_length_(datos, len(datos)))
+    img.setSize_((ancho, alto))
     return img
 
 
 class VistaDesplegable(NSImageView):
-    """La imagen responde a los clics de la barra de acciones de abajo."""
+    """La imagen recibe los clics y los reparte por zonas (geometria_desplegable)."""
 
     def acceptsFirstMouse_(self, _e):
         return True
 
     def hitTest_(self, _punto):
-        # NSImageView no editable devuelve nil aqui y el clic se va al popover (que se cierra)
-        return self
+        return self             # si no, NSImageView no editable deja pasar el clic y el popover se cierra
 
     def mouseDown_(self, evento):
         try:
             p = self.convertPoint_fromView_(evento.locationInWindow(), None)
-            ancho = self.frame().size.width
-            # la vista no esta volteada: y=0 es el borde INFERIOR. El PNG va recortado a la
-            # tarjeta: abajo la fila de acciones (58 pt) y justo encima los chips de tema (36 pt).
-            x = p.x / max(1.0, ancho)
-            if p.y < 58:                   # cuatro columnas iguales dentro de la tarjeta
-                self.accion_("Abrir panel" if x < 0.28 else ("Guia" if x < 0.51 else ("Refrescar" if x < 0.74 else "Salir")))
-            elif p.y < 96:                 # tres chips: claro / oscuro / sistema
-                self.accion_("tema:" + ("claro" if x < 0.36 else ("oscuro" if x < 0.66 else "sistema")))
+            dueno = getattr(self, "dueno", None)
+            if dueno is not None:
+                dueno.clicEn_(p)
         except Exception as e:
             log(f"ERROR clic {type(e).__name__}: {e}")
 
-    def accion_(self, zona):
-        dueno = getattr(self, "dueno", None)
-        if dueno is not None:
-            dueno.accion_(zona)
-
 
 class Barra(NSObject):
-    """Icono + desplegable. Sin WKWebView: dentro del bucle de la app peta.
-
-    El desplegable es la vista del diseno renderizada a PNG (Chrome headless) y mostrada
-    en un NSImageView. Se regenera cada vez que se abre, asi que los datos van en vivo.
-    """
-
     def init(self):
         self = objc.super(Barra, self).init()
         if self is None:
@@ -208,172 +140,300 @@ class Barra(NSObject):
         boton = self.item.button()
         boton.setTarget_(self)
         boton.setAction_("pulsa:")
-        log("icono listo")
-        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(8.0, self, "preparaImagenes:", None, False)
-        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(300.0, self, "cadaCinco:", None, True)
-        self.refresca_(None)
-        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(60, self, "refresca:", None, True)
+        boton.setImagePosition_(NSImageLeft)
+        boton.setTitle_("…")
+        self.pop, self.conjunto, self.escala, self.alto_mostrado = None, None, 1.0, 0
+        self.punto = None
+        self.trabajador = Trabajador(self.entregar)
+        self.trabajador.start()
+        log("icono listo, trabajador en marcha")
         return self
 
+    # --- del trabajador al hilo principal ---
+    @objc.python_method
+    def entregar(self, tipo, dato):
+        """Lo llama el hilo trabajador: se reenvia al principal sin esperar."""
+        with objc.autorelease_pool():           # hilo sin bucle de Cocoa: su propio pool
+            self.performSelectorOnMainThread_withObject_waitUntilDone_("recibe:", {"tipo": tipo, "dato": dato}, False)
+
+    def recibe_(self, msg):
+        try:
+            tipo, dato = msg["tipo"], msg["dato"]
+            if tipo == "agentes":
+                self.agentes = dict(dato)
+                self.pinta_icono()
+            elif tipo == "refresco_hecho":
+                self.rueda_para()
+            elif tipo == "punto":
+                self.punto = dato
+                self.pinta_icono()
+            elif tipo == "conjunto":
+                self.conjunto = dato
+                log(f"imagenes nuevas: gen {dato.get('gen')}, {len(dato.get('servidores') or {})} servidores")
+                if self.pop is not None and self.pop.isShown():
+                    self.muestra()
+                desplegable_png.limpiar(dato)
+        except Exception as e:
+            log(f"ERROR recibe {type(e).__name__}: {e}")
+
+    @objc.python_method
+    def pinta_icono(self):
+        a = getattr(self, "agentes", None)
+        boton = self.item.button()
+        if a:
+            txt = costbar.fmt_tok(a["cinco_h"]).replace(" ", " ")
+            boton.setImage_(imagen_icono(txt, min(100, a.get("pct_5h") or 40)))
+            boton.setToolTip_(f"5 h: {costbar.fmt_tok(a['cinco_h'])} · hoy {costbar.fmt_tok(a['hoy'])} · {a['turnos']} turnos")
+        # punto de color tras el icono si algun servidor no esta en verde (el icono es plantilla)
+        if self.punto in COLOR_PUNTO:
+            r, g, b = COLOR_PUNTO[self.punto]
+            titulo = NSAttributedString.alloc().initWithString_attributes_(" ●", {
+                NSForegroundColorAttributeName: NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0),
+                NSFontAttributeName: NSFont.systemFontOfSize_(10)})
+            boton.setAttributedTitle_(titulo)
+        else:
+            boton.setTitle_("" if a else "…")
+
+    # --- desplegable ---
+    @objc.python_method
     def monta_popover(self):
-        if getattr(self, "pop", None) is not None:
+        if self.pop is not None:
             return
-        ancho, alto = 404, 664
         self.pop = NSPopover.alloc().init()
-        self.pop.setContentSize_(NSMakeSize(ancho, alto))
-        # Comportamiento "definido por la app" (0), no "transitorio": el Chrome headless que
-        # renderiza los PNG roba el foco un instante y un popover transitorio se cerraria solo.
-        # El cierre por clic fuera lo hace este monitor (los clics dentro no pasan por el).
+        # comportamiento "definido por la app" (0): el cierre por clic fuera lo hace este monitor
         self.pop.setBehavior_(0)
         self.monitor = NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
             (1 << 1) | (1 << 3), lambda _e: self.pop.performClose_(None) if self.pop.isShown() else None)
         vc = NSViewController.alloc().init()
-        vista = VistaDesplegable.alloc().initWithFrame_(NSMakeRect(0, 0, ancho, alto))
-        vista.setImageScaling_(3)          # NSImageScaleAxesIndependently: el PNG llena la vista
-        vista.setImageAlignment_(0)
-        vista.setAutoresizingMask_(18)     # ancho y alto siguen al contenido del popover
+        fondo = NSVisualEffectView.alloc().initWithFrame_(NSMakeRect(0, 0, G.ANCHO, 600))
+        fondo.setMaterial_(MATERIAL_POPOVER)
+        fondo.setBlendingMode_(0)          # detras de la ventana: se ve el escritorio desenfocado
+        fondo.setState_(1)                 # siempre activo, aunque la app no tenga el foco
+        fondo.setAutoresizingMask_(18)
+        vista = VistaDesplegable.alloc().initWithFrame_(NSMakeRect(0, 0, G.ANCHO, 600))
+        vista.setImageScaling_(1)          # NSImageScaleAxesIndependently: el PNG llena la vista
+        vista.setAutoresizingMask_(18)
         vista.dueno = self
-        vc.setView_(vista)
+        fondo.addSubview_(vista)
+        # ruedita nativa encima del boton de refrescar mientras el trabajador recoge y repinta
+        self.rueda = NSProgressIndicator.alloc().initWithFrame_(NSMakeRect(0, 0, 18, 18))
+        self.rueda.setStyle_(1)                 # spinning
+        self.rueda.setControlSize_(1)           # small
+        self.rueda.setDisplayedWhenStopped_(False)
+        fondo.addSubview_(self.rueda)
+        vc.setView_(fondo)
         self.pop.setContentViewController_(vc)
         self.vista = vista
-        log("popover listo")
 
-    def render(self, tema=None):
-        """Regenera los DOS temas de una vez (un solo escaneo) y recorta cada PNG a la tarjeta.
+    @objc.python_method
+    def pestana(self):
+        return costbar.leer_ui().get("pestana") or "agentes"
 
-        Asi cambiar de tema es instantaneo: solo se cambia de imagen. El argumento se acepta
-        por compatibilidad; devuelve la ruta del tema pedido (o del activo).
-        """
-        chrome = navegador()
-        if chrome is None:
-            log("ERROR render: no hay Chrome, Chromium, Brave ni Edge instalado")
-            return f"{AQUI}/popover_{tema or tema_activo()}.png"
-        subprocess.run([PY, f"{AQUI}/popover.py"], capture_output=True, timeout=120)
-        for t in ("claro", "oscuro"):
-            html = f"{AQUI}/popover{'_oscuro' if t == 'oscuro' else ''}.html"
-            bruto = f"{AQUI}/logs/_bruto_{t}.png"
-            subprocess.run([chrome, "--headless=new", "--hide-scrollbars",
-                            "--default-background-color=00000000", "--force-device-scale-factor=2",
-                            f"--screenshot={bruto}", "--window-size=404,1400", f"file://{html}"],
-                           capture_output=True, timeout=180)
-            try:
-                from PIL import Image
-                im = Image.open(bruto).convert("RGBA")
-                caja = im.getchannel("A").getbbox()     # la tarjeta es lo unico opaco
-                if caja:
-                    im = im.crop(caja)
-                im.save(f"{AQUI}/popover_{t}.png")
-                log(f"render {t}: {im.size[0] // 2}x{im.size[1] // 2} pt")
-            except Exception as e:
-                log(f"ERROR recorte {t}: {type(e).__name__}: {e}")
-        return f"{AQUI}/popover_{tema or tema_activo()}.png"
+    @objc.python_method
+    def servidores(self):
+        return costbar.cfg().get("servidores") or []
 
-    def tamano_del_png(self, ruta):
-        """El PNG ya viene recortado a la tarjeta: su tamano (a 2x) es el del popover."""
-        try:
-            from PIL import Image
-            im = Image.open(ruta)
-            return (max(200, im.size[0] // 2), max(200, min(1400, im.size[1] // 2)))
-        except Exception:
-            return (384, 664)
+    @objc.python_method
+    def servidor_activo(self):
+        nombres = [s["nombre"] for s in self.servidores()]
+        activo = costbar.leer_ui().get("servidor_activo")
+        return activo if activo in nombres else (nombres[0] if nombres else "")
 
-    def ruta_del_tema(self):
-        """Claro, oscuro o el que tenga macOS ahora mismo, segun config.json ('tema')."""
+    @objc.python_method
+    def imagen_actual(self):
+        """(ruta, ancho, alto, n_botones, con_selector) de la pestana/servidor/tema activos, o None."""
+        if not self.conjunto:
+            return None
         tema = tema_activo()
-        ruta = f"{AQUI}/popover_{tema}.png"
-        if not os.path.exists(ruta):
-            self.render(tema)
-        return ruta
+        if self.pestana() == "servidores":
+            img = (self.conjunto.get("servidores", {}).get(self.servidor_activo()) or {}).get(tema)
+        else:
+            img = (self.conjunto.get("agentes") or {}).get(tema)
+        return img if img and os.path.exists(img[0]) else None
 
-    def accion_(self, zona):
-        """Lo que hacen los botones del desplegable."""
-        log(f"clic en: {zona}")   # las zonas se reparten en VistaDesplegable.mouseDown_
-        try:
-            if zona == "Abrir panel":
-                subprocess.run(["open", f"http://127.0.0.1:{costbar.PUERTO}/"], capture_output=True)
-            elif zona == "Guia":
-                subprocess.run(["open", f"{AQUI}/GUIA.md"], capture_output=True)
-            elif zona == "Refrescar":
-                self.repinta()
-            elif zona.startswith("tema:"):
-                costbar.guardar_config({"tema": zona[5:]})     # atomico y por fusion (infobar/config_y_estado)
-                self.muestra()          # instantaneo: los dos temas ya estan renderizados
-                NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(0.5, self, "preparaImagenes:", None, False)
-            elif zona == "Salir":
-                self.pop.performClose_(None)
-        except Exception as e:
-            log(f"ERROR accion {type(e).__name__}: {e}")
-
-    def viste_popover(self, tema):
-        """El marco nativo del popover va a juego con el PNG (si no, queda un borde blanco)."""
-        nombre = "NSAppearanceNameDarkAqua" if tema == "oscuro" else "NSAppearanceNameAqua"
-        self.pop.setAppearance_(NSAppearance.appearanceNamed_(nombre))
-
+    @objc.python_method
     def muestra(self):
-        """Pone en el desplegable el PNG del tema activo, al tamano exacto de la tarjeta."""
         tema = tema_activo()
-        self.viste_popover(tema)
-        ruta = self.ruta_del_tema()
-        ancho, alto = self.tamano_del_png(ruta)
-        self.pop.setContentSize_(NSMakeSize(ancho, alto))
-        self.vista.setFrameSize_(NSMakeSize(ancho, alto))   # solo el tamano: el popover la coloca (con su margen)
-        datos_png = open(ruta, "rb").read()
-        img = NSImage.alloc().initWithData_(NSData.dataWithBytes_length_(datos_png, len(datos_png)))
-        img.setSize_((ancho, alto))        # el PNG va a 2x: su tamano en puntos es la mitad
-        self.vista.setImage_(img)
-        return ancho, alto
-
-    def repinta(self):
-        """Refrescar: datos nuevos (escaneo + Chrome, tarda unos segundos) y a la vista."""
-        self.render()
-        self.muestra()
+        self.pop.setAppearance_(NSAppearance.appearanceNamed_(
+            "NSAppearanceNameDarkAqua" if tema == "oscuro" else "NSAppearanceNameAqua"))
+        img = self.imagen_actual()
+        self.forma = None                   # zonas de clic de la imagen que se ve (no de la config viva)
+        if not img:
+            self.pop.setContentSize_(NSMakeSize(G.ANCHO, 120))
+            self.vista.setImage_(None)
+            return
+        ruta, ancho, alto, n_botones, con_selector = img
+        self.forma = (n_botones, con_selector)
+        # si no cabe en la pantalla, se escala entero (las zonas de clic se escalan igual)
+        pantalla = NSScreen.mainScreen().visibleFrame().size.height - 40
+        self.escala = min(1.0, pantalla / float(alto))
+        w, h = ancho * self.escala, alto * self.escala
+        self.alto_mostrado = alto
+        self.pop.setContentSize_(NSMakeSize(w, h))
+        self.vista.setFrameSize_(NSMakeSize(w, h))
+        self.vista.setImage_(nsimagen(ruta, w, h))
+        log(f"desplegable {self.pestana()} {tema}: {w:.0f}x{h:.0f} pt (escala {self.escala:.2f})")
 
     def pulsa_(self, sender):
-        import time as _t
-        _t0 = _t.time()
         try:
             self.monta_popover()
             if self.pop.isShown():
                 self.pop.performClose_(sender)
                 return
-            ancho, alto = self.muestra()
-            log(f"imagen del tema puesta ({ancho}x{alto} pt)")
+            self.muestra()
             boton = self.item.button()
             self.pop.showRelativeToRect_ofView_preferredEdge_(boton.bounds(), boton, 1)
-            log(f"desplegable mostrado en {_t.time()-_t0:.2f} s")
+            visible = boton.window() is not None and boton.window().isVisible()
+            log(f"desplegable abierto (icono visible en la barra: {visible})")
         except Exception:
             import traceback
             log("FALLO clic: " + traceback.format_exc()[-700:])
 
-    def preparaImagenes_(self, _=None):
-        """Los PNG de los dos temas, en segundo plano (para que el clic sea instantaneo)."""
-        try:
-            self.render()
-            if getattr(self, "pop", None) is not None and self.pop.isShown():
-                self.muestra()          # si esta abierto, que luzca lo recien renderizado
-        except Exception as e:
-            log(f"ERROR render {type(e).__name__}: {e}")
-
-    def cadaCinco_(self, _=None):
-        """Los PNG en segundo plano, para que el clic no espere nunca."""
-        if getattr(self, "pop", None) is not None and self.pop.isShown():
+    # --- clics y acciones ---
+    def clicEn_(self, p):
+        if not getattr(self, "forma", None):
             return
-        self.preparaImagenes_()
+        n_botones, con_selector = self.forma
+        botones = (BOTONES_SERVIDORES if self.pestana() == "servidores" else BOTONES_AGENTES)[:n_botones]
+        zona = G.zona_en(p.x / self.escala, p.y / self.escala, self.alto_mostrado, n_botones, con_selector)
+        log(f"clic en: {zona}")
+        if zona is None:
+            return
+        if zona == "refrescar":
+            self.refresca_ya()
+        elif zona.startswith("pestana:"):
+            costbar.guardar_ui({"pestana": zona.split(":", 1)[1]})
+            self.muestra()
+        elif zona == "selector":
+            self.menu_servidores(p)
+        elif zona == "menu":
+            self.menu_general(p)
+        elif zona.startswith("boton:"):
+            self.boton(botones[int(zona.split(":")[1])][1])
 
-    def refresca_(self, _=None):
-        self.refresca()
+    @objc.python_method
+    def boton(self, texto):
+        s = next((x for x in self.servidores() if x["nombre"] == self.servidor_activo()), None)
+        if texto == "Abrir panel":
+            self.abre(f"http://127.0.0.1:{costbar.PUERTO}/")
+        elif texto == "Guía":
+            subprocess.Popen(["open", os.path.join(AQUI, "GUIA.md")])
+        elif s and texto == "Panel" and s.get("panel_url"):
+            self.abre(s["panel_url"], publica=True)
+        elif s and texto == "Abrir" and s.get("webs"):
+            self.abre(s["webs"][0], publica=True)
+        elif s and texto == "Terminal":
+            self.terminal(s)
 
-    def refresca(self):
-        try:
-            d = datos()
-            if not d.get("c5"):
-                return
-            n, u = trocea(d["c5"])
-            self.item.button().setImage_(imagen_ns(f"{n:.1f}".replace(".", ",") + " " + u, color_magnitud(u), 40))
-            self.item.button().setToolTip_(f"5 h: {d['c5']} - hoy {d.get('hoy','')} - {d.get('turnos','')} turnos")
-            log(f"refresco: 5h {d['c5']}")
-        except Exception as e:
-            log(f"ERROR refresco {type(e).__name__}: {e}")
+    @objc.python_method
+    def abre(self, url, publica=False):
+        if publica and url_valida(url):
+            log(f"url rechazada: {url[:80]!r}")
+            return
+        subprocess.Popen(["open", url])          # sin esperar: el hilo principal no se bloquea
+
+    @objc.python_method
+    def terminal(self, s):
+        """Terminal con tu sesion SSH normal (ssh_admin, p. ej. victor@...): la clave de infobar no da shell."""
+        if errores_servidores([s]):
+            return
+        destino = s.get("ssh_admin") or s["ssh"].split("@")[-1]
+        puerto = int(s.get("puerto") or 22)
+        orden = f"ssh {shlex.quote(destino)}" + (f" -p {puerto}" if puerto != 22 else "")
+        guion = f'tell application "Terminal" to do script "{orden}"\ntell application "Terminal" to activate'
+        subprocess.Popen(["osascript", "-e", guion])   # el permiso de Automatizacion no congela la barra
+
+    @objc.python_method
+    def menu_en(self, menu, p):
+        menu.popUpMenuPositioningItem_atLocation_inView_(None, NSMakePoint(p.x, p.y), self.vista)
+
+    @objc.python_method
+    def entrada_menu(self, titulo, accion, objeto=None, marcado=False):
+        it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(titulo, accion, "")
+        it.setTarget_(self)
+        if objeto is not None:
+            it.setRepresentedObject_(objeto)
+        it.setState_(1 if marcado else 0)
+        return it
+
+    @objc.python_method
+    def menu_servidores(self, p):
+        menu = NSMenu.alloc().init()
+        cache = servidores_ciclo.leer_cache().get("servidores") or {}
+        activo = self.servidor_activo()
+        normal, _ = servidores_ciclo.intervalos()
+        marca = {"verde": "🟢", "ambar": "🟠", "rojo": "🔴", "gris": "⚪️"}
+        for s in self.servidores():
+            est = servidores_ciclo.estado_visible(cache.get(s["nombre"]), None, normal)
+            menu.addItem_(self.entrada_menu(f"{marca[est]}  {s['nombre']}", "eligeServidor:", s["nombre"], s["nombre"] == activo))
+        menu.addItem_(NSMenuItem.separatorItem())
+        if activo:
+            menu.addItem_(self.entrada_menu(f"Modo incidencia en {activo} (30 min, cada minuto)", "incidencia:", activo))
+        self.menu_en(menu, p)
+
+    def eligeServidor_(self, it):
+        costbar.guardar_ui({"servidor_activo": str(it.representedObject()), "pestana": "servidores"})
+        self.muestra()
+
+    def incidencia_(self, it):
+        servidores_ciclo.activar_incidencia(str(it.representedObject()))
+        self.trabajador.pide("refrescar")
+
+    @objc.python_method
+    def menu_general(self, p):
+        menu = NSMenu.alloc().init()
+        pref = tema_preferido()
+        sub = NSMenu.alloc().init()
+        for clave, txt in (("claro", "Claro"), ("oscuro", "Oscuro"), ("sistema", "Como el sistema")):
+            sub.addItem_(self.entrada_menu(txt, "tema:", clave, pref == clave))
+        tema = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Tema", None, "")
+        tema.setSubmenu_(sub)
+        menu.addItem_(tema)
+        menu.addItem_(self.entrada_menu("Refrescar ahora", "refrescarAhora:"))
+        if self.pestana() == "servidores" and self.servidores():
+            menu.addItem_(self.entrada_menu(f"Copiar cómo protegerlo ({self.servidor_activo()})", "copiaArreglos:"))
+        menu.addItem_(self.entrada_menu("Abrir panel web", "panelWeb:"))
+        menu.addItem_(NSMenuItem.separatorItem())
+        menu.addItem_(self.entrada_menu("Salir de infobar", "salir:"))
+        self.menu_en(menu, p)
+
+    def tema_(self, it):
+        costbar.guardar_ui({"tema": str(it.representedObject())})
+        self.muestra()              # instantaneo: los dos temas ya estan pintados
+
+    def refrescarAhora_(self, _):
+        self.refresca_ya()
+
+    @objc.python_method
+    def refresca_ya(self):
+        """Pide al trabajador recoger todo ya (NaN incluido) y lo muestra con la ruedita."""
+        if getattr(self, "rueda", None) is not None and self.pop is not None:
+            alto = self.vista.frame().size.height
+            x = (G.REFRESCAR_X + G.REFRESCAR_ANCHO / 2) * self.escala - 9
+            y = alto - (G.CABECERA_ALTO / 2) * self.escala - 9
+            self.rueda.setFrameOrigin_(NSMakePoint(x, y))
+            self.rueda.startAnimation_(None)
+        self.trabajador.pide("refrescar")
+
+    @objc.python_method
+    def rueda_para(self):
+        if getattr(self, "rueda", None) is not None:
+            self.rueda.stopAnimation_(None)
+
+    def copiaArreglos_(self, _):
+        """Copia al portapapeles lo que falta en el servidor activo y como arreglarlo."""
+        e = (servidores_ciclo.leer_cache().get("servidores") or {}).get(self.servidor_activo()) or {}
+        falta = [c for c in (e.get("bastionado") or []) if c["ok"] is False]
+        texto = "\n".join(f"# {c['texto']}\n{c['arreglo']}\n" for c in falta) or "# nada pendiente"
+        pb = NSPasteboard.generalPasteboard()
+        pb.clearContents()
+        pb.setString_forType_(f"# {self.servidor_activo()}: que falta para protegerlo\n" + texto, NSPasteboardTypeString)
+
+    def panelWeb_(self, _):
+        self.abre(f"http://127.0.0.1:{costbar.PUERTO}/")
+
+    def salir_(self, _):
+        NSApplication.sharedApplication().terminate_(None)
 
 
 def main():
