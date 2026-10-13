@@ -1,203 +1,129 @@
-# codeia-cost-guard
+# infobar
 
-Mide (y ayuda a frenar) el gasto de tokens de tu flota de agentes: **Claude Code, Codex, OpenCode, pi**.
-Lee sus logs locales, descarta los turnos duplicados, y te lo enseña en un panel y en un icono de la
-barra de menús. Todo en **tokens**: la **ventana de 5 horas** (la que se agota en las suscripciones), la
-**semana**, el día, los turnos y la caché. Los dólares van solo como equivalente API informativo.
+Tus agentes de IA y tus servidores, en la barra de menús del Mac.
 
-Hecho por [Codeia](https://codeia.dev) — el sitio donde se aprenden estas tecnologías.
+Al pulsar el icono se abre un desplegable con dos pestañas:
 
-## Cómo se ve
+- **Agentes**: consumo de tokens de Claude Code, Codex, OpenCode y pi (ventana de 5 h, semana, hoy,
+  planes, cuotas mensuales de NaN en vivo, modelos y proyectos).
+- **Servidores**: estado de cada VPS, que eliges en un selector. Incluye webs, CPU, memoria, disco,
+  servicios de Dokploy o Easypanel, intentos de entrar, fail2ban, puertos abiertos a Internet,
+  actualizaciones y una revisión de **protección** que dice qué falta y cómo arreglarlo.
 
-El icono de la barra de menús lleva la cifra de la ventana de 5 h; al pulsarlo se abre el desplegable
-(tema claro, oscuro o el del sistema):
+| Servidores | Agentes |
+|---|---|
+| ![Pestaña Servidores](docs/img/desplegable-servidores.png) | ![Pestaña Agentes](docs/img/desplegable-agentes.png) |
 
-![Icono en la barra de menús](docs/img/icono.png)
+*(Capturas con datos de ejemplo.)*
 
-![Desplegable, claro y oscuro](docs/img/desplegable.png)
+> **Basado en [codeia-cost-guard](https://github.com/yosnap/codeia-cost-guard)** de
+> [Codeia](https://codeia.dev) (Paulo), con la cuota en vivo de NaN de
+> [Daniel](https://github.com/dmaurelc/codeia-cost-guard/tree/feat/nan-live-usage). Licencia MIT: se
+> conserva el aviso de copyright original en `LICENSE`.
 
-Y «Abrir panel» sirve el panel completo en el navegador, con filtros por periodo y por plan:
-
-![Panel](docs/img/panel.png)
-
-## Por qué
-
-No te arruina el *effort* del modelo: te arruina **cuántas veces le mandas el contexto**. El 75 % del
-gasto típico es lectura de caché — o sea, el mismo contexto reenviado turno tras turno. Y por encima de
-**272.000 tokens** toda la petición pasa a facturarse a 2× entrada / 1,5× salida. Con esto delante, un
-día de trabajo se ve de un vistazo. El detalle completo, en [GUIA.md](GUIA.md).
-
-## Reglas de ahorro (Claude Code y Codex)
-
-Además de medir, el repo trae las **cinco palancas** de `GUIA.md` ya escritas para pegar en las
-instrucciones globales de tus agentes: contexto por debajo de 200K (nunca cruzar los 272K),
-parches en vez de reescribir el fichero entero, fan-out máximo 3 y solo para tareas ambiguas
-(dispersando entre modelos, no copias del mismo), no tocar el prompt de sistema a mitad de sesión
-(rompe la caché), y Batch para lo asíncrono con Fast apagado. `python3 instalar_reglas_globales.py`
-(o `./install.sh --reglas`) las pega solo en `~/.codex/AGENTS.md` y `~/.claude/CLAUDE.md` — nunca
-en la memoria de un agente, que se inyecta en cada turno y encarecería el propio remedio. El bloque
-exacto que escribe está en [AGENTS-snippet.md](AGENTS-snippet.md). Es idempotente: puedes
-ejecutarlo cuantas veces quieras y respeta lo que ya tengas alrededor (con copia de seguridad).
-
-Las tarifas de `costbar.py` (para el equivalente USD y el precipicio de los 272K) están puestas al
-día con los modelos frontera actuales de ambos servicios (Claude Opus/Sonnet/Fable 5, GPT-5.6);
-cuando salgan modelos nuevos, hay que añadir su fila en `TARIFAS` dentro de `costbar.py`.
-
-## Instalación
+## Instalación (macOS)
 
 ```bash
-git clone https://github.com/yosnap/codeia-cost-guard.git
-cd codeia-cost-guard
-
-# macOS: instala todo (app de barra + panel + reglas opcionales)
-./install.sh
-
-# Cualquier sistema: solo el medidor y el panel (necesita únicamente Python 3.9+)
-python3 analizar_gasto.py      # informe en el terminal
-python3 panel.py               # genera panel.html y lo abres en el navegador
+git clone <este repo> infobar && cd infobar
+cp config.example.json config.json     # tu configuración (no se sube al repo)
+./install.sh                           # copia a ~/.cost-guard y arranca sola al iniciar sesión
 ```
 
-En macOS, `install.sh` deja la app arrancando sola al iniciar sesión. Para pegar además las reglas de
-ahorro en `~/.codex/AGENTS.md` y `~/.claude/CLAUDE.md`: `./install.sh --reglas`.
+Necesita Python 3.9+ (el del sistema vale) y Chrome, Chromium, Brave o Edge: el desplegable se pinta
+con el navegador en modo invisible. `install.sh` crea su propio entorno con Pillow y PyObjC.
 
-### Windows
+Para actualizar tras un `git pull`, vuelve a ejecutar `./install.sh`. No pisa tu configuración.
 
-`install.sh` no corre en Windows (es un script de shell que instala un icono de barra de menús y un
-LaunchAgent, ambos exclusivos de macOS). Lo que sí funciona igual que en macOS y Linux es el motor de
-medición, con Python 3.9+ desde `cmd.exe`, PowerShell o la terminal de Git Bash:
+En Linux y Windows no hay barra de menús, pero el medidor sí funciona: `python3 analizar_gasto.py`
+(informe en la terminal) y `python3 panel.py` (panel HTML).
 
-```powershell
-git clone https://github.com/yosnap/codeia-cost-guard.git
-cd codeia-cost-guard
-python analizar_gasto.py
-python panel.py
-```
+## Configuración
 
-`panel.py` genera `panel.html` en la carpeta del proyecto; ábrelo haciendo doble clic o con
-`start panel.html`. Si quieres el informe cada día sin lanzarlo a mano, prográmalo con el
-**Programador de tareas** de Windows apuntando a `python.exe` con el script como argumento.
+Todo vive en `~/.cost-guard/config.json` una vez instalado. Parte de
+[`config.example.json`](config.example.json).
 
-Nota: si usas OpenCode en Windows, esta herramienta busca su base de datos en la ruta de Linux/macOS
-(`~/.local/share/opencode/`). En Windows, OpenCode guarda sus datos en otra carpeta y de momento no se
-lee ahí — Claude Code y Codex sí se detectan igual en los tres sistemas.
+- **Planes de IA** (`proveedores`, `aliases`): qué modelos son de qué suscripción y sus límites.
+  `python3 costbar.py --proveedores` te propone la lista a partir de tus logs.
+- **Servidores** (`servidores`): ver [docs/guia-servidores.md](docs/guia-servidores.md).
+- **Claves** (NaN y otras): **nunca** en `config.json`. Van al Llavero de macOS:
+  ```bash
+  python3 costbar.py --clave nan       # la pide sin mostrarla
+  ```
 
-## Compatibilidad por sistema
+Claude Max y ChatGPT Plus son suscripciones sin API pública de consumo: se miden con los logs locales
+de Claude Code y Codex. NaN sí tiene API (`/v1/usage`). Con `"uso_api": "nan"` en su plan, la cuota
+del mes sale en vivo, e incluye lo que consumas desde otras máquinas.
 
-| Componente | macOS | Linux | Windows |
-|---|---|---|---|
-| `analizar_gasto.py` (informe en terminal) | ✅ | ✅ | ✅ |
-| `panel.py` (panel HTML) | ✅ | ✅ | ✅ |
-| `precio_astra.py` (calculadora de precios) | ✅ | ✅ | ✅ |
-| Icono de barra de menús + desplegable (`install.sh`, `barra.py`) | ✅ | ❌ (no hay barra de menús equivalente) | ❌ |
-| Arranque automático al iniciar sesión | ✅ (LaunchAgent) | — | — (usa el Programador de tareas si quieres algo similar) |
-| Lectura de logs de Claude Code / Codex | ✅ | ✅ | ✅ |
-| Lectura de consumo de OpenCode | ✅ | ✅ | ⚠️ ruta de datos distinta, no detectado todavía |
+## Servidores
 
-Verificado ejecutando el medidor con `$HOME` vacío (instalación limpia, sin historial previo) además
-de con historial real.
-
-## Contribuir
-
-Ver [CONTRIBUTING.md](CONTRIBUTING.md): cómo preparar el entorno, qué tipo de cambios encajan en el
-repo y el estilo de commits y de PRs que se usa aquí.
-
-## Qué trae
-
-- **`costbar.py`** — la app de barra de menús (macOS). Muestra el gasto de hoy y, al clicarla, el ritmo
-  de la última hora, ayer, 7 días y el desglose por modelo y por proyecto. Avisa por notificación si el
-  ritmo pasa de un límite (`config.json`).
-- **`panel.py`** — el panel visual: `panel.html` con barras por día, modelo y proyecto. Se refresca
-  solo cada minuto.
-- **`analizar_gasto.py`** — el informe de texto, para terminal o para cron.
-- **`precio_astra.py`** — calculadora de precios con *preflight*: estima el coste de una petición antes
-  de enviarla (incluido el precipicio de los 272K, caché, Batch y Fast).
-- **`instalar_reglas_globales.py`** — escribe las reglas de ahorro en los ficheros de instrucciones
-  globales de los agentes CLI. Idempotente y con copia de seguridad.
-- **`GUIA.md`** — la guía: las cinco palancas y por qué el contexto manda.
-
-## Qué te muestra
-
-- **Ventana de 5 horas** y **semana** en tokens, separando Claude de OpenAI (son suscripciones distintas).
-- **Hoy**: entrada, salida, caché leída (con su % sobre la entrada) y caché escrita.
-- **Turnos**: cada ida y vuelta con el modelo reenvía el contexto, y ahí está el gasto.
-- **Ritmo de la última hora**, con aviso si pasa del límite.
-- Por día, por modelo y por proyecto.
-
-## Panel
-
-Modo claro y oscuro con un boton (recuerda tu eleccion), filtros por periodo (5 h / hoy / mes) y por
-plan, tarjetas de 5 h, hoy, semana y mes, barras por dia y por proyecto, y una matriz
-**modelo x dia** para ver que modelo consume cada dia. Todo el calculo va en Python y los datos se
-embuten en el HTML: sin red, sin dependencias, sin librerias de graficos.
-
-El desplegable del icono de la barra de menus lleva su propio selector (Claro / Oscuro / Sistema)
-que guarda la eleccion en la clave `"tema"` de `config.json`; `"sistema"` (por defecto) sigue la
-apariencia de macOS. El boton «Abrir panel» sirve el panel en `http://127.0.0.1:47391`.
-
-## Configurar tus planes (proveedores)
-
-Los logs dicen qué modelo se usó, nunca qué cuota tienes: eso solo lo sabe tu proveedor. Declara cada
-plan en `config.json` (mira `config.example.json`) y el panel y el icono medirán **por plan**, con el
-**% de la ventana de 5 h y de la semana** que llevas consumido:
+infobar entra en cada servidor por SSH con un **usuario de solo lectura** (`infobar`), cuya clave
+solo puede ejecutar un script de lectura instalado en el servidor. Para dar de alta uno:
 
 ```bash
-python3 costbar.py --proveedores    # lista tus modelos por proveedor y te da la config lista para pegar
+infobar/remoto/alta-servidor.sh victor@203.0.113.10
 ```
 
-```json
-{"proveedores": [
-  {"nombre": "Claude (Max)", "modelos": ["claude", "sonnet", "opus", "haiku", "fable"],
-   "limite_5h_tokens": 0, "limite_semana_tokens": 0},
-  {"nombre": "z.ai (GLM)", "modelos": ["glm"], "limite_5h_tokens": 0, "limite_semana_tokens": 0}
-]}
-```
+La guía completa (permisos, puertos, problemas frecuentes y qué significa cada aviso) está en
+[docs/guia-servidores.md](docs/guia-servidores.md). Los comandos del día a día están en
+[docs/chuleta.md](docs/chuleta.md).
 
-Con los límites a 0 se muestran tokens en crudo; al ponerlos aparece el porcentaje.
+## Seguridad
 
-### Cuotas de NaN, en vivo
+- En los servidores solo se **lee**. La clave de infobar lleva `restrict,command=` y no da una
+  shell. `sudo` solo se permite para un programa fijo, sin argumentos.
+- Las claves van en el **Llavero**, y `config.json` está fuera del repo. El panel local
+  (`127.0.0.1:47391`) rechaza peticiones de otras webs (`Host`/`Origin`) y nunca devuelve claves.
+- Los datos de los servidores se escapan antes de pintarse, y la página del desplegable no puede
+  ejecutar scripts ni conectarse a nada (CSP).
+- Si la clave de un servidor es rechazada, infobar espera 30 min antes de reintentar, para que
+  fail2ban no bloquee tu IP.
+- No usa las APIs de Dokploy ni de Easypanel: sus claves dan acceso a todos los secretos de
+  producción.
 
-NaN publica tu consumo real en `GET https://api.nan.builders/v1/usage`. Con `"uso_api": "nan"` en el
-proveedor NaN (ya viene así en `config.json`), el panel y el icono de la barra leen de ahí el consumo
-**mensual por modelo** —incluido lo que corrió en la nube o en otra máquina, que no deja log local— y
-le aplican las cuotas publicadas (DeepSeek V4-Flash 3 B, GLM 5.3 Flash 2 B, MiMo V2.6 Flash 1 B, Qwen
-3.8 Flash 500 M; se resetean el día 1). La API key se coge de la variable de entorno `NAN_API_KEY` (lo
-recomendado; **no** la pongas en `config.json`, que este repo sí versiona). Si no hay clave o no hay
-red, cae sin ruido a los logs locales.
+## Compartir el repo
 
-```bash
-export NAN_API_KEY=sk-tu-clave    # en tu shell (o ~/.zshrc); config.example.json lo documenta
-```
+En el repo no hay nada tuyo:
+- `config.json`, `state.json`, `logs/` y el entorno de Python local están en `.gitignore`.
+- Las claves viven en tu Llavero, y la de SSH en `~/.ssh/infobar_ed25519`.
+- Las capturas usan datos de ejemplo.
 
-## Cómo cuenta
+Quien lo clone crea su `config.json` desde el ejemplo y da de alta sus propios servidores.
 
-Dos formatos distintos, y confundirlos infla los totales (lo aprendimos midiendo):
+Los planes de trabajo (`plans/`) y tus notas (`docs/chuleta-personal.md`) se quedan en tu disco:
+están en `.gitignore`.
 
-- **Claude Code**: una línea por respuesta, con `message.usage`. Ahí la entrada y la caché ya vienen
-  separadas.
-- **Codex** (rollouts): cada turno se escribe **dos veces** (`token_usage_record` y
-  `event_msg/token_count`, en el mismo segundo) y el fichero lleva además `total_token_usage`, que es
-  **acumulado**. Hay que usar el uso del turno ignorando el acumulado, y tener en cuenta que
-  `cached_input_tokens` va **dentro** de `input_tokens`.
+## Cómo cuenta los tokens
 
-Lee los logs de sesión de `~/.claude`, `~/.codex` y `~/.opencode`, se queda con los turnos **únicos**
-(los forks de Claude Code copian los turnos de sus padres y contarían doble) y aplica los precios de
-lista de cada modelo.
+No te arruina el *effort* del modelo: te arruina **cuántas veces le mandas el contexto**. Alrededor
+del 75 % del gasto típico es caché leída, es decir, el mismo contexto reenviado turno tras turno.
+Por encima de **272.000 tokens**, toda la petición se factura a 2× la entrada y 1,5× la salida.
+Más detalle en [GUIA.md](GUIA.md).
 
-**Los dólares son equivalente API**, no tu factura: si vas con suscripción no pagas por token, pero lo
-que se agota es lo mismo que aquí se mide — *tokens × turnos*. Los agentes que corren en la nube no
-dejan log en tu máquina: ejecuta el medidor **en esas máquinas** y suma los totales.
+- **Claude Code**: una línea por respuesta con `message.usage`; la entrada y la caché ya vienen
+  separadas. Los forks copian los turnos de sus padres, así que se cuentan una sola vez.
+- **Codex**: cada turno se escribe dos veces (mismo segundo) y además va un total **acumulado**. Se
+  usa el uso del turno, y `cached_input_tokens` va **dentro** de `input_tokens`.
+- **OpenCode** (SQLite, mensaje a mensaje), **pi** (JSONL) y **Hermes**.
 
-## Tests
+Los dólares son un **equivalente API**, no tu factura. Las tarifas están en `TARIFAS`, dentro de
+`infobar/planes_y_tarifas.py`.
 
-```bash
-python3 -m unittest discover tests   # sin dependencias: unittest de la libreria estandar
-```
+Las **reglas de ahorro** para tus agentes (contexto por debajo de 200K, parches en vez de reescribir
+ficheros, fan-out máximo 3…) se instalan con `./install.sh --reglas` o con
+`python3 instalar_reglas_globales.py`. El texto exacto está en [AGENTS-snippet.md](AGENTS-snippet.md).
 
-Cubren `a_local()` (UTC con Z a hora local, verano/invierno, offsets, cadenas rotas), la
-conversion de horas/dias a local en `parsear()`, el doble registro de Codex (mismo segundo,
-un turno) y el lector de pi (reasoning, dedup, claves locales). Se fija `TZ=Europe/Madrid`
-para que los resultados sean deterministas en cualquier maquina.
+## Estructura
+
+| Fichero | Qué es |
+|---|---|
+| `barra.py` | La app de la barra: icono, desplegable, menús y clics |
+| `costbar.py` | Entrada de línea de comandos (`--print`, `--clave`, `--proveedores`) y fachada del motor |
+| `infobar/` | El motor: lectores de logs, agregación, NaN, servidores, desplegable, panel local |
+| `infobar/remoto/` | Scripts para los servidores: alta, recogida, cerrar un puerto de docker |
+| `panel.py`, `panel_assets/` | Panel web (`127.0.0.1:47391`) |
+| `popover.py` | Vista previa del desplegable en HTML, para depurar el diseño |
+| `tests/` | `python3 -m unittest discover tests` (sin dependencias) |
 
 ## Licencia
 
-MIT.
+MIT. Ver `LICENSE`.

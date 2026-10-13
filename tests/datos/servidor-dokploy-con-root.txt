@@ -1,0 +1,49 @@
+### version
+1
+### sistema
+0.16 0.21 0.24 4/524 1517436
+4
+2811941.78
+### memoria
+8127725568 4749873152
+### disco
+80307429376 30314622976
+### sesiones
+victor   pts/0        2026-10-12 21:10 (203.0.113.7)
+### puertos
+22 80 443 2377 3000 7946 
+### intentos
+total 1131
+hora 386
+ip 198.51.100.60 145
+ip 198.51.100.21 128
+ip 192.0.2.73 54
+ip 192.0.2.30 54
+### actualizaciones
+50
+reinicio
+### bastionado
+auto_upgrades si
+unattended_instalado si
+parches_seguridad 0
+uid0_extra 0
+hora_sincronizada yes
+### servicios
+dokploy	1/1
+dokploy-postgres	1/1
+dokploy-redis	1/1
+blog-app-x1	0/1
+### contenedores
+dokploy.1.abc	running	Up 3 days
+### bastionado_root
+sshd_passwordauthentication no
+sshd_permitrootlogin without-password
+sshd_permitemptypasswords no
+sshd_kbdinteractiveauthentication no
+input_politica ACCEPT
+fail2ban_activo active
+### fail2ban
+ahora 3
+total 15
+### inventada
+esto no debe aparecer

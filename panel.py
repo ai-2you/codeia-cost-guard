@@ -20,7 +20,7 @@ SECCION_CFG = """
   Guarda y la app lo aplica sola en el siguiente refresco.</p>
   <table id="tabla-cfg" style="width:100%;border-collapse:collapse"></table>
   <div style="margin-top:1rem;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
-    <button onclick="guardarCfg()" style="padding:.5rem 1.1rem;border-radius:8px;border:0;background:#ae00ff;color:#fff;font-weight:600;cursor:pointer">Guardar</button>
+    <button onclick="guardarCfg()" style="padding:.5rem 1.1rem;border-radius:8px;border:0;background:var(--marca);color:var(--sobre-marca);font-weight:600;cursor:pointer">Guardar</button>
     <span id="aviso-cfg" style="font-size:.9rem"></span>
   </div>
   <h4 style="margin:1.4rem 0 .4rem">Cuotas por plan (en tokens; 0 = sin declarar)</h4>

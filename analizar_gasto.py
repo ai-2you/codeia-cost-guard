@@ -6,11 +6,9 @@ Uso:  python3 analizar_gasto.py [dias]
 """
 import os, sys, subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-if len(sys.argv) > 1 and sys.argv[1].isdigit():
-    import costbar
-    costbar.DIAS = int(sys.argv[1])
 import costbar
-r = costbar.escanear()
+dias = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else None
+r = costbar.escanear(dias=dias)
 print(costbar.informa(r))
 print(f"\nficheros reescaneados en esta pasada: {r['nuevos']} · limite ritmo {r['limites']['limite_hora_tokens']:,.0f} tokens/h")
 print("modelos hoy (detalle):", " · ".join(f"{k}={v['tok']:.0f}" for k, v in sorted(r["modelos_hoy"].items(), key=lambda x: -x[1]["tok"])))

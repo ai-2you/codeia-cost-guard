@@ -1,28 +1,29 @@
-:root[data-tema="claro"]{--fondo:#f4f2f8;--panel:#fff;--borde:#e4dff0;--texto:#1c1726;--suave:#6d6485;--pista:#ece7f5;--sombra:0 1px 3px rgba(30,20,60,.07)}
-:root[data-tema="oscuro"]{--fondo:#0e0b14;--panel:#171226;--borde:#241a3a;--texto:#efeaf7;--suave:#9d93b5;--pista:#0b0813;--sombra:none}
-:root{--marca:#ae00ff;--marca2:#ff008c}
+/* mismo lenguaje que el desplegable de la barra: grafito, cristal y dos acentos
+   (verde terminal para lo normal, naranja Opus para lo seleccionado o lo grande) */
+:root[data-tema="claro"]{--fondo:#f2f2f7;--panel:rgba(255,255,255,.78);--borde:rgba(0,0,0,.09);--texto:#1c1c1e;--suave:#6e6e73;--pista:#e5e5ea;--sombra:0 1px 2px rgba(0,0,0,.05);--marca:#1a8f3c;--marca2:#c4623f;--sobre-marca:#fff}
+:root[data-tema="oscuro"]{--fondo:#111214;--panel:rgba(255,255,255,.06);--borde:rgba(255,255,255,.11);--texto:#f5f5f7;--suave:#98989d;--pista:rgba(255,255,255,.07);--sombra:none;--marca:#30d158;--marca2:#e0876a;--sobre-marca:#0b0b0c}
 *{box-sizing:border-box}
-body{margin:0;padding:26px;background:var(--fondo);color:var(--texto);font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",Segoe UI,sans-serif}
+body{margin:0;padding:26px;background:var(--fondo);-webkit-font-smoothing:antialiased;color:var(--texto);font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",Segoe UI,sans-serif}
 .cab{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
 #tema{font-size:12.5px;padding:6px 12px;color:var(--suave)}
 #tema:hover{color:var(--texto)}
 th .f{opacity:.35;font-size:10px} th.act{color:var(--marca)} th.act .f{opacity:1}
 h1{font-size:20px;margin:0 0 4px} .sub{color:var(--suave);font-size:12.5px}
 button{font:inherit;font-size:13px;padding:7px 12px;border-radius:10px;border:1px solid var(--borde);background:var(--panel);color:var(--texto);cursor:pointer}
-button:hover{border-color:var(--marca)} button.on{background:linear-gradient(90deg,var(--marca),var(--marca2));color:#fff;border-color:transparent}
+button:hover{border-color:var(--marca)} button.on{background:var(--marca);color:var(--sobre-marca);border-color:transparent;font-weight:600}
 .fila-b{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
 .etq{color:var(--suave);font-size:12px;text-transform:uppercase;letter-spacing:.7px;margin-right:2px}
 .rejilla{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:13px;margin-bottom:14px}
 .tarjeta{background:var(--panel);border:1px solid var(--borde);border-radius:16px;padding:16px 18px;box-shadow:var(--sombra)}
 .tarjeta .rot{font-size:11.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--suave)}
-.tarjeta .num{font-size:30px;font-weight:680;margin-top:5px;background:linear-gradient(90deg,var(--marca),var(--marca2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.tarjeta .num{font-size:30px;font-weight:680;margin-top:5px;color:var(--marca);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .tarjeta.g .num{font-size:36px} .tarjeta .pie{font-size:12px;color:var(--suave);margin-top:3px}
 section{background:var(--panel);border:1px solid var(--borde);border-radius:16px;padding:16px 18px;margin-bottom:14px;box-shadow:var(--sombra)}
 h2{font-size:13px;margin:0 0 12px;color:var(--suave);text-transform:uppercase;letter-spacing:.9px}
 .fila{display:grid;grid-template-columns:minmax(130px,34%) 1fr 118px;align-items:center;gap:12px;padding:3.5px 0}
 .et{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pista{background:var(--pista);border-radius:7px;height:15px;overflow:hidden}
-.barra{display:block;height:100%;border-radius:7px;background:linear-gradient(90deg,var(--marca),var(--marca2))}
+.barra{display:block;height:100%;border-radius:7px;background:var(--marca)}
 .val{text-align:right;font-variant-numeric:tabular-nums;color:var(--suave);font-size:12.5px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--borde);font-variant-numeric:tabular-nums}
