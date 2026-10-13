@@ -1,0 +1,25 @@
+### version
+1
+### sistema
+0.39 0.29 0.20 1/387 1494577
+4
+14202159.81
+### memoria
+8326955008 5802172416
+### disco
+154894188544 30781394944
+### sesiones
+### puertos
+22 80 443 2377 3000 7946 
+### intentos
+total 0
+hora 0
+### actualizaciones
+52
+sin-reinicio
+### bastionado
+auto_upgrades no
+unattended_instalado si
+parches_seguridad 4
+uid0_extra 0
+hora_sincronizada yes

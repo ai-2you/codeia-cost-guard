@@ -158,7 +158,8 @@ Con los límites a 0 se muestran tokens en crudo; al ponerlos aparece el porcent
 
 Desde el icono de la barra abre el panel y pulsa **Ajustes**: ahí editas sin tocar `config.json` los
 proveedores (modelos que cuentan, cuotas de 5 h, semana y mes), a qué plan va cada origen del log, los
-proyectos (renombrar, ocultar de las listas, presupuesto mensual) y el tema. Las **claves de API** se
+proyectos (renombrar, ocultar de las listas, presupuesto mensual), los servidores VPS que monitoriza por SSH
+(`docs/guia-servidores.md`) y la alerta de ritmo. Las **claves de API** se
 guardan en el Keychain de macOS, nunca en `config.json` ni en git; de momento solo NaN tiene lector de
 consumo por API, para el resto la clave se guarda pero el consumo sigue saliendo de los logs. Solo
 funciona abriendo el panel desde la barra (por `http://127.0.0.1`), no como fichero suelto.

@@ -1,6 +1,7 @@
 panel.html
 popover.html
 popover_oscuro.html
+popover-*.html
 popover_*.png
 __pycache__/
 *.pyc
@@ -8,3 +9,12 @@ state.json
 estado.json
 logs/
 *.log
+# copias de seguridad que deja el guardado de la configuracion
+config.json.bak*
+*.lock
+# entorno de Python local para probar la barra desde el repo
+venv/
+# notas personales: se quedan en tu disco
+docs/chuleta-personal.md
+# tus servidores (hosts, usuarios): fuera de git; plantilla en servidores.example.json
+servidores.json

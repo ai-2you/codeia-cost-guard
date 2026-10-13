@@ -1,0 +1,18 @@
+{
+  "servidores": [
+    {
+      "nombre": "produccion",
+      "ssh": "infobar@203.0.113.10",
+      "ssh_admin": "victor@203.0.113.10",
+      "panel": "dokploy",
+      "panel_url": "https://dokploy.example.com",
+      "webs": [
+        "https://example.com"
+      ]
+    }
+  ],
+  "ips_conocidas": [],
+  "intervalo_normal_s": 300,
+  "intervalo_incidencia_s": 60,
+  "_nota": "Copia este fichero a servidores.json (fuera de git: lleva hosts y usuarios). Alta de un servidor: infobar/remoto/alta-servidor.sh victor@IP, o desde la pestaña Ajustes. Guia: docs/guia-servidores.md"
+}
