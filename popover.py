@@ -56,6 +56,24 @@ def fila_mini(nombre, valor):
             f'{cifra(valor)}</div></div>')
 
 
+def fila_cuota(modelo, x):
+    """Fila de cuota mensual por modelo: barra del % consumido y mes / tope.
+
+    Los modelos del plan sin tope publicado (no-SOTA) van solo con el consumo del mes."""
+    if not x.get("limite"):
+        nota = "sin tope" + (" · solo logs" if x.get("fuente") == "logs" else "")
+        return (f'<div class="plan"><div class="plan-top"><span class="plan-name">{modelo}</span>'
+                f'{cifra(x["mes"])}</div>'
+                f'<div class="plan-sub"><span>{nota}</span><span>—</span></div></div>')
+    pct = min(100, x["pct"])
+    aria = f"{modelo}: {x['pct']:.0f} % de {costbar.fmt_tok(x['limite'])} al mes"
+    return (f'<div class="plan"><div class="plan-top"><span class="plan-name">{modelo}</span>'
+            f'{cifra(x["mes"])}</div>'
+            f'<div class="bar" role="img" aria-label="{aria}"><i style="width:{pct:.0f}%"></i></div>'
+            f'<div class="plan-sub"><span>{costbar.fmt_tok(x["mes"])} / {costbar.fmt_tok(x["limite"])}</span>'
+            f'<span>{x["pct"]:.1f} %</span></div></div>')
+
+
 def informe():
     """costbar.escanear() ya trae porcentajes, historial y turnos: nada que parsear."""
     return costbar.escanear()
@@ -74,6 +92,16 @@ def render(r, oscuro=False):
                     f'<i style="width:{min(100, pct5):.0f}%"></i></div>')
 
     planes = [(n, x) for n, x in r["proveedores"].items() if x["cinco_h"] or x["semana"]]
+
+    cuotas = [(mc["modelo"], mc) for _n, x in r["proveedores"].items() for mc in (x.get("modelos_cuota") or [])]
+    seccion_cuotas = ""
+    if cuotas:
+        en_vivo = any(x.get("cuota_fuente") == "api" for x in r["proveedores"].values() if x.get("modelos_cuota"))
+        nota = "NaN SOTA · mes natural (día 1)" + (" · en vivo (API NaN)" if en_vivo else "")
+        seccion_cuotas = (
+            '<section class="sec"><div class="sec-head"><span class="sec-title">Cuotas mensuales</span>'
+            f'<span class="sec-note">{nota}</span></div>'
+            '<div class="pad">' + "".join(fila_cuota(m, x) for m, x in cuotas) + '</div></section>')
 
     ayer = r["ayer"]["tok"]
     dias_2a5 = [costbar.time.strftime("%Y-%m-%d", costbar.time.localtime(costbar.time.time() - i * 86400))
@@ -120,6 +148,7 @@ html,body{{margin:0;background:transparent}}
     <div class="sec-head"><span class="sec-title">Planes</span><span class="sec-note">5 h · semana · % límite</span></div>
     <div class="pad">{"".join(fila_plan(n, x) for n, x in planes)}</div>
   </section>
+  {seccion_cuotas}
   <section class="sec">
     <div class="sec-head"><span class="sec-title">Hoy</span><span class="sec-note">desglose</span></div>
     <div class="pad">

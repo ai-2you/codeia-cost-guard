@@ -83,7 +83,9 @@ def datos():
         "dias": {d: {"tok": int(v["tok"]), "turnos": int(v["turnos"]), "usd": round(v["usd"], 2), "cr": int(v["cr"])} for d, v in sorted(r["dias"].items())},
         "proveedores": {n: {"cinco_h": int(x["cinco_h"]), "hoy": int(x["hoy"]), "semana": int(x["semana"]),
                             "mes": int(x["mes"]), "pct_5h": round(x["pct_5h"], 1), "pct_semana": round(x["pct_semana"], 1),
-                            "modelos": x["modelos"], "auto": bool(x.get("auto", False))}
+                            "modelos": x["modelos"], "auto": bool(x.get("auto", False)),
+                            "modelos_cuota": x.get("modelos_cuota") or [],
+                            "cuota_fuente": x.get("cuota_fuente") or "logs"}
                         for n, x in r["proveedores"].items()},
         "modelo_prov": r["modelo_prov"],
         "cruce": {n: {m: {d: int(t) for d, t in dd.items()} for m, dd in mm.items()} for n, mm in r["cruce"].items()},
