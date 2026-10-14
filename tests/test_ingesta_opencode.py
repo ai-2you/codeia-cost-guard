@@ -82,7 +82,7 @@ class OpenCodeTest(BaseOC):
         for i in range(5):
             self.inserta(f"msg_{i:08d}", datos(), actualizado=T0 + i)
         self.assertEqual(self.pasada()["filas"], 5)
-        with mock.patch.object(ingesta_opencode, "_abrir_solo_lectura", side_effect=AssertionError("no debía abrirse")):
+        with mock.patch.object(ingesta_opencode, "abrir_sqlite_solo_lectura", side_effect=AssertionError("no debía abrirse")):
             self.assertTrue(self.pasada()["sin_cambios"])
         self.inserta("msg_nuevo001", datos(), actualizado=T0 + 99)
         r = self.pasada()

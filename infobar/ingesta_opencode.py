@@ -8,13 +8,11 @@ al terminar (los tokens llegan al completarse) vuelve a salir y el almacén se q
 histórico sobrevive. `tokens.reasoning` NO se suma a la salida: en OpenCode va aparte (y en 550 mensajes reales supera a
 `output`), pero no se sabe si algún proveedor ya lo incluye en `output`; queda pendiente de decisión del dueño.
 """
-import os
-import pathlib
 import re
 import sqlite3
 
 from . import almacen
-from .ingesta import a_epoch_utc, id_fuente, proyecto_de_slug
+from .ingesta import a_epoch_utc, abrir_sqlite_solo_lectura, aplicar_filas, firma_sqlite, id_fuente, proyecto_de_slug
 
 AGENTE = "opencode"
 LOTE_FILAS = 2000
@@ -30,24 +28,6 @@ FROM message
 WHERE CASE WHEN json_valid(data) THEN json_extract(data, '$.modelID') END IS NOT NULL   -- una fila con JSON roto no puede tumbar la consulta
   AND (coalesce(time_updated, time_created, 0) > ? OR (coalesce(time_updated, time_created, 0) = ? AND id > ?))
 ORDER BY coalesce(time_updated, time_created, 0), id LIMIT ?"""
-
-
-def _firma(ruta):
-    """Tamaño y fecha de la base y de su WAL (donde SQLite escribe primero)."""
-    partes = []
-    for f in (ruta, ruta + "-wal"):
-        try:
-            st = os.stat(f)
-            partes.append(f"{st.st_size}:{st.st_mtime_ns}")
-        except OSError:
-            partes.append("-")
-    return "|".join(partes)
-
-
-def _abrir_solo_lectura(ruta):
-    con = sqlite3.connect(f"{pathlib.Path(ruta).as_uri()}?mode=ro", uri=True, timeout=2)
-    con.execute("PRAGMA query_only=ON")
-    return con
 
 
 def _n(v):
@@ -72,12 +52,12 @@ def ingerir_base(con, quien, espacio_id, ruta, base, max_filas=LOTE_FILAS, ahora
     """Una pasada sobre una base de OpenCode. Devuelve {nuevos, subidos, iguales, anomalias, filas, completo, sin_cambios}."""
     total = {"nuevos": 0, "subidos": 0, "iguales": 0, "anomalias": 0, "filas": 0, "completo": True, "sin_cambios": False}
     fid = almacen.fuente(con, quien, espacio_id, AGENTE, id_fuente(ruta, base), ahora=ahora)
-    firma = _firma(ruta)
+    firma = firma_sqlite(ruta)
     if almacen.leer_marca(con, fid, "firma") == firma:
         total["sin_cambios"] = True
         return total
     try:
-        origen = _abrir_solo_lectura(ruta)
+        origen = abrir_sqlite_solo_lectura(ruta)
     except sqlite3.Error as e:
         almacen.anotar(con, quien, "ingesta", "", fid, f"fuente {fid}: base no legible: {type(e).__name__}", ahora=ahora)
         total["anomalias"] += 1
@@ -102,30 +82,9 @@ def ingerir_base(con, quien, espacio_id, ruta, base, max_filas=LOTE_FILAS, ahora
         return total
     finally:
         origen.close()
-    turnos, otras = {}, ({"filas con JSON inválido": rotas} if rotas else {})
-    for fila in filas:
-        try:
-            r = _turno(fila)
-        except Exception as e:                                   # noqa: BLE001  (una fila rara no bloquea la fuente)
-            otras[f"fila con error: {type(e).__name__}"] = otras.get(f"fila con error: {type(e).__name__}", 0) + 1
-            continue
-        if r is None:
-            continue
-        if isinstance(r, tuple):
-            otras[r[1]] = otras.get(r[1], 0) + 1
-            continue
-        motivo = almacen.problema(r)
-        if motivo:
-            otras[f"turno descartado: {motivo}"] = otras.get(f"turno descartado: {motivo}", 0) + 1
-            continue
-        turnos[r["clave"]] = r
-    lote = list(turnos.values())
-    for i in range(0, len(lote), 500):
-        res = almacen.ingerir_turnos(con, quien, espacio_id, fid, lote[i:i + 500], ahora=ahora)
-        for k in ("nuevos", "subidos", "iguales", "anomalias"):
-            total[k] += res[k]
-    for texto, n in otras.items():
-        almacen.anotar(con, quien, "ingesta", "", fid, f"fuente {fid}: {texto}: {n}"[:200], ahora=ahora)
+    res = aplicar_filas(con, quien, espacio_id, fid, filas, _turno, ahora=ahora, extra={"filas con JSON inválido": rotas} if rotas else None)
+    for k in ("nuevos", "subidos", "iguales", "anomalias"):
+        total[k] += res[k]
     total["filas"] = len(filas)
     if filas:
         almacen.guardar_marca(con, quien, fid, "marca", f"{filas[-1][2]}:{filas[-1][0]}", ahora=ahora)

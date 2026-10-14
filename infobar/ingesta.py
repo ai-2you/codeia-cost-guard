@@ -9,7 +9,9 @@ import getpass
 import hashlib
 import json
 import os
+import pathlib
 import re
+import sqlite3
 import stat
 
 from . import almacen
@@ -268,3 +270,60 @@ def _trozos_usuario():
 
 def _ctrl_fuera(texto):
     return re.sub(r"[\x00-\x1f\x7f-\x9f]", "?", str(texto))[:120]
+
+
+# ---------------------------------------------------------------- fuentes SQLite ajenas (OpenCode, Hermes)
+
+def firma_sqlite(ruta):
+    """Tamaño y fecha de la base y de su WAL (donde SQLite escribe primero): si no cambian, la base no se abre."""
+    partes = []
+    for f in (ruta, ruta + "-wal"):
+        try:
+            st = os.stat(f)
+            partes.append(f"{st.st_size}:{st.st_mtime_ns}")
+        except OSError:
+            partes.append("-")
+    return "|".join(partes)
+
+
+def abrir_sqlite_solo_lectura(ruta):
+    """Abre una base AJENA sin poder modificarla (`mode=ro` + `query_only`), con la ruta escapada como URI."""
+    con = sqlite3.connect(f"{pathlib.Path(ruta).as_uri()}?mode=ro", uri=True, timeout=2)
+    con.execute("PRAGMA query_only=ON")
+    return con
+
+
+def aplicar_filas(con, quien, espacio_id, fuente_id, filas, a_turno, ahora=None, extra=None):
+    """Convierte filas de una base ajena en turnos y los guarda. `a_turno(fila)` devuelve un turno, None o ("anomalia", texto).
+
+    Una fila rara se cuenta y se anota, y el resto sigue. Devuelve {nuevos, subidos, iguales, anomalias}."""
+    turnos, otras = {}, dict(extra or {})
+
+    def cuenta(texto):
+        otras[texto] = otras.get(texto, 0) + 1
+
+    for fila in filas:
+        try:
+            r = a_turno(fila)
+        except Exception as e:                           # noqa: BLE001  (una fila rara no bloquea la fuente)
+            cuenta(f"fila con error: {type(e).__name__}")
+            continue
+        if r is None:
+            continue
+        if isinstance(r, tuple):
+            cuenta(r[1])
+            continue
+        motivo = almacen.problema(r)
+        if motivo:
+            cuenta(f"turno descartado: {motivo}")
+            continue
+        turnos[r["clave"]] = r
+    total = {"nuevos": 0, "subidos": 0, "iguales": 0, "anomalias": 0}
+    lote = list(turnos.values())
+    for i in range(0, len(lote), LOTE):
+        res = almacen.ingerir_turnos(con, quien, espacio_id, fuente_id, lote[i:i + LOTE], ahora=ahora)
+        for k in total:
+            total[k] += res[k]
+    for texto, n in otras.items():
+        almacen.anotar(con, quien, "ingesta", "", fuente_id, f"fuente {fuente_id}: {_ctrl_fuera(texto)}: {n}"[:200], ahora=ahora)
+    return total
