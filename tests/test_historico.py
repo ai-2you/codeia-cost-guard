@@ -25,6 +25,10 @@ class ConHusoMadrid(Base):
         os.environ["TZ"] = "Europe/Madrid"
         time.tzset()
         self.addCleanup(self._restaura)
+        # planes_y_tarifas lee los alias de la configuración global: se aísla para que otros tests no la contaminen
+        patch = mock.patch("infobar.planes_y_tarifas.cfg", return_value={})
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def _restaura(self):
         if self._tz is None:
@@ -130,7 +134,8 @@ class TestAgrupacion(ConHusoMadrid):
 
 class TestCoincideConElInforme(ConHusoMadrid):
     def test_mismos_totales_que_consultar_en_tres_fechas(self):
-        base = time.time() - time.time() % 3600
+        base = int(time.time())
+        base -= base % 3600
         turnos = [turno(f"claude:{i}", base - i * 5 * 3600 - 1800, proyecto=f"u/x/p{i % 3}", gi=i + 1, go=1, cr=10 * i, cw=2) for i in range(40)]
         turnos += [turno("claude:syn", base - 3600, modelo="<synthetic>", gi=99999)]
         self.mete(turnos)

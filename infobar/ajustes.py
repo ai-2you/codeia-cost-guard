@@ -114,12 +114,21 @@ def normalizar(nuevo, actual):
         for k, v in py.items():
             v = v or {}
             e = dict((actual.get("proyectos") or {}).get(k) or {})      # conserva campos puestos a mano
-            e.update({"alias": str(v.get("alias") or "").strip(), "oculto": bool(v.get("oculto")),
-                      "presupuesto_mes_tokens": _entero(v.get("presupuesto_mes_tokens"), f"proyectos.{k}")})
+            e.update({"alias": str(v.get("alias") or "").strip(), "oculto": bool(v.get("oculto"))})
+            if "presupuesto_mes_tokens" in v:          # el campo antiguo ya no se edita: solo se conserva lo que había
+                e["presupuesto_mes_tokens"] = _entero(v.get("presupuesto_mes_tokens"), f"proyectos.{k}")
+            e.setdefault("presupuesto_mes_tokens", 0)
             if e["alias"] or e["oculto"] or e["presupuesto_mes_tokens"]:
                 res[str(k)] = e
         if res or "proyectos" in actual:
             out["proyectos"] = res
+    if "presupuestos" in nuevo:
+        from . import presupuestos
+        out["presupuestos"] = presupuestos.validar(nuevo["presupuestos"])
+    if "avisos_presupuesto" in nuevo:
+        if not isinstance(nuevo["avisos_presupuesto"], bool):
+            raise ValueError("avisos_presupuesto: tiene que ser verdadero o falso")
+        out["avisos_presupuesto"] = nuevo["avisos_presupuesto"]
     for k in PASAN:
         if k in nuevo:
             out[k] = nuevo[k]

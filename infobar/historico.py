@@ -176,3 +176,21 @@ def historico(desde, hasta, paso="dia", agrupa="ninguno", conf=None):
             "anterior": anterior, "datos_desde": datos_desde.isoformat() if datos_desde else None,
             "mes_en_curso": {"mes": mes_ini.strftime("%Y-%m"), "acumulado": acumulado, "dias_transcurridos": pasados, "dias_mes": dias_mes,
                              "proyeccion": round(acumulado / pasados * dias_mes) if pasados >= 3 else None}}
+
+
+def consumo_por_grupo(desde, hasta, conf=None):
+    """Tokens de [desde, hasta) (fechas locales; `hasta` excluido) por proyecto mostrado y por plan final, para evaluar presupuestos.
+    Cuenta también los proyectos ocultos (ocultar no cambia los totales). Devuelve ({proyecto: tokens}, {plan: tokens})."""
+    conf = conf if conf is not None else cfg()
+    por_proyecto, por_plan = collections.defaultdict(int), collections.defaultdict(int)
+    con = _abrir()
+    try:
+        eid = con.execute("SELECT id FROM espacios WHERE nombre='local'").fetchone()[0]
+        for _d, _a, plan, proy, _o, gi, go, cr, cw, _n in _filas(con, eid, _medianoche(desde), _medianoche(hasta), conf):
+            por_proyecto[proy] += gi + go + cr + cw
+            por_plan[plan] += gi + go + cr + cw
+    except (TypeError, IndexError):
+        raise SinAlmacen("la base no tiene datos") from None
+    finally:
+        con.close()
+    return dict(por_proyecto), dict(por_plan)

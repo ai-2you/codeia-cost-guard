@@ -75,7 +75,7 @@ class TestSinAlmacen(Base):
 
 class TestInforme(Base):
     def test_formato_plan_y_proyecto(self):
-        ahora = time.time() - time.time() % 3600       # inicio de la hora en curso: siempre dentro del ritmo, sea cual sea el minuto
+        ahora = int(time.time()); ahora -= ahora % 3600       # inicio de la hora en curso (una sola lectura del reloj): siempre dentro del ritmo
         self.mete([turno("claude:m1", ahora), turno("claude:m2", ahora, gi=1, go=1, cr=1, cw=1)])
         self.mete([turno("pi:r1", ahora, agente="pi", proveedor="nan", modelo="deepseek-v4", proyecto="x/y/z")], "pi", "f2")
         self.completa()

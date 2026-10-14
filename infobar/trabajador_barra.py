@@ -7,7 +7,7 @@ cambia imagenes. Una excepcion se registra y el bucle sigue: el hilo no muere.
 """
 import threading, time, traceback
 
-from . import cuota_nan, desplegable_png, servidores_ciclo
+from . import cuota_nan, desplegable_png, presupuestos, servidores_ciclo
 from . import sombra
 from .agregacion import ULTIMOS, informe
 from .config_y_estado import cfg, log
@@ -35,6 +35,7 @@ class Trabajador(threading.Thread):
 
     def run(self):
         r, ultimo_scan, ultimo_render, gen_srv = None, 0.0, 0.0, None
+        migrado = False
         while True:
             self._evento.wait(timeout=DESPIERTA)
             self._evento.clear()
@@ -48,6 +49,13 @@ class Trabajador(threading.Thread):
                 if r is None or forzar or ahora - ultimo_scan >= CADA_AGENTES:
                     r = informe()
                     ultimo_scan = ahora
+                    try:
+                        if not migrado:
+                            presupuestos.migrar()
+                            migrado = True
+                        presupuestos.vigilar()          # solo este hilo escribe avisos.json
+                    except Exception:
+                        log("presupuestos: " + traceback.format_exc()[-400:])
                     if str(cfg().get("almacen") or "sombra").lower() == "sombra":
                         sombra.registrar_si_toca(ULTIMOS.get("vistos"))
                     self.entregar("agentes", {"cinco_h": r["cinco_h"]["tok"], "hoy": r["hoy"]["tok"],

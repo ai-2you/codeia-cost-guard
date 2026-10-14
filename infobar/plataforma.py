@@ -79,3 +79,18 @@ def volumen_sin_propietarios(ruta, salida_mount=None):
         if (real == punto or real.startswith(punto.rstrip("/") + "/") or punto == "/") and len(punto) >= len(mejor[0]):
             mejor = (punto, "noowners" in opciones)
     return mejor[1]
+
+
+def avisar(titulo, texto):
+    """Notificación del sistema. macOS con osascript; en otros sistemas todavía nada (devuelve False y el aviso solo es visual).
+    Los dos textos los pone la aplicación, nunca vienen de los logs; aun así se escapan."""
+    if sys.platform != "darwin":
+        return False
+    def esc(t):
+        return str(t).replace("\\", "\\\\").replace('"', '\\"')
+    try:
+        subprocess.run(["osascript", "-e", f'display notification "{esc(texto)}" with title "{esc(titulo)}"'],
+                       capture_output=True, timeout=5, check=True)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False

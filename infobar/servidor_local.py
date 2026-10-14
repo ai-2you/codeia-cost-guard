@@ -16,7 +16,7 @@ import hmac, json, os, secrets, subprocess, sys, threading, time
 
 from urllib.parse import parse_qs, urlsplit
 
-from . import ajustes, claves, exportacion, historico, rutas
+from . import ajustes, claves, exportacion, historico, presupuestos, rutas
 from . import cuota_nan
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_config, log, olvidar_cache
@@ -37,6 +37,14 @@ def html_con_nonce(html):
     html = html.replace(b"<script>", f'<script nonce="{nonce}">'.encode(), 1)
     return html, (f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; img-src 'self' data:; "
                   "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+
+
+def _estado_presupuestos():
+    try:
+        return presupuestos.evaluar()
+    except Exception as e:
+        log(f"presupuestos: {type(e).__name__}")
+        return {"disponible": False, "motivo": "No se pudieron evaluar los presupuestos.", "estados": []}
 
 
 PUERTO = 47391              # panel/configurador local: un puerto alto que casi nada usa
@@ -286,7 +294,7 @@ def crear_servidor(puerto=PUERTO):
                         if cuenta:
                             paneles[s["nombre"]] = {"cuenta": cuenta, "clave_guardada": bool(claves.leer_clave(cuenta))}
                     self._json(200, {"config": c, "origenes": r.get("origenes", {}), "proyectos": r.get("proyectos_origen", {}),
-                                     "proveedores": provs, "paneles": paneles, "keychain": claves.hay_llavero(), "copias": _estado_copias(),
+                                     "proveedores": provs, "paneles": paneles, "keychain": claves.hay_llavero(), "copias": _estado_copias(), "presupuestos": _estado_presupuestos(),
                                      "alta_servidor": "infobar/remoto/alta-servidor.sh"})
                 except Exception as e:
                     self._json(500, {"error": str(e)[:200]})
