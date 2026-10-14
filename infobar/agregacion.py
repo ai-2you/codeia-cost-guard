@@ -116,6 +116,26 @@ def suma(dest, v):
     dest["tok"] += v[0] + v[1] + v[2] + v[3]
 
 
+def modelos_ignorados(conf):
+    return [str(x).lower() for x in (conf.get("ignorar") or ["synthetic", "<synthetic>", "sin-modelo"])]
+
+
+def es_ignorado(modelo, ignora):
+    return any(x in (modelo or "").lower() for x in ignora)
+
+
+def proyecto_mostrado(r, conf):
+    """(nombre a mostrar, oculto) de un registro de consumo: lo comparten el informe y el histórico para que sus cifras coincidan."""
+    return ajustes.nombre_proyecto(r.get("proyecto", "otros"), conf, r.get("proyecto_alt") or ())
+
+
+def plan_del_consumo(r, modelo, provs):
+    """Plan final al que se asigna el consumo de `modelo` en el registro `r` (mismo criterio para el informe y el histórico)."""
+    plan_f = r.get("plan")
+    fiable = bool(plan_f) and modelo_nativo(plan_f, modelo)
+    return plan_final(proveedor_de(modelo, provs, plan_f, fiable), [x["nombre"] for x in provs])
+
+
 def agregar(vistos, nuevos=0, periodo=None):
     hoy = time.strftime("%Y-%m-%d")
     ayer = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400))
@@ -142,15 +162,15 @@ def agregar(vistos, nuevos=0, periodo=None):
     proys_raw = collections.defaultdict(int)       # tokens 30 d por nombre detectado (para Ajustes)
     conf = cfg()
     ahora = time.time()
-    ignora = [str(x).lower() for x in (cfg().get("ignorar") or ["synthetic", "<synthetic>", "sin-modelo"])]
+    ignora = modelos_ignorados(conf)
     for f, r in vistos.items():
         proy_raw = r.get("proyecto", "otros")
-        proy_n, proy_oculto = ajustes.nombre_proyecto(proy_raw, conf, r.get("proyecto_alt") or ())
+        proy_n, proy_oculto = proyecto_mostrado(r, conf)
         for d, mods in r.get("dia", {}).items():
             if not d or d < desde:
                 continue
             for m, v in mods.items():
-                if any(x in (m or "").lower() for x in ignora):
+                if es_ignorado(m, ignora):
                     continue
                 suma(dias[d], v)
                 t = tarifa(m)
@@ -166,9 +186,7 @@ def agregar(vistos, nuevos=0, periodo=None):
                         modelos_hoy[m]["usd"] += (v[0] * t[0] + v[2] * t[2] + v[3] * t[3] + v[1] * t[1]) / 1e6
                 if not proy_oculto:
                     suma(proys[proy_n], v)
-                plan_f = r.get("plan")
-                fiable = bool(plan_f) and modelo_nativo(plan_f, m)
-                pn = plan_final(proveedor_de(m, provs, plan_f, fiable), [x["nombre"] for x in provs])
+                pn = plan_del_consumo(r, m, provs)
                 pp = por_prov[pn]
                 pp["modelos"].add(corto(m))
                 modelo_prov[corto(m)] = pn

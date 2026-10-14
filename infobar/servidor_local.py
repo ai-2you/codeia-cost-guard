@@ -14,7 +14,9 @@ cosas a localhost. Por eso:
 """
 import hmac, json, os, secrets, subprocess, sys, threading, time
 
-from . import ajustes, claves, exportacion, rutas
+from urllib.parse import parse_qs, urlsplit
+
+from . import ajustes, claves, exportacion, historico, rutas
 from . import cuota_nan
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_config, log, olvidar_cache
@@ -163,6 +165,7 @@ def crear_servidor(puerto=PUERTO):
     import http.server, socketserver
 
     base = rutas.RAIZ
+    historiando = threading.BoundedSemaphore(2)        # como mucho dos consultas de histórico a la vez
     generando = threading.Lock()        # un solo panel.py a la vez aunque lleguen muchas peticiones
 
     class H(http.server.BaseHTTPRequestHandler):
@@ -220,6 +223,29 @@ def crear_servidor(puerto=PUERTO):
                            ("Location", "/")]
             self._manda(302, b"", "text/plain")
 
+        def _historico(self):
+            """GET /historico?desde=&hasta=&paso=&agrupa= : solo esos cuatro parámetros, una vez cada uno, validados en `historico`."""
+            q = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=8)
+            if set(q) - {"desde", "hasta", "paso", "agrupa"} or any(len(v) != 1 for v in q.values()):
+                return self._json(400, {"error": "parámetros no permitidos"})
+            ok, motivo = historico.disponible()
+            if not ok:
+                return self._json(200, {"disponible": False, "motivo": motivo})
+            if not historiando.acquire(blocking=False):
+                return self._json(429, {"error": "hay otras consultas en curso; vuelve a intentarlo"})
+            try:
+                g = {k: v[0] for k, v in q.items()}
+                self._json(200, {"disponible": True, **historico.historico(g.get("desde"), g.get("hasta"), g.get("paso", "dia"), g.get("agrupa", "ninguno"))})
+            except historico.ErrorHistorico as e:
+                self._json(400, {"error": str(e)})
+            except historico.SinAlmacen as e:
+                self._json(503, {"error": str(e)})
+            except Exception as e:
+                log(f"historico: {type(e).__name__}")
+                self._json(500, {"error": "no se pudo calcular el histórico"})
+            finally:
+                historiando.release()
+
         def do_GET(self):
             if not self._host_ok():
                 return
@@ -237,6 +263,8 @@ def crear_servidor(puerto=PUERTO):
                     self._manda(200, html, "text/html; charset=utf-8", csp=csp)
                 except Exception as e:
                     self._manda(500, str(e).encode(), "text/plain")
+            elif ruta == "/historico":
+                self._historico()
             elif ruta == "/origenes":
                 try:
                     r = informe()
