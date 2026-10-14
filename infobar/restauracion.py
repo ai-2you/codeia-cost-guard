@@ -114,3 +114,25 @@ def restaurar(ruta_cgx, descifrar, confirmar, destino=None, forzar=False, ahora=
             con.close()
         if temporal:
             exportacion._borra(temporal)
+
+
+def probar(ruta_cgx, descifrar):
+    """Ensayo de restauración: descifra y comprueba en un temporal privado de `DATOS/tmp` y devuelve {turnos, version, fecha, tipo}.
+    No toca la base ni crea nada permanente."""
+    with open(ruta_cgx, "rb") as f:
+        try:
+            _modo, tipo, fecha, *_ = cgx.leer_cabecera(f)
+        except cgx.ErrorCgx as e:
+            raise ErrorRestauracion(str(e)) from None
+    fd, temporal = tempfile.mkstemp(prefix="prueba-", suffix=".tmp", dir=exportacion.dir_tmp())
+    try:
+        try:
+            with os.fdopen(fd, "wb") as salida, open(ruta_cgx, "rb") as entrada:
+                descifrar(entrada, salida)
+        except cgx.ErrorCgx as e:
+            raise ErrorRestauracion(str(e)) from None
+        info = _comprueba(temporal)
+        info.update(fecha=fecha, tipo=tipo)
+        return info
+    finally:
+        exportacion._borra(temporal)

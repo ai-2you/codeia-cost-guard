@@ -62,6 +62,9 @@ def main():
     endurecer()
     if "--ingerir" in sys.argv:
         return ingerir_cli()
+    from infobar import cli_copias
+    if any(o in sys.argv for o in cli_copias.ORDENES):
+        sys.exit(cli_copias.main(sys.argv[1:]))
     if "--clave" in sys.argv:
         # python3 costbar.py --clave nan | dokploy:<host> | easypanel:<host>  -> la guarda en el Llavero
         i = sys.argv.index("--clave")
