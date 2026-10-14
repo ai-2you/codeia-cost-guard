@@ -280,15 +280,22 @@ def firma_sqlite(ruta):
     for f in (ruta, ruta + "-wal"):
         try:
             st = os.stat(f)
-            partes.append(f"{st.st_size}:{st.st_mtime_ns}")
+            partes.append(f"{st.st_size}:{st.st_mtime_ns}:{st.st_ctime_ns}")
         except OSError:
             partes.append("-")
     return "|".join(partes)
 
 
 def abrir_sqlite_solo_lectura(ruta):
-    """Abre una base AJENA sin poder modificarla (`mode=ro` + `query_only`), con la ruta escapada como URI."""
-    con = sqlite3.connect(f"{pathlib.Path(ruta).as_uri()}?mode=ro", uri=True, timeout=2)
+    """Abre una base AJENA sin poder modificarla (`mode=ro` + `query_only`), con la ruta absoluta y escapada como URI.
+
+    Si la base no tiene WAL (la aplicación está cerrada) se abre `immutable=1`: así SQLite no crea ficheros `-wal`/`-shm` en el
+    directorio ajeno y funciona aunque sea de solo lectura. Con WAL se usa `mode=ro` (necesita el `-shm` de quien la tiene abierta)."""
+    ruta = os.path.abspath(ruta)
+    wal = ruta + "-wal"
+    sin_wal = not (os.path.exists(wal) and os.path.getsize(wal) > 0)
+    modo = "immutable=1" if sin_wal else "mode=ro"
+    con = sqlite3.connect(f"{pathlib.Path(ruta).as_uri()}?{modo}", uri=True, timeout=2)
     con.execute("PRAGMA query_only=ON")
     return con
 
@@ -324,6 +331,7 @@ def aplicar_filas(con, quien, espacio_id, fuente_id, filas, a_turno, ahora=None,
         res = almacen.ingerir_turnos(con, quien, espacio_id, fuente_id, lote[i:i + LOTE], ahora=ahora)
         for k in total:
             total[k] += res[k]
+    total["anomalias"] += sum(otras.values())             # lo descartado también cuenta como anomalía
     for texto, n in otras.items():
         almacen.anotar(con, quien, "ingesta", "", fuente_id, f"fuente {fuente_id}: {_ctrl_fuera(texto)}: {n}"[:200], ahora=ahora)
     return total

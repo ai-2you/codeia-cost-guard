@@ -116,6 +116,37 @@ class HermesTest(BaseH):
         self.pasada()
         self.assertEqual(next(iter(self.turnos().values()))["proyecto_raw"], "hermes/otros")
 
+    def test_la_url_del_proveedor_no_lleva_credenciales_ni_consulta_y_las_largas_no_descartan_la_fila(self):
+        self.sesion()
+        self.uso(sid="sesion_url_001", burl="https://usuario:secreto@api.example.com:8443/v1/?token=abc123#x")
+        self.uso(sid="sesion_url_002", burl="https://api.example.com/" + "a" * 300)
+        self.uso(sid="sesion_url_003", burl="https://api.nan.builders/v1")
+        self.assertEqual(self.pasada()["nuevos"], 3)
+        prov = {t["clave"].split(":")[1]: t["proveedor"] for t in self.turnos().values()}
+        self.assertEqual(prov["sesion_url_001"], "https://api.example.com:8443/v1")
+        self.assertEqual(prov["sesion_url_002"], "https://api.example.com")
+        self.assertEqual(prov["sesion_url_003"], "https://api.nan.builders/v1")
+        self.assertNotIn("secreto", repr(self.turnos()) + repr(self.con.execute("SELECT * FROM horas").fetchall()))
+
+    def test_bases_incluye_la_raiz_y_los_perfiles(self):
+        raiz = os.path.join(self.home, ".hermes", "state.db")
+        crea_base(raiz).close()
+        b = ingesta_hermes.bases(self.home)
+        self.assertEqual(b[0], raiz)
+        self.assertIn(self.ruta, b)
+
+    def test_la_base_raiz_se_ingiere_como_otra_fuente(self):
+        raiz = os.path.join(self.home, ".hermes", "state.db")
+        c = crea_base(raiz)
+        c.execute("INSERT INTO session_model_usage(session_id, model, billing_provider, billing_base_url, billing_mode, task, input_tokens, output_tokens, first_seen, last_seen) VALUES('sesion_raiz_1','m','','','','',120,2,?,?)", (PRIMERA, PRIMERA))
+        c.commit()
+        c.close()
+        self.sesion()
+        self.uso()
+        for b in ingesta_hermes.bases(self.home):
+            self.pasada(ruta=b)
+        self.assertEqual(len(self.turnos()), 2)
+
     def test_el_perfil_no_entra_en_la_clave_y_cada_perfil_es_una_fuente(self):
         carpeta2 = os.path.join(self.home, ".hermes", "profiles", "life")
         os.makedirs(carpeta2)
@@ -165,9 +196,9 @@ class HermesTest(BaseH):
         self.sesion()
         self.uso()
         self.origen.close()
-        antes = open(self.ruta, "rb").read()
+        antes = (open(self.ruta, "rb").read(), sorted(os.listdir(os.path.dirname(self.ruta))))
         self.pasada()
-        self.assertEqual(open(self.ruta, "rb").read(), antes)
+        self.assertEqual((open(self.ruta, "rb").read(), sorted(os.listdir(os.path.dirname(self.ruta)))), antes)
         self.origen = sqlite3.connect(self.ruta)
 
 

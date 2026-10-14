@@ -6,8 +6,9 @@ un 17 % y un 47 % más que `sessions`. Cada fila es UN turno con clave `hermes:<
 contadores acumulados suben con el tiempo y el almacén se queda con el máximo (idempotente). La hora es `first_seen`, que no
 cambia (con `last_seen` la identidad se movería en cada lectura): todo el consumo de una sesión larga cae en su primera hora,
 igual que el lector anterior (que usaba `started_at`); repartirlo por tiempo exigiría guardar deltas y perdería la
-idempotencia. Jamás se usa la hora de la lectura. El proyecto sale del `cwd` de la sesión. `reasoning_tokens` no se suma
-(como en el lector anterior; mismo pendiente que OpenCode). Cada perfil es una fuente; el nombre del perfil no entra en la clave.
+idempotencia. Jamás se usa la hora de la lectura. El proyecto sale del `cwd` de la sesión. `reasoning_tokens` NO se suma: en
+Hermes ya va dentro de `output_tokens`. Cada base es una fuente: la raíz `~/.hermes/state.db` (perfil por defecto, la que más
+consume y que el lector anterior no leía) y una por perfil; el nombre del perfil no entra en la clave.
 """
 import hashlib
 import re
@@ -23,6 +24,29 @@ CONSULTA = """
 SELECT u.session_id, u.model, u.task, u.billing_provider, u.billing_base_url, u.billing_mode,
        u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens, u.first_seen, s.cwd
 FROM session_model_usage u LEFT JOIN sessions s ON s.id = u.session_id"""
+
+
+def bases(home):
+    """Bases de Hermes: la raíz (perfil por defecto) y las de cada perfil."""
+    import glob
+    import os
+    raiz = os.path.join(home, ".hermes", "state.db")
+    return ([raiz] if os.path.exists(raiz) else []) + sorted(glob.glob(os.path.join(home, ".hermes", "profiles", "*", "state.db")))
+
+
+def _url_publica(url):
+    """`proveedor` sin credenciales ni consulta: solo esquema, host(:puerto) y ruta. Una URL con usuario, contraseña o `?token=` no
+    puede acabar en la base (ni, por tanto, en exportaciones). Si no cabe, esquema y host; si no es una URL, el texto recortado."""
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(url)
+        if u.scheme and u.hostname:
+            host = u.hostname + (f":{u.port}" if u.port else "")
+            completa = f"{u.scheme}://{host}{u.path.rstrip('/')}"
+            return completa if len(completa) <= 120 else f"{u.scheme}://{host}"
+    except ValueError:
+        pass
+    return re.sub(r"[\x00-\x1f\x7f-\x9f]", "", url)[:120]
 
 
 def _n(v):
@@ -44,7 +68,7 @@ def _turno(fila):
     hora = a_epoch_utc(primera)
     if hora is None:
         return ("anomalia", "first_seen ilegible")
-    proveedor = burl if isinstance(burl, str) and burl else (bprov if isinstance(bprov, str) else "")
+    proveedor = _url_publica(burl) if isinstance(burl, str) and burl else (re.sub(r"[\x00-\x1f\x7f-\x9f]", "", bprov)[:120] if isinstance(bprov, str) else "")
     proyecto = proyecto_de_slug(re.sub(r"[^A-Za-z0-9]", "-", cwd)) if isinstance(cwd, str) and cwd else "hermes/otros"
     return {"clave": f"{AGENTE}:{sesion}:{_huella(modelo, bprov, burl, modo, tarea)}", "hora_utc": hora, "agente": AGENTE, "proveedor": proveedor,
             "modelo": modelo, "gi": _n(ti), "go": _n(to), "cr": _n(tcr), "cw": _n(tcw), "proyecto_raw": proyecto}
@@ -64,7 +88,7 @@ def ingerir_base(con, quien, espacio_id, ruta, base, ahora=None):
             filas = origen.execute(CONSULTA).fetchall()
         finally:
             origen.close()
-    except sqlite3.Error as e:
+    except (sqlite3.Error, ValueError, OSError) as e:
         almacen.anotar(con, quien, "ingesta", "", fid, f"fuente {fid}: base no legible o sin session_model_usage: {type(e).__name__}", ahora=ahora)
         total["anomalias"] += 1
         return total

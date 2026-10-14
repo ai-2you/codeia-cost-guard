@@ -474,7 +474,7 @@ def leer_marca(con, fuente_id, tipo):
 
 
 def guardar_marca(con, quien, fuente_id, tipo, valor, ahora=None):
-    if tipo not in ("marca", "firma"):
+    if tipo not in ("marca", "firma", "drenando"):
         raise ValueError("tipo de marca no válido")
     ahora = int(ahora if ahora is not None else time.time())
     _transaccion_de_escritor(con, quien, ahora)

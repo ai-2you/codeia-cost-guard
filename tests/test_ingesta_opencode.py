@@ -1,5 +1,5 @@
-"""Ingesta de OpenCode: dos bases como fuentes, solo assistant con tokens, avance por (time_updated, id) con paginación, mensajes
-que se completan después, base sin cambios sin abrirla, filas podadas que no se pierden y filas hostiles."""
+"""Ingesta de OpenCode: dos bases como fuentes, solo assistant con tokens, reasoning sumado a la salida, avance por (time_updated, id)
+con margen y paginación, mensajes que se completan después, base sin cambios sin abrirla, filas podadas que no se pierden y filas hostiles."""
 import json
 import os
 import shutil
@@ -12,6 +12,8 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aislamiento  # noqa: E402,F401
 from infobar import almacen, ingesta_opencode  # noqa: E402
+from infobar.ingesta import firma_sqlite  # noqa: E402
+ingesta_opencode.firma_sqlite = firma_sqlite
 
 T0 = 1_790_000_000_000      # ms
 
@@ -60,13 +62,13 @@ class BaseOC(unittest.TestCase):
 
 
 class OpenCodeTest(BaseOC):
-    def test_turno_basico_solo_assistant_y_reasoning_no_se_suma(self):
+    def test_turno_basico_solo_assistant_y_reasoning_se_suma_a_la_salida(self):
         self.inserta("msg_aaaa1111", datos())
         self.inserta("msg_user0001", datos(rol="user"))
         self.inserta("msg_sinmod01", json.dumps({"role": "assistant", "tokens": {"input": 1, "output": 1, "cache": {"read": 0, "write": 0}}}))
         self.assertEqual(self.pasada()["nuevos"], 1)
         t = self.turnos()["opencode:msg_aaaa1111"]
-        self.assertEqual((t["gi"], t["go"], t["cr"], t["cw"], t["modelo"], t["proveedor"], t["agente"]), (100, 50, 900, 10, "deepseek-v4-flash", "nan", "opencode"))
+        self.assertEqual((t["gi"], t["go"], t["cr"], t["cw"], t["modelo"], t["proveedor"], t["agente"]), (100, 350, 900, 10, "deepseek-v4-flash", "nan", "opencode"))       # salida 50 + reasoning 300
         self.assertEqual(t["hora_utc"], T0 // 1000)
         self.assertEqual(t["proyecto_raw"], "Proyectos/demo/app")
 
@@ -76,7 +78,7 @@ class OpenCodeTest(BaseOC):
         self.inserta("msg_aaaa1111", datos(inp=100, out=50), actualizado=T0 + 5000)
         r = self.pasada()
         self.assertEqual((r["subidos"], r["nuevos"]), (1, 0))
-        self.assertEqual(self.turnos()["opencode:msg_aaaa1111"]["go"], 50)
+        self.assertEqual(self.turnos()["opencode:msg_aaaa1111"]["go"], 350)
 
     def test_segunda_pasada_solo_lee_lo_nuevo_y_una_base_sin_cambios_ni_se_abre(self):
         for i in range(5):
@@ -86,7 +88,7 @@ class OpenCodeTest(BaseOC):
             self.assertTrue(self.pasada()["sin_cambios"])
         self.inserta("msg_nuevo001", datos(), actualizado=T0 + 99)
         r = self.pasada()
-        self.assertEqual((r["filas"], r["nuevos"]), (1, 1))
+        self.assertEqual((r["nuevos"], r["iguales"]), (1, 5))             # releyó el margen de 5 minutos (inocuo) y solo 1 es nuevo
 
     def test_paginacion_con_muchas_filas_con_el_mismo_time_updated(self):
         for i in range(25):
@@ -95,7 +97,78 @@ class OpenCodeTest(BaseOC):
             if self.pasada(max_filas=4)["completo"]:
                 break
         self.assertEqual(len(self.turnos()), 25)
-        self.assertEqual(sum(t["go"] for t in self.turnos().values()), sum(range(1, 26)))
+        self.assertEqual(sum(t["go"] for t in self.turnos().values()), sum(range(1, 26)) + 25 * 300)
+
+    def test_un_mensaje_confirmado_tarde_con_time_updated_menor_que_la_marca_no_se_pierde(self):
+        self.inserta("msg_aaaa1111", datos(), actualizado=T0 + 10 * 60000)
+        self.pasada()
+        self.inserta("msg_tarde001", datos(), actualizado=T0 + 9 * 60000)             # otro proceso lo confirma después, con una marca anterior
+        self.assertEqual(self.pasada()["nuevos"], 1)
+        self.assertEqual(len(self.turnos()), 2)
+
+    def test_paginacion_con_solape_termina_aunque_el_margen_tenga_mas_filas_que_la_pagina(self):
+        for i in range(30):
+            self.inserta(f"msg_{i:08d}", datos(out=i + 1), actualizado=T0 + i * 1000)       # 30 filas dentro de un margen de 5 minutos
+        for _ in range(60):
+            if self.pasada(max_filas=4)["completo"]:
+                break
+        else:
+            self.fail("el drenado no termina")
+        self.assertEqual(len(self.turnos()), 30)
+
+    def test_time_updated_con_texto_decimales_nulo_o_blob_no_bloquea_ni_repite(self):
+        for i, valor in enumerate(("1790000000100", 1790000000200.5, None, b"x", "no-numerico")):
+            self.origen.execute("INSERT INTO message VALUES(?,?,?,?,?)", (f"msg_raro{i:04d}", "s", T0, valor, datos()))
+        self.origen.commit()
+        for _ in range(10):
+            if self.pasada(max_filas=3)["completo"]:
+                break
+        self.assertEqual(len(self.turnos()), 5)
+        self.assertTrue(self.pasada()["sin_cambios"])
+
+    def test_ruta_relativa_o_inexistente_se_anota_sin_romper(self):
+        self.inserta("msg_aaaa1111", datos())
+        os.chdir(os.path.dirname(self.ruta))
+        try:
+            self.assertEqual(self.pasada(ruta="opencode.db")["nuevos"], 1)       # relativa: se resuelve a absoluta
+        finally:
+            os.chdir(self.dir)
+        self.assertEqual(self.pasada(ruta=os.path.join(self.dir, "no-existe.db"))["anomalias"], 1)
+
+    def test_abrir_una_base_con_wal_cerrada_no_crea_ficheros_ni_necesita_escribir_en_su_directorio(self):
+        carpeta = os.path.join(self.dir, "ajena")
+        os.makedirs(carpeta)
+        ruta = os.path.join(carpeta, "opencode.db")
+        c = sqlite3.connect(ruta)
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("CREATE TABLE message(id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT)")
+        c.execute("INSERT INTO message VALUES('msg_wal00001','s',?,?,?)", (T0, T0, datos()))
+        c.commit()
+        c.close()
+        for f in os.listdir(carpeta):
+            if f != "opencode.db":
+                os.remove(os.path.join(carpeta, f))
+        antes = sorted(os.listdir(carpeta))
+        os.chmod(carpeta, 0o500)
+        try:
+            self.assertEqual(self.pasada(ruta=ruta)["nuevos"], 1)
+        finally:
+            os.chmod(carpeta, 0o700)
+        self.assertEqual(sorted(os.listdir(carpeta)), antes)                         # ni -wal ni -shm nuevos
+
+    def test_la_firma_incluye_ctime(self):
+        self.assertEqual(ingesta_opencode.firma_sqlite(self.ruta).split("|")[0].count(":"), 2)
+
+    def test_el_json_roto_no_crea_una_anomalia_nueva_en_cada_pasada(self):
+        self.inserta("msg_json0001", "{no es json")
+        self.pasada()
+        self.inserta("msg_json0002", "{tampoco", actualizado=T0 + 5)
+        self.pasada()
+        self.assertEqual(len([a for a in almacen.anomalias(self.con, 50) if "JSON inválido" in a["detalle"]]), 1)
+
+    def test_las_filas_descartadas_cuentan_como_anomalias_en_el_resultado(self):
+        self.inserta("msg_gran0001", datos(inp=10 ** 15))
+        self.assertEqual(self.pasada()["anomalias"], 1)
 
     def test_las_filas_podadas_del_origen_no_se_pierden(self):
         self.inserta("msg_aaaa1111", datos())
@@ -160,9 +233,11 @@ class OpenCodeTest(BaseOC):
 
     def test_el_origen_no_se_modifica(self):
         self.inserta("msg_aaaa1111", datos())
-        antes = open(self.ruta, "rb").read()
+        self.origen.close()
+        antes = (open(self.ruta, "rb").read(), sorted(os.listdir(os.path.dirname(self.ruta))))
         self.pasada()
-        self.assertEqual(open(self.ruta, "rb").read(), antes)
+        self.assertEqual((open(self.ruta, "rb").read(), sorted(os.listdir(os.path.dirname(self.ruta)))), antes)
+        self.origen = sqlite3.connect(self.ruta)
 
     def test_ruta_con_caracteres_especiales(self):
         raro = os.path.join(os.path.dirname(self.ruta), "a#b?c d.db")
