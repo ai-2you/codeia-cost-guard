@@ -170,5 +170,6 @@ de contenedores, no de `done`) → **3.4** (EasyPanel tras exploración propia) 
 **Avance de 3.0 (2026-10-14):** hechos y probados en macOS: cerrojo portable (`plataforma.bloqueo_de_fichero`: `flock` y `msvcrt.locking` con tiempo máximo),
 `matar_arbol`/`grupo_nuevo_kwargs` en lugar de `os.killpg`/`start_new_session`, ningún módulo importa `fcntl`/`resource` al cargar (test), exclusión de copias del sistema
 verificada (`tmutil` en macOS, «no indexar» en Windows), poda de IPs de la caché a 48 h, purga horaria de las imágenes del desplegable (también en Windows),
-`Trabajador(pintar=False)` y `costbar.py --demonio`. **Pendiente de 3.0:** almacén de secretos de Windows (Administrador de credenciales) y probar todo en un
+`Trabajador(pintar=False)` y `costbar.py --demonio`. **Almacén de secretos (2026-10-15):** `claves.py` con dos almacenes (Llavero de macOS y Administrador de credenciales de Windows por ctypes,
+persistencia solo de este equipo), validación común de la clave y 9 tests con un advapi32 simulado. **Pendiente de 3.0:** probar todo en un
 Windows real con `--autoprueba-copias` ampliada; el código de Windows está probado con simulaciones, no en el sistema.

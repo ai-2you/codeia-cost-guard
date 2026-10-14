@@ -26,6 +26,8 @@ rutas.COPIAS = os.path.join(rutas.DATOS, "copias")
 os.environ.pop("NAN_API_KEY", None)
 from infobar import claves  # noqa: E402
 
+if not hasattr(claves, "leer_clave_real"):          # una sola vez, aunque el módulo se importe por dos nombres
+    claves.leer_clave_real = claves.leer_clave      # para las pruebas del propio almacén
 claves.leer_clave = lambda cuenta: ""
 
 
