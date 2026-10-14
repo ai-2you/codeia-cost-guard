@@ -1,6 +1,6 @@
-# Fase 3 ampliada — monitorización completa de servidores, paneles, servicios y bases de datos (plan v2, pendiente de pre-mortem y red team)
+# Fase 3 ampliada — monitorización completa de servidores, paneles, servicios y bases de datos (plan v3, con la revisión `../reports/revision-plan-fase3-ampliada-261014.md` aceptada)
 
-Estado: **plan v2 sin código** (incorpora las respuestas del dueño y una exploración de solo lectura del Dokploy real). Fecha: 2026-10-14. Sustituye el alcance de `fase3-diseno.md` (historial de servidores e IPs): ese diseño y su
+Estado: **plan v3**; ver «Decisiones y orden definitivos» al final. Antes: plan v2 sin código (incorpora las respuestas del dueño y una exploración de solo lectura del Dokploy real). Fecha: 2026-10-14. Sustituye el alcance de `fase3-diseno.md` (historial de servidores e IPs): ese diseño y su
 revisión (`../reports/revision-diseno-fase3-261014.md`) pasan a ser la **fase 3.1** de este plan, con sus correcciones. Lo nuevo es todo lo
 que hay *dentro* de los servidores.
 
@@ -150,3 +150,19 @@ Cada fase: pre-mortem y red team independientes antes de escribir código; tests
 (respuestas gigantes, JSON con tipos cambiados, etiquetas con control y HTML, IPs privadas, cardinalidad explosiva, relojes del futuro);
 borrado verificado leyendo los bytes del fichero; mutaciones sobre los filtros de seguridad; prueba en Windows con `--autoprueba` ampliada; y
 revisión independiente del código con foco en privacidad y en mínimo privilegio.
+
+## Decisiones y orden definitivos (v3, 2026-10-14, tras la revisión independiente del plan)
+Decisiones del dueño (aceptó las recomendaciones de la revisión): **D-A** CostGuard empieza **sin API de panel** (todo por SSH y Docker, sin credenciales
+nuevas); la API de Dokploy/EasyPanel queda como segunda etapa y, si se hace, con una clave **dedicada** de un usuario Member recortado, nunca la del MCP, y
+comprobando al dar de alta que una ruta de escritura responde 403. **D-B** el ciclo de servidores tendrá un modo headless `--demonio` que sirve para
+Windows (servicio o tarea programada) y Linux. **D-C** los nombres de recursos se guardan como datos personales (etiqueta clasificada, retención y borrado al
+quitar el servidor; se revierte el no objetivo «no guardar nombres de contenedores» de `fase3-diseno.md`). **D-D** certificados no válidos de los paneles se
+rechazan; la huella SPKI fijada es opcional y posterior. **D-E** `recoger` v2 también en servidores de clientes (mismos privilegios); `recoger-bd` solo en los
+propios o con autorización escrita. Kubernetes queda fuera del plan (el modelo es genérico). Servidores remotos de Dokploy: `servidor_panel_id` nullable desde 3.1.
+
+Orden: **3.0** (portabilidad completa con ejecutor, retención fuera de la base) → **3.1** (núcleo SQLite extraído y parametrizado por esquema; esquema genérico de
+recursos desde el primer día; aceptados explícitamente los cambios de la revisión de 3.1: `ok_en`, registrar fuera del cerrojo, `caduca_en` calculado,
+`horas_vista`, `ips_conocidas` fuera, copia premigración sin IPs, 90 días como máximo) → **3.3a** (`recoger` v2 + `docker_ssh` + caducidad de certificados) →
+**3.2** (API Dokploy, condicionada a D-A: solo `settings.health`, `overview.services`, `overview.backups`, `docker.getServerHealth`; historial propio de
+«última copia buena» por servicio, histéresis y desaparición tras dos ciclos, cabecera `Date` del panel como reloj) → **3.5** (reglas honestas: el estado vivo sale
+de contenedores, no de `done`) → **3.4** (EasyPanel tras exploración propia) → **3.6** (pestaña) → **3.3b** (`recoger-bd`, condicionada).
