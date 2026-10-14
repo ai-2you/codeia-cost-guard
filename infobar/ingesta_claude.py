@@ -9,7 +9,7 @@ import re
 import urllib.parse
 
 from . import ingesta
-from .ingesta import a_epoch_utc
+from .ingesta import a_epoch_utc, texto_seguro
 
 AGENTE = "claude"
 _ID_ANTHROPIC = re.compile(r"^msg_[0-9A-Za-z]{10,40}$")
@@ -42,7 +42,7 @@ def _proveedor(modelo):
 
 
 def _texto(v, maximo):
-    return v if isinstance(v, str) and 0 < len(v) <= maximo else ""
+    return texto_seguro(v, maximo)
 
 
 def extractor(d, ctx):
@@ -56,7 +56,10 @@ def extractor(d, ctx):
     hora = a_epoch_utc(d.get("timestamp"))
     if hora is None:
         return ("anomalia", "marca de tiempo sin zona o ilegible")
-    modelo = _texto(m.get("model"), 120) or ctx.get("modelo") or "sin-modelo"
+    crudo = m.get("model")
+    if crudo is not None and not _texto(crudo, 120):        # un modelo presente pero inválido (control, sustitutos, enorme) no se disfraza con otro
+        return ("anomalia", "nombre de modelo no válido")
+    modelo = _texto(crudo, 120) or ctx.get("modelo") or "sin-modelo"
     ctx["modelo"] = modelo
     if _ID_ANTHROPIC.match(mid):
         clave = f"{AGENTE}:{mid}"

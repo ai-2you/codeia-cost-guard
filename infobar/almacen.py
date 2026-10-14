@@ -179,6 +179,9 @@ def _migrar(con, ruta):
     if version > VERSION_ESQUEMA:
         raise ErrorAlmacen(f"la base es de una versión más nueva ({version}); actualiza la aplicación")
     if version == VERSION_ESQUEMA:
+        columnas = {f[1] for f in con.execute("PRAGMA table_info(lecturas)")}
+        if not {"contexto", "hash_cola"} <= columnas:
+            raise ErrorAlmacen("la base tiene un esquema v1 de desarrollo ya obsoleto (sin lecturas.contexto): bórrala y se recreará")
         return _comprueba_escritor_compatible(con)
     if version > 0 and (_tablas(con) - {"sqlite_sequence"}):
         # hay datos de una versión anterior: copia ANTES de cambiar el esquema (regla del proyecto)

@@ -226,10 +226,20 @@ def _contexto_guardado(estado):
     return d if isinstance(d, dict) else {}
 
 
+def texto_seguro(v, maximo):
+    """`v` si es un texto no vacío, UTF-8 real (sin sustitutos sueltos), sin caracteres de control y de longitud acotada; si no, ""."""
+    return v if almacen._texto_ok(v, maximo) and v else ""
+
+
 def _serializa_contexto(ctx):
-    """Solo valores de texto cortos (sesión, modelo, proyecto...): el contexto no puede crecer sin límite ni llevar basura."""
-    limpio = {k: v for k, v in ctx.items() if isinstance(k, str) and len(k) <= 30 and isinstance(v, str) and len(v) <= 200}
-    texto = json.dumps(limpio, ensure_ascii=False)
+    """Solo valores de texto cortos y válidos (sesión, modelo, proyecto...): el contexto no puede crecer sin límite, ni llevar
+    sustitutos o control, ni romper el guardado de la lectura (un fallo aquí bloquearía el fichero en cada pasada)."""
+    limpio = {k: v for k, v in ctx.items() if texto_seguro(k, 30) and texto_seguro(v, 200)}
+    try:
+        texto = json.dumps(limpio, ensure_ascii=False)
+        texto.encode("utf-8")
+    except (ValueError, UnicodeError):
+        return "{}"
     return texto if len(texto) <= 1000 else "{}"
 
 
