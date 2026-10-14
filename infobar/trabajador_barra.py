@@ -7,7 +7,7 @@ cambia imagenes. Una excepcion se registra y el bucle sigue: el hilo no muere.
 """
 import threading, time, traceback
 
-from . import cuota_nan, desplegable_png, presupuestos, servidores_ciclo
+from . import cuota_nan, desplegable_png, permisos, presupuestos, servidores_ciclo
 from . import sombra
 from .agregacion import ULTIMOS, informe
 from .config_y_estado import cfg, log
@@ -18,9 +18,11 @@ DESPIERTA = 15              # s maximos dormido: el ciclo de servidores decide s
 
 
 class Trabajador(threading.Thread):
-    def __init__(self, entregar):
+    def __init__(self, entregar, pintar=True):
+        """`pintar=False` es el modo sin interfaz (`costbar.py --demonio`): hace todo salvo renderizar el desplegable con Chrome."""
         super().__init__(name="infobar-trabajador", daemon=True)
         self.entregar = entregar
+        self.pintar = pintar
         self._evento = threading.Event()
         self._cerrojo = threading.Lock()
         self._pedidos = set()
@@ -35,7 +37,7 @@ class Trabajador(threading.Thread):
 
     def run(self):
         r, ultimo_scan, ultimo_render, gen_srv = None, 0.0, 0.0, None
-        migrado = False
+        migrado, ultima_purga = False, 0.0
         while True:
             self._evento.wait(timeout=DESPIERTA)
             self._evento.clear()
@@ -49,6 +51,12 @@ class Trabajador(threading.Thread):
                 if r is None or forzar or ahora - ultimo_scan >= CADA_AGENTES:
                     r = informe()
                     ultimo_scan = ahora
+                    if ahora - ultima_purga >= 3600:
+                        ultima_purga = ahora
+                        try:
+                            permisos.purgar_render()            # las imágenes con IPs no esperan al próximo arranque
+                        except Exception:
+                            log("purga de imágenes: " + traceback.format_exc()[-300:])
                     try:
                         if not migrado:
                             presupuestos.migrar()
@@ -81,6 +89,8 @@ class Trabajador(threading.Thread):
                 self.entregar("refresco_hecho", None)       # quita la ruedita del boton
 
     def _pinta(self, r, cache):
+        if not self.pintar:
+            return False
         nuevo = desplegable_png.renderizar(r, cache, cfg().get("servidores") or [], previo=self.conjunto)
         if nuevo:
             self.conjunto = nuevo

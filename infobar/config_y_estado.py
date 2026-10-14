@@ -5,9 +5,9 @@ config.json lo escriben la barra, el configurador del panel y el CLI: toda escri
 guardar_config(), que bloquea, FUSIONA con lo que haya en disco y reemplaza el fichero de golpe.
 Asi dos escritores a la vez no se pisan y nadie borra claves que no conoce.
 """
-import contextlib, fcntl, glob, json, os, tempfile, time
+import contextlib, glob, json, os, tempfile, time
 
-from . import rutas
+from . import plataforma, rutas
 
 
 VERSION_ESTADO = 13         # subir cuando cambie el formato del cache o lo que cuenta el parser: obliga a reescanear
@@ -87,12 +87,12 @@ def _migra_servidores():
 def _bloqueo(ruta):
     """Bloqueo exclusivo entre procesos (barra, panel, CLI) sobre <ruta>.lock."""
     os.makedirs(os.path.dirname(ruta), exist_ok=True)
-    with open(f"{ruta}.lock", "a") as fl:
-        fcntl.flock(fl, fcntl.LOCK_EX)
-        try:
+    with open(f"{ruta}.lock", "a+") as fl:
+        if os.name == "nt" and os.fstat(fl.fileno()).st_size == 0:
+            fl.write("\0")                         # msvcrt.locking bloquea un byte: tiene que existir
+            fl.flush()
+        with plataforma.bloqueo_de_fichero(fl):
             yield
-        finally:
-            fcntl.flock(fl, fcntl.LOCK_UN)
 
 
 def _escribe_json(ruta, datos):

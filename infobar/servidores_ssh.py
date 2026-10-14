@@ -4,8 +4,9 @@ La clave dedicada solo puede ejecutar el script del servidor (command= en author
 aqui no se envia ninguna orden: se conecta y se lee. Todo con tope de tiempo y de tamano, y sin
 heredar nada peligroso de ~/.ssh/config (ProxyCommand, LocalCommand, reenvios).
 """
-import math, os, re, signal, subprocess, time
+import math, os, re, subprocess, time
 
+from . import plataforma
 from .servidores import errores_servidores
 
 CLAVE = os.path.expanduser("~/.ssh/infobar_ed25519")
@@ -64,10 +65,7 @@ def _lee_con_tope(flujo, tope, destino, excedido):
 
 
 def _mata(p):
-    try:
-        os.killpg(p.pid, signal.SIGKILL)       # el grupo entero: no quedan ssh huerfanos
-    except OSError:
-        pass
+    plataforma.matar_arbol(p)                  # el grupo entero: no quedan ssh huerfanos
 
 
 def ejecutar(servidor):
@@ -82,7 +80,7 @@ def ejecutar(servidor):
         return "", str(e)
     try:
         p = subprocess.Popen(orden, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, start_new_session=True)
+                             stderr=subprocess.PIPE, **plataforma.grupo_nuevo_kwargs())
     except OSError as e:
         return "", f"no se pudo lanzar ssh: {e}"
     salida, err, excedido = [], [], threading.Event()

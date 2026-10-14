@@ -144,6 +144,8 @@ class Barra(NSObject):
         boton.setTitle_("…")
         self.pop, self.conjunto, self.escala, self.alto_mostrado = None, None, 1.0, 0
         self.punto = None
+        from infobar import permisos
+        permisos.excluir_datos_sensibles()                  # base y logs fuera de Time Machine
         self.trabajador = Trabajador(self.entregar)
         self.trabajador.start()
         self.ingesta = None

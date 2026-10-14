@@ -30,10 +30,18 @@ def _modo(ruta, modo):
         pass
 
 
+def excluir_datos_sensibles():
+    """Una vez al arrancar la barra o el demonio: la base de consumo y los logs (con IPs y nombres) fuera de las copias automáticas del
+    sistema. Devuelve cuántas rutas quedaron excluidas."""
+    from . import plataforma
+    return sum(bool(plataforma.excluir_de_copias_del_sistema(r)) for r in (rutas.DATOS, os.path.dirname(rutas.LOG)))
+
+
 def endurecer():
     """Llamar al arrancar (barra, CLI, panel). Idempotente y barata."""
     os.umask(0o077)
     if os.name == "nt":
+        purgar_render()
         return
     base = os.path.dirname(rutas.LOG)                   # .../logs
     if _es_instalacion():
@@ -51,19 +59,19 @@ def endurecer():
 
 
 def purgar_render():
-    """Las imagenes del desplegable llevan host e IPs: privadas y fuera pasada una hora."""
-    if os.name == "nt":
-        return
+    """Las imagenes del desplegable llevan host e IPs: privadas y fuera pasada una hora. Se llama al arrancar y cada hora (en Windows solo
+    borra: los permisos van por la carpeta de datos del usuario)."""
     render = os.path.join(os.path.dirname(rutas.LOG), "render")
     if not os.path.isdir(render):
         return
-    _modo(render, 0o700)
+    if os.name != "nt":
+        _modo(render, 0o700)
     ahora = time.time()
     for f in glob.glob(os.path.join(render, "*")):
         try:
             if ahora - os.stat(f).st_mtime > RENDER_CADUCA_S:
                 os.remove(f)
-            else:
+            elif os.name != "nt":
                 _modo(f, 0o600)
         except OSError:
             pass

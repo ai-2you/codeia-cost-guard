@@ -7,9 +7,9 @@ Se ejecuta en el hilo trabajador de barra.py, nunca en el principal. Cada tanda 
 un numero de generacion en el nombre: la vista cambia de tanda de una vez y nunca lee un PNG a
 medio escribir; las tandas viejas se borran despues.
 """
-import glob, os, shutil, signal, subprocess, tempfile, time
+import glob, os, shutil, subprocess, tempfile, time
 
-from . import desplegable_agentes, desplegable_servidores, permisos, rutas
+from . import desplegable_agentes, desplegable_servidores, permisos, plataforma, rutas
 from . import geometria_desplegable as G
 from .config_y_estado import log
 
@@ -44,11 +44,11 @@ def html_a_png(html_txt, destino, chrome):
                         "--default-background-color=00000000",
                         "--force-device-scale-factor=2", f"--window-size={G.ANCHO},{ALTO_MAX}",
                         f"--screenshot={bruto}", f"file://{pagina}"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **plataforma.grupo_nuevo_kwargs())
         try:
             p.wait(timeout=25)
         except subprocess.TimeoutExpired:
-            os.killpg(p.pid, signal.SIGKILL)       # Chrome y todos sus procesos hijos
+            plataforma.matar_arbol(p)              # Chrome y todos sus procesos hijos
             p.wait()
             raise TimeoutError("Chrome no termino en 25 s")
         im = Image.open(bruto).convert("RGBA")

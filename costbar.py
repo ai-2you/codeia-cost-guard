@@ -58,8 +58,43 @@ def ingerir_cli():
         ing.cierra()
 
 
+def demonio(esperar=True):
+    """python3 costbar.py --demonio: todo lo que hace la barra, sin icono ni Chrome (ingesta, copias cifradas, ciclo de servidores,
+    presupuestos y panel local). Es la forma de tenerlo en marcha en Windows (tarea programada o servicio), Linux o un servidor.
+    Con `esperar=False` arranca los hilos y los devuelve (los tests)."""
+    import signal
+    import threading
+    from infobar import permisos, trabajador_barra
+    permisos.excluir_datos_sensibles()
+    servir()
+    hilos = [trabajador_barra.Trabajador(lambda *a: None, pintar=False)]
+    if str(cfg().get("almacen") or "sombra").lower() != "desactivado":
+        from infobar.hilo_copias import HiloCopias
+        from infobar.ingestor import HiloIngesta
+        hilos += [HiloIngesta(), HiloCopias()]
+    for h in hilos:
+        h.start()
+    log("demonio: trabajador" + (", ingesta y copias" if len(hilos) > 1 else "") + " en marcha")
+    if not esperar:
+        return hilos
+    parar = threading.Event()
+    for nombre in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        if hasattr(signal, nombre):
+            signal.signal(getattr(signal, nombre), lambda *a: parar.set())
+    parar.wait()
+    for h in hilos:
+        if hasattr(h, "parar"):
+            h.parar.set()
+    for h in hilos:
+        if hasattr(h, "parar"):
+            h.join(timeout=10)
+    log("demonio: parado")
+
+
 def main():
     endurecer()
+    if "--demonio" in sys.argv:
+        return demonio()
     if "--ingerir" in sys.argv:
         return ingerir_cli()
     from infobar import cli_copias

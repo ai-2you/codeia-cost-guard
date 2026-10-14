@@ -94,3 +94,93 @@ def avisar(titulo, texto):
         return True
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+# ---------------------------------------------------------------- procesos y cerrojos portables
+
+def grupo_nuevo_kwargs():
+    """Argumentos de Popen para que el proceso hijo y sus hijos se puedan matar juntos: sesión nueva en POSIX, grupo nuevo en Windows."""
+    if os.name == "nt":
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}
+
+
+def matar_arbol(proc):
+    """Mata a `proc` y a todo lo que haya lanzado. No falla si ya terminó."""
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        return
+    import signal
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+class bloqueo_de_fichero:
+    """Cerrojo exclusivo entre procesos sobre un fichero abierto: `flock` en POSIX, `msvcrt.locking` en Windows (que no bloquea para siempre:
+    se reintenta hasta `espera_s` y luego falla con TimeoutError, en vez de colgar la barra)."""
+    def __init__(self, fichero, espera_s=30.0):
+        self.f, self.espera_s = fichero, espera_s
+
+    def __enter__(self):
+        if os.name == "nt":
+            import msvcrt, time
+            self.f.seek(0)
+            fin = time.monotonic() + self.espera_s
+            while True:
+                try:
+                    msvcrt.locking(self.f.fileno(), msvcrt.LK_NBLCK, 1)
+                    return self
+                except OSError:
+                    if time.monotonic() > fin:
+                        raise TimeoutError("no se pudo tomar el cerrojo a tiempo") from None
+                    time.sleep(0.05)
+        import fcntl
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *a):
+        if os.name == "nt":
+            import msvcrt
+            try:
+                self.f.seek(0)
+                msvcrt.locking(self.f.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+            return
+        import fcntl
+        fcntl.flock(self.f, fcntl.LOCK_UN)
+
+
+# ---------------------------------------------------------------- copias del sistema y datos sensibles
+
+def excluir_de_copias_del_sistema(ruta):
+    """Pide al sistema que no copie `ruta` en sus copias automáticas ni la indexe. macOS: exclusión de Time Machine (por ruta, se queda en el
+    xattr). Windows: atributo «no indexar» (el Historial de archivos y OneDrive no cubren %LOCALAPPDATA% por defecto; la copia soportada es la
+    cifrada de la aplicación). Devuelve True si quedó hecho; False si no se pudo o no aplica."""
+    if not os.path.isdir(ruta):
+        return False
+    try:
+        if sys.platform == "darwin":
+            r = subprocess.run(["tmutil", "isexcluded", ruta], capture_output=True, text=True, timeout=10)
+            if "[Excluded]" in r.stdout:
+                return True
+            return subprocess.run(["tmutil", "addexclusion", ruta], capture_output=True, timeout=10).returncode == 0
+        if os.name == "nt":
+            import ctypes
+            FILE_ATTRIBUTE_NOT_CONTENT_INDEXED = 0x2000
+            atributos = ctypes.windll.kernel32.GetFileAttributesW(ruta)
+            if atributos == -1:
+                return False
+            return bool(ctypes.windll.kernel32.SetFileAttributesW(ruta, atributos | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED))
+    except (OSError, subprocess.SubprocessError, AttributeError):
+        return False
+    return False

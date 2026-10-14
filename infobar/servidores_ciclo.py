@@ -24,6 +24,7 @@ INCIDENCIA_MANUAL_S = 30 * 60
 # la IP del Mac (tambien para tu propio ssh). Esos errores esperan media hora o a Refrescar.
 ERRORES_SIN_REINTENTO = ("autenticacion", "clave de host no confiada", "falta la clave ~/.ssh/infobar_ed25519")
 ESPERA_TRAS_RECHAZO = 30 * 60
+CACHE_IPS_VIDA_S = 48 * 3600       # las IPs de intentos de acceso y de sesiones no se conservan en la caché más de 48 h
 HILOS = 4
 TOPE_POR_TANDA = 32         # s: ssh (20) + webs y puertos en paralelo; con N servidores, ceil(N/4) tandas
 _EN_MARCHA = threading.Lock()
@@ -141,6 +142,22 @@ def ciclo(forzar=False):
         _EN_MARCHA.release()
 
 
+def podar_ips(entrada, ahora, vida_s=CACHE_IPS_VIDA_S):
+    """Quita de una entrada de la caché las IPs (de intentos de acceso y de sesiones) cuando su último dato bueno es más viejo que `vida_s`.
+    Devuelve la misma entrada, modificada. La caché guarda el último dato bueno sin límite; las IPs son datos personales y no deben vivir más."""
+    if ahora - (entrada.get("ok_en") or 0) <= vida_s:
+        return entrada
+    datos = entrada.get("datos")
+    if isinstance(datos, dict):
+        it = datos.get("intentos")
+        if isinstance(it, dict):
+            it["top"] = []
+        for s in datos.get("sesiones") or []:
+            if isinstance(s, dict):
+                s["desde"] = ""
+    return entrada
+
+
 def _guardar(servidores, cache, nuevos, ahora):
     with _bloqueo(rutas.SERVIDORES):
         salida = {}
@@ -157,7 +174,7 @@ def _guardar(servidores, cache, nuevos, ahora):
                 if not r.get("error"):
                     previo.update(r)
                     previo["ok_en"] = ahora
-            salida[n] = previo
+            salida[n] = podar_ips(previo, ahora)
         datos = {"generado_en": ahora, "servidores": salida}
         _escribe_json(rutas.SERVIDORES, datos)
     return datos
