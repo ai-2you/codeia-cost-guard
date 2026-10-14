@@ -188,7 +188,8 @@ def parsear_pi(ruta):
 
     Formato (igual que el lector de nodeclub-tracker): los turnos son mensajes assistant con
     message.usage = {input, output, cacheRead, cacheWrite, reasoning, cost:{total}}. `reasoning`
-    NO va dentro de `output` (totalTokens = input+output), asi que se suma a la salida. Los
+    YA va dentro de `output` (medido: totalTokens = input+output+cache en todos los turnos y reasoning <= output),
+    asi que NO se suma: hacerlo inflaba la salida de pi un 52 %. Los
     timestamps van en UTC (iso con Z) y hay que pasarlos a hora local para no descuadrar el dia.
     Cada turno lleva su `provider` (nodeclub, anthropic, opencode-go, ...) y una misma sesion
     puede cambiar de proveedor a mitad, asi que se devuelven los registros por proveedor:
@@ -217,7 +218,7 @@ def parsear_pi(ruta):
         uso = m["usage"]
         ts = a_local(d.get("timestamp") or m.get("timestamp") or "")     # UTC -> hora local
         gi = uso.get("input", 0) or 0
-        go = (uso.get("output", 0) or 0) + (uso.get("reasoning", 0) or 0)
+        go = uso.get("output", 0) or 0                 # `reasoning` ya va DENTRO de `output` (totalTokens = input+output+cache): no se suma
         cr = uso.get("cacheRead", 0) or 0
         cw = uso.get("cacheWrite", 0) or 0
         modelo = m.get("model") or "sin-modelo"

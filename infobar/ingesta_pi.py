@@ -1,10 +1,12 @@
 """Extractor de pi (~/.pi/agent/sessions/<cwd-slug>/*.jsonl) para la ingesta.
 
 Una cabecera `{type: session, id, cwd}` y una línea por mensaje; los turnos son mensajes `assistant` con
-`message.usage = {input, output, cacheRead, cacheWrite, reasoning, cost}`. `reasoning` NO va dentro de `output`: se suma a la
-salida. Cada línea lleva un `id` único (medido: ni uno repetido entre los 22 ficheros reales) y las ramas/forks copian las
-líneas con el mismo id, así que la clave es `pi:<id de línea>` y los forks se deduplican solos. Cada turno lleva su `provider`
-(nodeclub, anthropic, opencode-go...): una misma sesión puede cambiar de proveedor a mitad.
+`message.usage = {input, output, cacheRead, cacheWrite, reasoning, cost}`. `reasoning` YA va dentro de `output` (medido:
+`totalTokens = input+output+cache` en todos los turnos y `reasoning <= output`): NO se suma. Clave `pi:<responseId>`, el
+id de la respuesta del proveedor (único en los datos reales); el `id` de línea de pi son 8 hexadecimales y no sirve como
+clave global (colisión del 25 % a 50.000 turnos). Sin `responseId` (errores con uso 0) se usa `pi:<sesión>:<id de línea>`.
+Si pi copiase líneas entre ramas, el `responseId` las deduplicaría. La hora es la de la línea (`timestamp` ISO), igual
+que en Claude y Codex. Cada turno lleva su `provider`: una misma sesión puede cambiar de proveedor a mitad.
 """
 import json
 import os
@@ -22,8 +24,9 @@ def _slug(cwd):
 
 
 def contexto_de_fichero(ruta):
-    """Proyecto de la cabecera (`cwd`) o, si falta, de la carpeta de la sesión (que lleva el cwd convertido a texto plano)."""
-    ctx = {"proyecto": proyecto_de_slug(os.path.basename(os.path.dirname(ruta))) or "otros"}
+    """Proyecto de la cabecera (`cwd`) o, si falta, de la carpeta de la sesión (que lleva el cwd convertido a texto plano, con
+    espacios y signos que aquí se normalizan igual que en el `cwd`)."""
+    ctx = {"proyecto": proyecto_de_slug(_slug(os.path.basename(os.path.dirname(ruta)))) or "otros"}
     try:
         with open(ruta, "rb") as f:
             for linea in f.read(MAX_CABECERA).split(b"\n")[:20]:
@@ -41,14 +44,13 @@ def _cabecera(ctx, d):
     cwd = texto_seguro(d.get("cwd"), 1000)
     if cwd:
         ctx["proyecto"] = proyecto_de_slug(_slug(cwd))
+    sesion = texto_seguro(d.get("id"), 64)
+    if _ID.match(sesion):
+        ctx["sesion"] = sesion
 
 
 def _n(v):
     return 0 if v is None else v
-
-
-def _suma(a, b):
-    return a + b if all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in (a, b)) else a if not isinstance(a, (int, float)) else b
 
 
 def extractor(d, ctx):
@@ -59,9 +61,13 @@ def extractor(d, ctx):
     m = d.get("message")
     if not (isinstance(m, dict) and m.get("role") == "assistant" and isinstance(m.get("usage"), dict)):
         return None
-    uso, linea_id = m["usage"], d.get("id")
-    if not (isinstance(linea_id, str) and _ID.match(linea_id)):
-        return ("anomalia", "mensaje sin id válido")
+    uso, linea_id, respuesta = m["usage"], d.get("id"), m.get("responseId")
+    if isinstance(respuesta, str) and _ID.match(respuesta):
+        clave = f"{AGENTE}:{respuesta}"
+    elif isinstance(linea_id, str) and _ID.match(linea_id) and ctx.get("sesion"):
+        clave = f"{AGENTE}:{ctx['sesion']}:{linea_id}"
+    else:
+        return ("anomalia", "mensaje sin responseId ni id de sesión y línea válidos")
     hora = a_epoch_utc(d.get("timestamp") if d.get("timestamp") is not None else m.get("timestamp"))
     if hora is None:
         return ("anomalia", "marca de tiempo sin zona o ilegible")
@@ -71,7 +77,6 @@ def extractor(d, ctx):
     proveedor = m.get("provider")
     if proveedor is not None and not texto_seguro(proveedor, 120):
         return ("anomalia", "nombre de proveedor no válido")
-    salida = _suma(_n(uso.get("output")), _n(uso.get("reasoning")))
-    return {"clave": f"{AGENTE}:{linea_id}", "hora_utc": hora, "agente": AGENTE, "proveedor": (proveedor or "sin-proveedor").strip() or "sin-proveedor",
-            "modelo": crudo or "sin-modelo", "gi": _n(uso.get("input")), "go": salida, "cr": _n(uso.get("cacheRead")),
+    return {"clave": clave, "hora_utc": hora, "agente": AGENTE, "proveedor": (proveedor or "sin-proveedor").strip() or "sin-proveedor",
+            "modelo": crudo or "sin-modelo", "gi": _n(uso.get("input")), "go": _n(uso.get("output")), "cr": _n(uso.get("cacheRead")),
             "cw": _n(uso.get("cacheWrite")), "proyecto_raw": ctx.get("proyecto") or "otros"}

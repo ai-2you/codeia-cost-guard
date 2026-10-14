@@ -152,7 +152,7 @@ class ParsearTest(TZFix):
 
 
 class ParsearPiTest(TZFix):
-    def test_pi_z_a_local_reasoning_y_dedup(self):
+    def test_pi_z_a_local_reasoning_incluido_y_dedup(self):
         d = self._carpeta(".pi", "agent", "sessions", "x")
         uso = {"input": 100, "output": 10, "reasoning": 3, "cacheRead": 5, "cacheWrite": 1}
         _escribir(d, "s.jsonl", [
@@ -169,8 +169,8 @@ class ParsearPiTest(TZFix):
         rec = r["proveedores"]["nodeclub"]
         self.assertEqual(rec["turnos"], {"2026-09-27": 2})
         self.assertEqual(set(rec["horas"]), {"2026-09-27T22", "2026-09-27T23"})
-        # reasoning (3 x 2 turnos) va con la salida
-        self.assertEqual(rec["dia"]["2026-09-27"]["claude-sonnet-5"], [200, 26, 10, 2])
+        # reasoning ya va DENTRO de output: la salida es la de `output` (10 x 2 turnos), sin sumarle el reasoning
+        self.assertEqual(rec["dia"]["2026-09-27"]["claude-sonnet-5"], [200, 20, 10, 2])
 
 
 class PeriodoTest(TZFix):

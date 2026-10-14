@@ -1,4 +1,4 @@
-"""Ingesta de pi: clave por id de línea (los forks se deduplican), reasoning sumado a la salida, proveedor por turno,
+"""Ingesta de pi: clave por responseId (fallback sesión+línea), reasoning ya incluido en la salida, proveedor por turno,
 líneas hostiles y equivalencia con el parser actual."""
 import json
 import os
@@ -21,7 +21,7 @@ def mensaje(lid, ts="2026-05-20T10:01:00.000Z", inp=100, out=50, cr=900, cw=10, 
     if reasoning is not None:
         uso["reasoning"] = reasoning
     d = {"type": "message", "id": lid, "parentId": None, "timestamp": ts,
-         "message": {"role": role, "provider": proveedor, "model": modelo, "usage": uso, "timestamp": 1747735260000}}
+         "message": {"role": role, "provider": proveedor, "model": modelo, "usage": uso, "timestamp": 1747735260000, "responseId": "resp_" + lid}}
     d.update(extra)
     return json.dumps(d)
 
@@ -59,27 +59,27 @@ class Base(unittest.TestCase):
 
 
 class PiTest(Base):
-    def test_turno_basico_reasoning_se_suma_a_la_salida_y_proveedor_por_turno(self):
+    def test_turno_basico_reasoning_ya_esta_en_la_salida_y_proveedor_por_turno(self):
         self.escribe([cabecera(), mensaje("aaaa1111", proveedor="nodeclub"), mensaje("bbbb2222", proveedor="opencode-go")])
         self.assertEqual(self.pasada()["nuevos"], 2)
-        t = self.turnos()["pi:aaaa1111"]
-        self.assertEqual((t["gi"], t["go"], t["cr"], t["cw"], t["agente"]), (100, 57, 900, 10, "pi"))
+        t = self.turnos()["pi:resp_aaaa1111"]
+        self.assertEqual((t["gi"], t["go"], t["cr"], t["cw"], t["agente"]), (100, 50, 900, 10, "pi"))      # reasoning (7) NO se suma
         self.assertEqual({t["proveedor"] for t in self.turnos().values()}, {"nodeclub", "opencode-go"})
 
     def test_sin_reasoning_no_falla(self):
         self.escribe([cabecera(), mensaje("aaaa1111", reasoning=None)])
         self.pasada()
-        self.assertEqual(self.turnos()["pi:aaaa1111"]["go"], 50)
+        self.assertEqual(self.turnos()["pi:resp_aaaa1111"]["go"], 50)
 
     def test_proyecto_de_cwd_sin_usuario_y_comun_con_los_demas_agentes(self):
         self.escribe([cabecera(), mensaje("aaaa1111")])
         self.pasada()
-        self.assertEqual(self.turnos()["pi:aaaa1111"]["proyecto_raw"], "Proyectos/demo/app")
+        self.assertEqual(self.turnos()["pi:resp_aaaa1111"]["proyecto_raw"], "Proyectos/demo/app")
 
     def test_sin_cabecera_el_proyecto_sale_de_la_carpeta(self):
         self.escribe([mensaje("aaaa1111")])
         self.pasada()
-        self.assertEqual(self.turnos()["pi:aaaa1111"]["proyecto_raw"], "Proyectos/demo/app")
+        self.assertEqual(self.turnos()["pi:resp_aaaa1111"]["proyecto_raw"], "Proyectos/demo/app")
 
     def test_un_fork_con_las_lineas_del_padre_no_duplica(self):
         padre = [cabecera(), mensaje("aaaa1111"), mensaje("bbbb2222")]
@@ -88,7 +88,7 @@ class PiTest(Base):
         self.escribe([cabecera().replace("019e43f8-e", "otra-sesion")] + padre[1:] + [mensaje("cccc3333")], ruta=hijo)
         self.pasada()
         self.pasada(ruta=hijo)
-        self.assertEqual(set(self.turnos()), {"pi:aaaa1111", "pi:bbbb2222", "pi:cccc3333"})
+        self.assertEqual(set(self.turnos()), {"pi:resp_aaaa1111", "pi:resp_bbbb2222", "pi:resp_cccc3333"})
 
     def test_otros_roles_y_lineas_sin_uso_se_ignoran(self):
         self.escribe([cabecera(), mensaje("aaaa1111", role="user"), json.dumps({"type": "compaction", "id": "zzzz9999"}),
@@ -104,16 +104,53 @@ class PiTest(Base):
                       mensaje("bueno001")])
         r = self.pasada()
         self.assertEqual(r["nuevos"], 2)                              # "sin_id" cumple el patrón de id; el resto, no
-        self.assertEqual(set(self.turnos()), {"pi:sin_id", "pi:bueno001"})
+        self.assertEqual(set(self.turnos()), {"pi:resp_sin_id", "pi:resp_bueno001"})
         self.assertEqual(self.pasada()["lineas"], 0)
+
+    def test_sin_responseid_se_usa_sesion_y_linea(self):
+        sin = json.loads(mensaje("aaaa1111"))
+        del sin["message"]["responseId"]
+        self.escribe([cabecera(), json.dumps(sin)])
+        self.assertEqual(self.pasada()["nuevos"], 1)
+        self.assertEqual(set(self.turnos()), {"pi:019e43f8-e:aaaa1111"})
+
+    def test_sin_responseid_ni_cabecera_no_hay_clave_fiable_y_se_anota(self):
+        sin = json.loads(mensaje("aaaa1111"))
+        del sin["message"]["responseId"]
+        self.escribe([json.dumps(sin)])
+        r = self.pasada()
+        self.assertEqual(r["nuevos"], 0)
+        self.assertTrue(any("sin responseId" in d for _, d in self.anomalias()))
+
+    def test_el_id_de_linea_repetido_en_otra_sesion_no_colisiona_si_hay_responseid(self):
+        otra = os.path.join(os.path.dirname(self.ruta), "otra.jsonl")
+        a, b = json.loads(mensaje("aaaa1111")), json.loads(mensaje("aaaa1111"))
+        b["message"]["responseId"] = "resp_distinta"
+        self.escribe([cabecera(), json.dumps(a)])
+        self.escribe([cabecera().replace("019e43f8-e", "sesion-2"), json.dumps(b)], ruta=otra)
+        self.pasada()
+        self.pasada(ruta=otra)
+        self.assertEqual(len(self.turnos()), 2)
+
+    def test_proyecto_de_la_carpeta_con_espacios_coincide_con_el_del_cwd(self):
+        carpeta = os.path.join(self.home, ".pi", "agent", "sessions", "--Users-yo-Mis Proyectos-app--")
+        os.makedirs(carpeta)
+        ruta = os.path.join(carpeta, "s.jsonl")
+        self.escribe([mensaje("aaaa1111")], ruta=ruta)
+        self.pasada(ruta=ruta)
+        con_cwd = os.path.join(carpeta, "t.jsonl")
+        self.escribe([cabecera("/Users/yo/Mis Proyectos/app"), mensaje("bbbb2222")], ruta=con_cwd)
+        self.pasada(ruta=con_cwd)
+        t = self.turnos()
+        self.assertEqual(t["pi:resp_aaaa1111"]["proyecto_raw"], t["pi:resp_bbbb2222"]["proyecto_raw"])
 
     def test_misma_clave_con_otro_modelo_no_cambia_lo_guardado(self):
         self.escribe([cabecera(), mensaje("aaaa1111", modelo="gpt-x", out=50)])
         self.pasada()
         self.escribe([mensaje("aaaa1111", modelo="otro", out=999999)], modo="a")
         self.pasada()
-        t = self.turnos()["pi:aaaa1111"]
-        self.assertEqual((t["modelo"], t["go"]), ("gpt-x", 57))
+        t = self.turnos()["pi:resp_aaaa1111"]
+        self.assertEqual((t["modelo"], t["go"]), ("gpt-x", 50))
 
     def test_reanudar_en_pasadas_pequenas_da_lo_mismo(self):
         self.escribe([cabecera()] + [mensaje(f"id{i:06d}", ts=f"2026-05-20T10:{i:02d}:00Z", out=10 + i) for i in range(40)])

@@ -137,10 +137,11 @@ class CodexTest(Base):
         self.assertEqual(self.pasada()["lineas"], 0)
 
     def test_un_modelo_con_sustituto_suelto_no_bloquea_el_fichero(self):
-        self.escribe([meta(), json.dumps({"type": "turn_context", "payload": {"model": "gpt\ud800x"}}),
-                      json.dumps({"type": "turn_context", "payload": {"model": "ok-modelo"}})] + respuesta(0, "2026-10-02T00:20:26Z"))
+        self.escribe([meta(), json.dumps({"type": "turn_context", "payload": {"model": "ok-modelo"}})] + respuesta(0, "2026-10-02T00:20:26Z")
+                     + [json.dumps({"type": "turn_context", "payload": {"model": "gpt\ud800x"}})])       # el valor hostil es el ÚLTIMO que ve el contexto
         self.assertEqual(self.pasada()["nuevos"], 1)
-        self.assertEqual(self.pasada()["lineas"], 0)                                         # la lectura se guardó
+        self.assertEqual(self.pasada()["lineas"], 0)                                         # la lectura se guardó (antes fallaba y se repetía cada pasada)
+        self.assertEqual(self.turnos()[0]["modelo"], "ok-modelo")
 
     def test_el_contexto_guardado_descarta_sustitutos_control_y_tamanos_absurdos(self):
         ctx = {"modelo": "a\ud800", "proyecto": "ok", "x\x00": "v", "largo": "y" * 500, "bien": "valor"}
