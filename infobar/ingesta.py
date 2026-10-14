@@ -100,7 +100,8 @@ def leer_nuevas(ruta, estado, max_bytes=MAX_LECTURA):
     Todo sobre UN descriptor abierto (stat, lectura y hashes): el fichero no puede cambiar de inodo entre medias. Se relee
     desde el principio si cambió el inodo, la cabecera o la cola, o se truncó. Una línea sin terminar (se está escribiendo)
     no avanza. Una línea mayor que `max_bytes` se salta ENTERA (se busca su salto de línea) para no dejar un resto que se
-    lea como JSON roto. Devuelve (lineas, info) con info lista para `almacen.guardar_lectura`."""
+    lea como JSON roto. Devuelve (lineas, info) con info lista para `almacen.guardar_lectura`.
+    `completo`: no queda nada más que leer ahora (una última línea sin terminar no cuenta como pendiente)."""
     if not stat.S_ISREG(os.stat(ruta).st_mode):         # antes de abrir: abrir un FIFO sin escritor cuelga la ingesta
         raise OSError("no es un fichero regular")
     with open(ruta, "rb") as f:
@@ -137,7 +138,7 @@ def leer_nuevas(ruta, estado, max_bytes=MAX_LECTURA):
         cola = f.read(cola_len) if cola_len else b""
     info = {"desplazamiento": nuevo, "tam": st.st_size, "inodo": st.st_ino, "mtime_ns": st.st_mtime_ns,
             "cab_len": cab_len, "hash_cab": hash_cab, "cola_len": len(cola), "hash_cola": _hash(cola) if cola else "",
-            "completo": nuevo >= st.st_size, "enormes": enormes, "reanudado": desde > 0}
+            "completo": nuevo >= st.st_size or len(trozo) < max_bytes, "enormes": enormes, "reanudado": desde > 0}
     return lineas, info
 
 

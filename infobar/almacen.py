@@ -487,6 +487,24 @@ def guardar_marca(con, quien, fuente_id, tipo, valor, ahora=None):
         raise
 
 
+META_ESCRIBIBLE = ("construccion_completa", "ultima_vuelta", "ultimo_quick_check", "ultimo_mantenimiento")
+
+
+def guardar_meta(con, quien, clave, valor, ahora=None):
+    """Datos de funcionamiento del escritor (base construida, resumen de la última vuelta): lista cerrada de claves."""
+    if clave not in META_ESCRIBIBLE:
+        raise ValueError("clave de meta no permitida")
+    ahora = int(ahora if ahora is not None else time.time())
+    _transaccion_de_escritor(con, quien, ahora)
+    try:
+        con.execute("INSERT INTO meta(clave, valor) VALUES(?, ?) ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor",
+                    (clave, str(valor)[:300]))
+        con.execute("COMMIT")
+    except Exception:
+        _rollback(con)
+        raise
+
+
 def anotar(con, quien, tipo, clave, fuente_id, detalle, ahora=None):
     """Anota una anomalía de ingesta (líneas rotas, marcas sin zona...). Única por tipo+clave+detalle."""
     ahora = int(ahora if ahora is not None else time.time())
@@ -547,5 +565,11 @@ def copia(con, directorio, prefijo="copia", conservar=5):
 
 
 def mantenimiento(con):
-    """Checkpoint que trunca el WAL (journal_size_limit solo recorta tras un checkpoint)."""
+    """Checkpoint que trunca el WAL (journal_size_limit solo recorta tras un checkpoint). Devuelve (busy, páginas del WAL,
+    páginas pasadas a la base): busy=1 si un lector largo lo dejó a medias, sin daño; se repite en el siguiente intento."""
     return tuple(con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone())
+
+
+def comprobar(con):
+    """`quick_check` (lento a tres años de datos): "ok" o el primer problema. Solo desde el hilo de ingesta, una vez al día."""
+    return str(con.execute("PRAGMA quick_check(1)").fetchone()[0])[:200]
