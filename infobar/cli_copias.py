@@ -15,11 +15,11 @@ import tempfile
 import time
 import warnings
 
-from . import almacen, cgx, claves_copias, exportacion, plataforma, restauracion, rutas
+from . import almacen, cgx, claves_copias, exportacion, exportacion_csv, historico, plataforma, restauracion, rutas
 from .config_y_estado import cfg, guardar_config
 
 ORDENES = ("--exportar", "--importar", "--claves-generar", "--copia-ahora", "--probar-restauracion", "--frase-sugerir",
-           "--autoprueba-copias")
+           "--autoprueba-copias", "--exportar-csv", "--descifrar-csv")
 
 
 class Salida(Exception):
@@ -276,6 +276,41 @@ def probar_restauracion(argv, t):
     t.escribe(f"La copia se descifra y es válida: {info['turnos']} turnos, esquema {info['version']}.")
 
 
+def exportar_csv(argv, t):
+    """CSV del histórico: `--exportar-csv [--desde AAAA-MM-DD] [--hasta AAAA-MM-DD] [--paso dia|semana|mes] [--agrupa ninguno|proyecto|plan|agente]
+    [--cifrar]`. Sin `--cifrar` queda en claro (0600) en la carpeta privada de exportaciones: quien lo copie fuera la deja desprotegida."""
+    hoy = datetime.date.today()
+    desde = _valor(argv, "--desde") or (hoy - datetime.timedelta(days=29)).isoformat()
+    hasta = _valor(argv, "--hasta") or hoy.isoformat()
+    ok, motivo = historico.disponible()
+    if not ok:
+        raise Salida(motivo)
+    try:
+        r = historico.historico(desde, hasta, _valor(argv, "--paso") or "dia", _valor(argv, "--agrupa") or "ninguno")
+        if "--cifrar" in argv:
+            frase = t.frase("Frase de paso para el CSV (mínimo 12 caracteres): ")
+            if t.frase("Repite la frase: ") != frase:
+                raise Salida("las frases no coinciden")
+            ruta, n = exportacion_csv.escribir_cifrado(r, frase)
+            t.escribe(f"CSV cifrado y verificado ({n} filas): {ruta}\nPara abrirlo: costbar.py --descifrar-csv RUTA.csv.cgx")
+        else:
+            ruta, n = exportacion_csv.escribir_claro(r)
+            t.escribe(f"CSV ({n} filas) en {ruta}\nAVISO: está sin cifrar. Para compartirlo, usa --cifrar.")
+    except (historico.ErrorHistorico, exportacion_csv.ErrorCsv, historico.SinAlmacen) as e:
+        raise Salida(str(e)) from None
+
+
+def descifrar_csv(argv, t):
+    ruta = _valor(argv, "--descifrar-csv")
+    if not ruta:
+        raise Salida("uso: costbar.py --descifrar-csv RUTA.csv.cgx")
+    try:
+        destino = exportacion_csv.descifrar(ruta, t.frase("Frase de paso del CSV: "))
+    except (exportacion_csv.ErrorCsv, cgx.ErrorCgx, FileNotFoundError) as e:
+        raise Salida(str(e) or "no se encuentra el fichero") from None
+    t.escribe(f"CSV descifrado en {destino}")
+
+
 def autoprueba(t):
     """Ida y vuelta completa en un directorio temporal, sin tocar tus datos: para ejecutarla en Windows y pegar la salida."""
     pasos, raiz = [], tempfile.mkdtemp(prefix="cg-autoprueba-")
@@ -367,6 +402,10 @@ def main(argv=None, t=None):
             importar(argv, t)
         elif "--probar-restauracion" in argv:
             probar_restauracion(argv, t)
+        elif "--exportar-csv" in argv:
+            exportar_csv(argv, t)
+        elif "--descifrar-csv" in argv:
+            descifrar_csv(argv, t)
         else:
             raise Salida("orden no reconocida")
     except Salida as e:

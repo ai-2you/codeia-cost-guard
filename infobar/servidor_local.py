@@ -16,7 +16,7 @@ import hmac, json, os, secrets, subprocess, sys, threading, time
 
 from urllib.parse import parse_qs, urlsplit
 
-from . import ajustes, claves, exportacion, historico, presupuestos, rutas
+from . import ajustes, claves, exportacion, exportacion_csv, historico, presupuestos, rutas
 from . import cuota_nan
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_config, log, olvidar_cache
@@ -231,8 +231,9 @@ def crear_servidor(puerto=PUERTO):
                            ("Location", "/")]
             self._manda(302, b"", "text/plain")
 
-        def _historico(self):
-            """GET /historico?desde=&hasta=&paso=&agrupa= : solo esos cuatro parámetros, una vez cada uno, validados en `historico`."""
+        def _historico(self, como_csv=False):
+            """GET /historico?desde=&hasta=&paso=&agrupa= : solo esos cuatro parámetros, una vez cada uno, validados en `historico`.
+            Con `como_csv` devuelve el CSV como descarga: se genera en memoria y el servidor no deja ningún fichero."""
             q = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=8)
             if set(q) - {"desde", "hasta", "paso", "agrupa"} or any(len(v) != 1 for v in q.values()):
                 return self._json(400, {"error": "parámetros no permitidos"})
@@ -243,7 +244,15 @@ def crear_servidor(puerto=PUERTO):
                 return self._json(429, {"error": "hay otras consultas en curso; vuelve a intentarlo"})
             try:
                 g = {k: v[0] for k, v in q.items()}
-                self._json(200, {"disponible": True, **historico.historico(g.get("desde"), g.get("hasta"), g.get("paso", "dia"), g.get("agrupa", "ninguno"))})
+                r = historico.historico(g.get("desde"), g.get("hasta"), g.get("paso", "dia"), g.get("agrupa", "ninguno"))
+                if como_csv:
+                    datos = exportacion_csv.construir(r)
+                    exportacion_csv.auditar(r, datos.count(b"\r\n") - 1, False, "panel")
+                    self._extra = [("Content-Disposition", f'attachment; filename="{exportacion_csv.nombre(r)}"')]
+                    return self._manda(200, datos, "text/csv; charset=utf-8")
+                self._json(200, {"disponible": True, **r})
+            except exportacion_csv.ErrorCsv as e:
+                self._json(400, {"error": str(e)})
             except historico.ErrorHistorico as e:
                 self._json(400, {"error": str(e)})
             except historico.SinAlmacen as e:
@@ -273,6 +282,8 @@ def crear_servidor(puerto=PUERTO):
                     self._manda(500, str(e).encode(), "text/plain")
             elif ruta == "/historico":
                 self._historico()
+            elif ruta == "/historico.csv":
+                self._historico(como_csv=True)
             elif ruta == "/origenes":
                 try:
                     r = informe()

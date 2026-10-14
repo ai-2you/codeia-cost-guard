@@ -24,8 +24,8 @@ import unicodedata
 MAGIA = b"CGX1"
 VERSION = 1
 MODO_FRASE, MODO_DESTINATARIO = 1, 2
-TIPO_EXPORT, TIPO_CLAVE, TIPO_COPIA = 1, 2, 3
-NOMBRE_TIPO = {TIPO_EXPORT: "una exportación", TIPO_CLAVE: "una clave privada", TIPO_COPIA: "una copia automática"}
+TIPO_EXPORT, TIPO_CLAVE, TIPO_COPIA, TIPO_CSV = 1, 2, 3, 4
+NOMBRE_TIPO = {TIPO_EXPORT: "una exportación", TIPO_CLAVE: "una clave privada", TIPO_COPIA: "una copia automática", TIPO_CSV: "un CSV de consumo"}
 TROZO = 1 << 20
 ETIQUETA = 16
 RELLENO = 1 << 16

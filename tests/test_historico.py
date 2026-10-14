@@ -194,7 +194,8 @@ class TestAnteriorYProyeccion(ConHusoMadrid):
         self.assertIn(m["proyeccion"] is None, (True, False))
 
 
-class TestEndpoint(ConHusoMadrid):
+class ServidorBase(ConHusoMadrid):
+    """Servidor local de prueba con sesión; sin tests propios para poder heredarlo."""
     def setUp(self):
         super().setUp()
         import http.client, threading
@@ -222,6 +223,9 @@ class TestEndpoint(ConHusoMadrid):
 
     def activo(self):
         return mock.patch.object(historico, "cfg", lambda: {"almacen": "activo"})
+
+
+class TestEndpoint(ServidorBase):
 
     def test_pide_sesion(self):
         self.assertEqual(self.pide("/historico?desde=2026-10-12&hasta=2026-10-12", sesion=False)[0], 401)

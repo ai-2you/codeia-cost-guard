@@ -8,7 +8,7 @@
   const RANGOS = [["30", "Últimos 30 días", "dia"], ["90", "Últimos 90 días", "dia"], ["365", "Últimos 12 meses", "semana"], ["todo", "Desde el principio", "mes"]];
   const PASOS = [["dia", "Día"], ["semana", "Semana"], ["mes", "Mes"]];
   const GRUPOS = [["ninguno", "Sin agrupar"], ["proyecto", "Proyecto"], ["plan", "Plan"], ["agente", "Agente"]];
-  let estado = {rango: "30", paso: "dia", agrupa: "plan"}, cargando = 0;
+  let estado = {rango: "30", paso: "dia", agrupa: "plan"}, cargando = 0, ultimaConsulta = "";
 
   const iso = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   function fechas(rango){
@@ -79,6 +79,8 @@
     return [h("section", {}, h("h2", {}, "Consumo por " + (r.paso === "dia" ? "día" : r.paso === "semana" ? "semana (de lunes)" : "mes")), kpis,
         r.cubos.length ? h("div", {class: "grafico"}, grafico(r, series)) : h("p", {class: "vacio"}, "Sin datos en el rango."),
         r.agrupa !== "ninguno" ? h("table", {}, h("tr", {}, h("th", {style: "text-align:left"}, GRUPOS.find(g => g[0] === r.agrupa)[1]), h("th", {}, "Tokens"), h("th", {}, "%")), ...filas) : null,
+        ultimaConsulta ? h("p", {class: "ayuda"}, h("a", {href: "/historico.csv?" + ultimaConsulta, download: ""}, "Descargar CSV"),
+          " · sin cifrar, con ; como separador (Excel en español lo abre directo). Para uno cifrado con frase: costbar.py --exportar-csv --cifrar.") : null,
         h("p", {class: "ayuda"}, "Tokens totales: entrada, salida y caché. Los proyectos ocultos cuentan en el total y salen como (ocultos). La proyección es una estimación lineal.")) ];
   }
 
@@ -92,6 +94,7 @@
     const dest = $("vista-historico"), mio = ++cargando;
     const [desde, hasta] = fechas(estado.rango);
     const q = new URLSearchParams({desde, hasta, paso: estado.paso, agrupa: estado.agrupa});
+    ultimaConsulta = q.toString();
     dest.replaceChildren(controles(), h("p", {class: "vacio"}, "Cargando…"));
     fetch("/historico?" + q).then(async res => {
       if (res.status === 401) throw new Error("la sesión ha caducado o no existe (se reinició la barra o pasaron 12 h)");
