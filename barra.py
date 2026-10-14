@@ -146,7 +146,12 @@ class Barra(NSObject):
         self.punto = None
         self.trabajador = Trabajador(self.entregar)
         self.trabajador.start()
-        log("icono listo, trabajador en marcha")
+        self.ingesta = None
+        if str(costbar.cfg().get("almacen") or "sombra").lower() != "desactivado":
+            from infobar.ingestor import HiloIngesta        # solo la barra (y costbar.py --ingerir) escribe en la base
+            self.ingesta = HiloIngesta()
+            self.ingesta.start()
+        log("icono listo, trabajador e ingesta en marcha")
         return self
 
     # --- del trabajador al hilo principal ---

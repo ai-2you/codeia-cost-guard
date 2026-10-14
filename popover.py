@@ -15,7 +15,7 @@ from infobar import desplegable_agentes, desplegable_servidores, servidores_cicl
 
 
 def main():
-    r = costbar.escanear()
+    r = costbar.informe()
     cache = servidores_ciclo.leer_cache()
     servidores = costbar.cfg().get("servidores") or []
     escritos = []

@@ -38,7 +38,7 @@ def datos():
 
 
 def _datos():
-    r = costbar.escanear()
+    r = costbar.informe()
     def b(x):
         return {"gi": int(x["gi"]), "go": int(x["go"]), "cr": int(x["cr"]), "cw": int(x["cw"]),
                 "tok": int(x["tok"]), "usd": round(x["usd"], 2), "turnos": int(x["turnos"])}

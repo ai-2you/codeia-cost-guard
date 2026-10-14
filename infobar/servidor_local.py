@@ -16,7 +16,7 @@ import hmac, json, os, secrets, subprocess, sys, threading, time
 
 from . import ajustes, claves, rutas
 from . import cuota_nan
-from .agregacion import escanear
+from .agregacion import informe
 from .config_y_estado import cfg, guardar_config, log, olvidar_cache
 from .servidores import errores_ips, errores_servidores
 
@@ -220,7 +220,7 @@ def crear_servidor(puerto=PUERTO):
                     self._manda(500, str(e).encode(), "text/plain")
             elif ruta == "/origenes":
                 try:
-                    r = escanear()
+                    r = informe()
                     self._json(200, {"origenes": r.get("origenes", {}),
                                      "planes": [p["nombre"] for p in (cfg().get("proveedores") or [])],
                                      "config": sin_secretos(cfg())})
@@ -228,7 +228,7 @@ def crear_servidor(puerto=PUERTO):
                     self._json(500, {"error": str(e)})
             elif ruta == "/ajustes":
                 try:
-                    r = escanear()
+                    r = informe()
                     c = sin_secretos(cfg())
                     provs = [{"nombre": p["nombre"], "clave_guardada": bool(claves.leer_clave(ajustes.cuenta_de(p["nombre"]))),
                               "api_soportada": ajustes.api_soportada(p)} for p in (c.get("proveedores") or [])]

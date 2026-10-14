@@ -19,7 +19,7 @@ import json, os, subprocess, sys, time  # noqa: F401  (time: popover.py usa cost
 # El motor vive en el paquete infobar/; este fichero es la entrada (CLI) y la fachada que
 # reexporta lo que usan barra.py, popover.py, panel.py, analizar_gasto.py y los tests.
 from infobar import rutas  # noqa: F401
-from infobar.agregacion import DIAS, VENTANA_H, agregar, escanear, suma, vacio  # noqa: F401
+from infobar.agregacion import DIAS, VENTANA_H, agregar, escanear, informe, suma, vacio  # noqa: F401
 from infobar.claves import guardar_clave, leer_clave  # noqa: F401
 from infobar.config_y_estado import (VERSION_ESTADO, cfg, guardar_config, guardar_estado,  # noqa: F401
                                      guardar_ui, leer_estado, leer_ui, log)
@@ -34,8 +34,29 @@ from infobar.servidor_local import PUERTO, servir, url_panel  # noqa: F401
 AQUI = rutas.RAIZ
 
 
+def ingerir_cli():
+    """python3 costbar.py --ingerir [--una]: ingiere los logs a la base (sin la barra: Windows, servidores, cron).
+    Sin --una se queda en bucle. Si la barra ya es la escritora, espera su turno sin escribir."""
+    from infobar import ingestor
+    ing = ingestor.Ingestor(rol="cli")
+    try:
+        while True:
+            r = ing.vuelta()
+            print(f"ingesta: escritor={r['escritor']} nuevos={r['nuevos']} subidos={r['subidos']} anomalias={r['anomalias']} "
+                  f"ficheros={r['ficheros']} completo={r['completo']} ({r['s']} s)", flush=True)
+            if "--una" in sys.argv and (r["completo"] or not r["escritor"]):
+                return
+            time.sleep(ingestor.PAUSA_PENDIENTE_S if (r["escritor"] and not r["completo"]) else ingestor.PAUSA_AL_DIA_S)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        ing.cierra()
+
+
 def main():
     endurecer()
+    if "--ingerir" in sys.argv:
+        return ingerir_cli()
     if "--clave" in sys.argv:
         # python3 costbar.py --clave nan | dokploy:<host> | easypanel:<host>  -> la guarda en el Llavero
         i = sys.argv.index("--clave")
@@ -48,7 +69,7 @@ def main():
             sys.exit(1)
         return
     if "--proveedores" in sys.argv:
-        r = escanear()
+        r = informe()
         print("Modelos usados en los ultimos 7 dias, agrupados por proveedor:")
         for n, x in r["proveedores"].items():
             print(f"  {n:<14} {', '.join(x['modelos']) or '-'}")
@@ -60,7 +81,7 @@ def main():
         print("y veras el % de la ventana de 5 h y de la semana en el icono y en el panel.")
         return
     if "--print" in sys.argv:
-        print(informa(escanear()))
+        print(informa(informe()))
         return
     servir()        # el panel solo con la app (rumps): un --print no debe quitarle el puerto a la barra
     try:
@@ -103,7 +124,7 @@ def main():
 
         def refrescar(self, _):
             try:
-                r = escanear()
+                r = informe()
                 self.r = r
                 h, c5 = r["hoy"], r["cinco_h"]
                 lim5 = r["limites"].get("limite_5h_tokens") or 0
