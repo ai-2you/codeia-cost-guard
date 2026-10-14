@@ -149,6 +149,14 @@ class EscrituraMonotonaTest(Base):
         self.assertEqual(r["anomalias"], 1)
         self.assertEqual(almacen.anomalias(self.con)[0]["tipo"], "contador_baja")
 
+    def test_la_deriva_de_segundos_entre_lineas_del_mismo_mensaje_no_es_un_cambio_de_hora(self):
+        self.ingiere([turno(hora=H0 + 100, go=5)])
+        r = self.ingiere([turno(hora=H0 + 160, go=321)])
+        self.assertEqual((r["subidos"], r["anomalias"]), (1, 0))
+        self.assertEqual(self.filas()["claude:msg_1"][1], 321)
+        self.assertEqual(self.filas()["claude:msg_1"][4], H0 + 100)               # se conserva la primera hora vista
+        self.assertEqual(self.horas_reales(), self.horas_esperadas())
+
     def test_no_se_mueve_el_modelo_ni_la_hora(self):
         self.ingiere([turno()])
         r = self.ingiere([turno(modelo="otro-modelo", hora=H0 + 86400 * 400)])
@@ -364,7 +372,7 @@ class EsquemaTest(unittest.TestCase):
     def test_sentencias_no_se_cortan_por_un_punto_y_coma_en_comentario_o_literal(self):
         sql = "CREATE TABLE a(x TEXT DEFAULT 'a;b'); -- comentario; con punto y coma\nCREATE TABLE b(y INTEGER);\n"
         self.assertEqual(len(list(almacen._sentencias(sql))), 2)
-        self.assertEqual(len(list(almacen._sentencias(almacen.ESQUEMA_V1))), 7)
+        self.assertEqual(len(list(almacen._sentencias(almacen.ESQUEMA_V1))), 8)
 
     def test_un_esquema_incompleto_falla(self):
         with self.assertRaises(almacen.ErrorAlmacen):

@@ -25,6 +25,7 @@ LATIDO_TTL_S = 90                            # sin latido en este tiempo, otro p
 LIMITE_CONTADOR = 10 ** 12                   # un turno real no pasa de millones; más es un log hostil o roto
 HORA_MIN, HORA_MAX = 946_684_800, 4_102_444_800     # 2000-01-01 .. 2100-01-01
 MAX_ANOMALIAS_POR_LOTE = 50
+TOLERANCIA_HORA_S = 3600                     # las líneas de un mismo mensaje se escriben con segundos de diferencia: es el mismo turno
 COLUMNAS_AGRUPABLES = {"hora", "agente", "proveedor", "modelo", "proyecto_raw"}
 CONTADORES = ("gi", "go", "cr", "cw")
 
@@ -72,6 +73,12 @@ CREATE TABLE horas(
     agente TEXT NOT NULL, proveedor TEXT NOT NULL, modelo TEXT NOT NULL, proyecto_raw TEXT NOT NULL,
     gi INTEGER NOT NULL, go INTEGER NOT NULL, cr INTEGER NOT NULL, cw INTEGER NOT NULL, turnos INTEGER NOT NULL,
     PRIMARY KEY(espacio_id, hora, agente, proveedor, modelo, proyecto_raw)) STRICT, WITHOUT ROWID;
+CREATE TABLE lecturas(
+    fuente_id INTEGER PRIMARY KEY REFERENCES fuentes(id) ON DELETE CASCADE,
+    inodo INTEGER NOT NULL, tam INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
+    desplazamiento INTEGER NOT NULL CHECK(desplazamiento >= 0),
+    cab_len INTEGER NOT NULL CHECK(cab_len >= 0), hash_cab TEXT NOT NULL CHECK(length(hash_cab) <= 64),
+    leido_en INTEGER NOT NULL) STRICT;
 CREATE TABLE anomalias(
     id INTEGER PRIMARY KEY,
     ts INTEGER NOT NULL,
@@ -394,8 +401,10 @@ def ingerir_turnos(con, quien, espacio_id, fuente_id, turnos, ahora=None):
                 _suma_hora(con, espacio_id, t["hora_utc"], t["agente"], t.get("proveedor", ""), t["modelo"], t.get("proyecto_raw", ""), nuevo, 1)
                 res["nuevos"] += 1
                 continue
-            distintos = [campo for campo, valor in (("espacio_id", espacio_id), ("hora_utc", t["hora_utc"]), ("agente", t["agente"]), ("modelo", t["modelo"]))
+            distintos = [campo for campo, valor in (("espacio_id", espacio_id), ("agente", t["agente"]), ("modelo", t["modelo"]))
                          if previo[campo] != valor]
+            if abs(previo["hora_utc"] - t["hora_utc"]) > TOLERANCIA_HORA_S:       # la hora guardada (la primera vista) no se mueve
+                distintos.append("hora_utc")
             if distintos:
                 for campo in distintos:
                     res["anomalias"] += 1
@@ -428,6 +437,40 @@ def ingerir_turnos(con, quien, espacio_id, fuente_id, turnos, ahora=None):
         _rollback(con)
         raise
     return res
+
+
+# ---------------------------------------------------------------- lectura incremental de ficheros
+
+def estado_lectura(con, fuente_id):
+    f = con.execute("SELECT inodo, tam, mtime_ns, desplazamiento, cab_len, hash_cab FROM lecturas WHERE fuente_id=?", (fuente_id,)).fetchone()
+    return dict(f) if f else None
+
+
+def guardar_lectura(con, quien, fuente_id, inodo, tam, mtime_ns, desplazamiento, cab_len, hash_cab, ahora=None):
+    """Dónde se quedó la lectura de un fichero. Si se pierde, se relee entero: el upsert monótono lo hace inocuo."""
+    ahora = int(ahora if ahora is not None else time.time())
+    _transaccion_de_escritor(con, quien, ahora)
+    try:
+        con.execute("INSERT INTO lecturas(fuente_id, inodo, tam, mtime_ns, desplazamiento, cab_len, hash_cab, leido_en) VALUES(?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(fuente_id) DO UPDATE SET inodo=excluded.inodo, tam=excluded.tam, mtime_ns=excluded.mtime_ns, "
+                    "desplazamiento=excluded.desplazamiento, cab_len=excluded.cab_len, hash_cab=excluded.hash_cab, leido_en=excluded.leido_en",
+                    (fuente_id, int(inodo), int(tam), int(mtime_ns), int(desplazamiento), int(cab_len), str(hash_cab)[:64], ahora))
+        con.execute("COMMIT")
+    except Exception:
+        _rollback(con)
+        raise
+
+
+def anotar(con, quien, tipo, clave, fuente_id, detalle, ahora=None):
+    """Anota una anomalía de ingesta (líneas rotas, marcas sin zona...). Única por tipo+clave+detalle."""
+    ahora = int(ahora if ahora is not None else time.time())
+    _transaccion_de_escritor(con, quien, ahora)
+    try:
+        _anomalia(con, ahora, tipo, clave, fuente_id, detalle, [0])
+        con.execute("COMMIT")
+    except Exception:
+        _rollback(con)
+        raise
 
 
 # ---------------------------------------------------------------- lectura
