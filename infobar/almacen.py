@@ -282,6 +282,45 @@ def _exige_escritor(con, quien, ahora):
         raise SinEscritura("este proceso no es el escritor vigente de la base")
 
 
+# ---------------------------------------------------------------- marcador de restauración
+
+MARCADOR_MAX_S = 2 * 3600
+
+
+def ruta_marcador():
+    return os.path.join(rutas.DATOS, "restaurando")
+
+
+def marcador_activo(ahora=None):
+    """¿Hay una restauración en curso? La barra y la ingesta lo respetan sin abrir la base: así «ciérrala» no hace falta (launchd la
+    relanzaría). Un marcador de más de 2 h se considera abandonado."""
+    try:
+        edad = (ahora if ahora is not None else time.time()) - os.stat(ruta_marcador()).st_mtime
+    except OSError:
+        return False
+    return edad < MARCADOR_MAX_S
+
+
+def poner_marcador(ahora=None):
+    os.makedirs(rutas.DATOS, mode=0o700, exist_ok=True)
+    if marcador_activo(ahora):
+        raise ErrorAlmacen("ya hay una restauración en curso")
+    try:
+        os.remove(ruta_marcador())
+    except OSError:
+        pass
+    fd = os.open(ruta_marcador(), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(str(os.getpid()))
+
+
+def quitar_marcador():
+    try:
+        os.remove(ruta_marcador())
+    except OSError:
+        pass
+
+
 # ---------------------------------------------------------------- escritura
 
 def _transaccion_de_escritor(con, quien, ahora):

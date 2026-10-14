@@ -227,19 +227,27 @@ Además de leer los logs, la barra guarda cada turno de Claude Code, Codex, pi, 
 
 Requiere la librería `cryptography` (la instala `install.sh`; sin ella solo se desactiva esto). Todo se hace desde la terminal:
 
-- **Copias automáticas (recomendado):** `python3 costbar.py --claves-generar RUTA_DE_LA_CLAVE` genera una clave **privada** que
-  guardas **fuera de este equipo** y una pública que se queda en `config.json` (`copias.destinatario`). Sin la privada las copias
-  son irrecuperables y no existe recuperación: el comando te lo advierte, la vuelve a leer del fichero que guardaste y ensaya
-  un descifrado antes de activar nada. La barra hace una copia al día en `copias.carpeta` (por defecto `copias-cifradas` en la
-  carpeta de datos; puede ser una carpeta sincronizada porque está cifrada), la **relee y verifica** antes de rotar y conserva
-  las últimas 14 diarias y la primera de cada uno de los últimos 6 meses. `--copia-ahora` fuerza una.
+- **Copias automáticas (recomendado):** `python3 costbar.py --claves-generar RUTA_DE_LA_CLAVE --carpeta CARPETA_DE_COPIAS` genera una
+  clave **privada** que guardas **fuera de este equipo** y una pública que se queda en `config.json` (`copias.destinatario`).
+  Elige una `--carpeta` en **otro disco** o en una carpeta de nube (va cifrada): por defecto es una carpeta del mismo disco que la
+  base, y un fallo del disco se llevaría base y copias. Sin la privada las copias son irrecuperables y no existe recuperación:
+  el comando te lo advierte, la vuelve a leer del fichero que guardaste y ensaya un descifrado antes de activar nada. El fichero de
+  la clave privada lleva también la **firma pública** de este equipo, que hace falta para restaurar en otro. La barra hace una copia
+  al día, la **relee y verifica** antes de rotar y conserva las últimas 14 diarias y la primera de cada uno de los últimos 6 meses
+  **de este equipo** (varios equipos pueden compartir carpeta: cada uno rota solo las suyas). Si la base falla su comprobación se
+  guarda una copia `.danada` (como mucho una al día, las 3 últimas). `--copia-ahora` fuerza una.
 - **Exportar a mano:** `--exportar RUTA.cgx` (te pide una frase de paso, mínimo 12 caracteres; `--frase-sugerir` propone una).
-- **Restaurar:** `--importar RUTA.cgx [--clave-privada RUTA] [--forzar]` descifra, comprueba, te muestra fecha y número de turnos y
-  pide confirmar; guarda antes una copia de la base actual. Se niega si la barra está escribiendo (ciérrala antes).
-  `--probar-restauracion RUTA.cgx` ensaya sin tocar nada (haz el ensayo cada pocos meses).
+- **Restaurar:** `--importar RUTA.cgx [--clave-privada RUTA] [--firma-publica cgxs1…] [--forzar]` descifra, comprueba, te muestra
+  fecha y número de turnos y pide confirmar. Guarda antes una copia de la base actual (si no se puede abrir, la aparta en
+  `copias/`). La barra se aparta sola mientras restauras (no hace falta cerrarla); espera hasta un minuto y medio a que suelte el
+  puesto de escritor. En un equipo nuevo basta con el fichero de la clave privada y la carpeta de copias.
+  `--probar-restauracion RUTA.cgx` ensaya sin tocar nada: hazlo cada pocos meses **desde otro equipo o con otra carpeta de datos**,
+  que es lo que de verdad comprueba que podrás restaurar.
 - **Windows:** `python costbar.py --autoprueba-copias` hace la ida y vuelta completa en un directorio temporal y dice si todo
   funciona en tu máquina; pega su salida si algo falla.
 - Las frases y las claves privadas **nunca** van por la línea de órdenes, el panel web ni la barra: solo se piden en la terminal.
+- El estado de las copias (`al_dia`, `atrasada`, `danada`, `nunca`, `reloj`, último error y si toca ensayar) va en el informe y en
+  `/origenes`; todavía no se pinta en la barra.
 
 ## Tests
 

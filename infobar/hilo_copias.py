@@ -18,11 +18,16 @@ def una_vez(ahora=None):
     """Una revisión: hace la copia si toca. Devuelve 'sin_destinatario' | 'no_toca' | resumen de la copia. Lanza si falla."""
     ahora = ahora if ahora is not None else time.time()
     c = cfg().get("copias") or {}
-    if not c.get("destinatario"):
+    destinatarios = c.get("destinatario") or []
+    if isinstance(destinatarios, str):
+        destinatarios = [destinatarios]
+    if not destinatarios:
         return "sin_destinatario"
+    if almacen.marcador_activo():
+        return "restaurando"
     if not exportacion.toca_copia(ahora):
         return "no_toca"
-    publica = cgx.decodificar_clave("publica", c["destinatario"][0])
+    publica = cgx.decodificar_clave("publica", destinatarios[0])
     firma_priv, firma_pub = claves_copias.clave_de_firma()
     carpeta = c.get("carpeta") or exportacion.carpeta_por_defecto()
     con = almacen.abrir(solo_lectura=True)
@@ -32,6 +37,13 @@ def una_vez(ahora=None):
         con.close()
     exportacion.registrar_copia(r)
     return r
+
+
+def _anota_error(mensaje):
+    try:
+        exportacion.registrar_error(mensaje)
+    except OSError:
+        pass
 
 
 class HiloCopias(threading.Thread):
@@ -50,8 +62,10 @@ class HiloCopias(threading.Thread):
                         + (", DE UNA BASE DAÑADA" if r["danada"] else "") + ")")
             except (cgx.ErrorCgx, almacen.ErrorAlmacen, FileNotFoundError, OSError) as e:
                 log(f"copias: no se hizo la copia ({type(e).__name__}): {e}")
+                _anota_error(f"{type(e).__name__}: {e}")
                 espera = REINTENTO_TRAS_FALLO_S
             except Exception:                                # noqa: BLE001
                 log("copias: " + traceback.format_exc()[-400:])
+                _anota_error("fallo inesperado (mira el log)")
                 espera = REINTENTO_TRAS_FALLO_S
             self.parar.wait(espera)

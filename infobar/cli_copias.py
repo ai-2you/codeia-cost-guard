@@ -67,15 +67,30 @@ def _sin_volcados():
             pass
 
 
+def _lista(v):
+    return [v] if isinstance(v, str) else list(v or [])
+
+
 def _config_copias():
     c = cfg().get("copias") or {}
     return {"carpeta": c.get("carpeta") or exportacion.carpeta_por_defecto(),
-            "destinatario": list(c.get("destinatario") or []), "firmas_publicas": list(c.get("firmas_publicas") or [])}
+            "destinatario": _lista(c.get("destinatario")), "firmas_publicas": _lista(c.get("firmas_publicas"))}
 
 
-def _firmas_conocidas(cc):
+def _valores(argv, opcion):
+    """Todos los valores de una opción repetible (`--firma-publica a --firma-publica b`)."""
+    return [argv[i + 1] for i, a in enumerate(argv) if a == opcion and i + 1 < len(argv) and not argv[i + 1].startswith("--")]
+
+
+def _firmas_conocidas(cc, extra=()):
+    """Firmas públicas de confianza: las de la configuración, las que lleva el fichero de la clave privada, las que se pasen con
+    `--firma-publica` y la de este equipo. Las tres primeras permiten restaurar en un equipo nuevo."""
     firmas = [cgx.decodificar_clave("firma_publica", t) for t in cc["firmas_publicas"]]
-    firmas.append(claves_copias.clave_de_firma()[1])
+    firmas += list(extra)
+    try:
+        firmas.append(claves_copias.clave_de_firma()[1])
+    except cgx.ErrorCgx:
+        pass                                                  # un equipo nuevo sin clave de firma propia legible: no impide restaurar
     return firmas
 
 
@@ -95,7 +110,7 @@ def frase_sugerir(t):
 def claves_generar(argv, t):
     destino = _valor(argv, "--claves-generar")
     if not destino:
-        raise Salida("uso: costbar.py --claves-generar RUTA_DE_LA_CLAVE_PRIVADA [--con-frase]")
+        raise Salida("uso: costbar.py --claves-generar RUTA_DE_LA_CLAVE_PRIVADA [--con-frase] [--carpeta CARPETA_DE_COPIAS]")
     cc = _config_copias()
     t.escribe(claves_copias.AVISO)
     if not _confirma_si(t, "¿Entiendes que no hay forma de recuperar la clave si la pierdes?"):
@@ -106,10 +121,11 @@ def claves_generar(argv, t):
         if t.frase("Repite la frase: ") != frase:
             raise Salida("las frases no coinciden")
     try:
-        r = claves_copias.generar(destino, cc["carpeta"], frase=frase)
+        carpeta = _valor(argv, "--carpeta") or cc["carpeta"]
+        r = claves_copias.generar(destino, carpeta, frase=frase, crear_carpeta=bool(_valor(argv, "--carpeta")))
     except cgx.ErrorCgx as e:
         raise Salida(f"no se generaron claves: {e}") from None
-    nuevo = {"carpeta": cc["carpeta"], "destinatario": [r["publica"]] + [x for x in cc["destinatario"] if x != r["publica"]],
+    nuevo = {"carpeta": carpeta, "destinatario": [r["publica"]] + [x for x in cc["destinatario"] if x != r["publica"]],
              "firmas_publicas": sorted(set(cc["firmas_publicas"]) | {r["firma_publica"]})}
     guardar_config({"copias": nuevo})
     t.escribe("\nPAQUETE DE RESTAURACIÓN (guárdalo fuera de este equipo junto a la clave privada):")
@@ -117,7 +133,10 @@ def claves_generar(argv, t):
     t.escribe(f"  pública:         {r['publica']}")
     t.escribe(f"  huella:          {r['huella']}")
     t.escribe(f"  firma pública:   {r['firma_publica']}")
-    t.escribe(f"\nLas copias diarias irán a {cc['carpeta']}. El ensayo de descifrado con la clave guardada ha salido bien.")
+    t.escribe(f"\nLas copias diarias irán a {carpeta}. El ensayo de descifrado con la clave guardada ha salido bien.")
+    if os.path.abspath(carpeta) == os.path.abspath(exportacion.carpeta_por_defecto()):
+        t.escribe("AVISO: esa carpeta está en el mismo disco que la base: un fallo del disco se llevaría base y copias. "
+                  "Elige otra con --claves-generar … --carpeta RUTA (un disco externo o una carpeta de nube; va cifrado).")
 
 
 def copia_ahora(t, ahora=None):
@@ -192,9 +211,10 @@ def _descifrador(ruta_cgx, argv, t):
         return (lambda e, s: cgx.descifrar_con_frase(e, s, frase, tipo=tipo)), None
     cc = _config_copias()
     ruta_clave = _valor(argv, "--clave-privada")
+    de_la_clave = []
     if ruta_clave:
         try:
-            privada, avisos = claves_copias.cargar_privada(ruta_clave, lambda: t.frase("Frase de la clave privada: "))
+            privada, de_la_clave, avisos = claves_copias.cargar_paquete(ruta_clave, lambda: t.frase("Frase de la clave privada: "))
         except (cgx.ErrorCgx, OSError) as e:
             raise Salida(f"no se pudo cargar la clave: {e}") from None
         for a in avisos:
@@ -204,8 +224,20 @@ def _descifrador(ruta_cgx, argv, t):
             privada = cgx.decodificar_clave("privada", t.frase("Clave privada (CGX-SECRET-KEY-1-…): "))
         except cgx.ErrorCgx as e:
             raise Salida(str(e)) from None
-    firmas = _firmas_conocidas(cc)
-    return (lambda e, s: cgx.descifrar_con_privada(e, s, privada, firmas, tipo=tipo)), cgx.huella(destinatario)
+    try:
+        firmas = _firmas_conocidas(cc, de_la_clave + [cgx.decodificar_clave("firma_publica", x) for x in _valores(argv, "--firma-publica")])
+    except cgx.ErrorCgx as e:
+        raise Salida(f"--firma-publica no es válida: {e}") from None
+
+    def descifrar(e, s):
+        try:
+            cgx.descifrar_con_privada(e, s, privada, firmas, tipo=tipo)
+        except cgx.ErrorCgx as err:
+            if "firmada" in str(err):
+                raise cgx.ErrorCgx("la copia no está firmada por ningún equipo que conozcas: falta la firma pública del equipo que la hizo "
+                                   "(cgxs1…, está en tu paquete de restauración); pásala con --firma-publica") from None
+            raise
+    return descifrar, cgx.huella(destinatario)
 
 
 def importar(argv, t):
@@ -222,7 +254,7 @@ def importar(argv, t):
             t.escribe("Sustituirá la base actual (antes se guarda una copia de ella).")
         return _confirma_si(t, "¿Restaurar?")
     try:
-        r = restauracion.restaurar(ruta, descifrar, confirma, forzar="--forzar" in argv)
+        r = restauracion.restaurar(ruta, descifrar, confirma, forzar="--forzar" in argv, espera_s=100)
     except restauracion.ErrorRestauracion as e:
         raise Salida(str(e)) from None
     t.escribe(f"Restaurados {r['turnos']} turnos en {r['destino']}." + (f" Copia previa: {r['copia_previa']}" if r["copia_previa"] else ""))
@@ -237,6 +269,7 @@ def probar_restauracion(argv, t):
         info = restauracion.probar(ruta, descifrar)
     except restauracion.ErrorRestauracion as e:
         raise Salida(str(e)) from None
+    exportacion.registrar_ensayo()
     t.escribe(f"La copia se descifra y es válida: {info['turnos']} turnos, esquema {info['version']}.")
 
 
@@ -261,6 +294,7 @@ def autoprueba(t):
         priv, pub = cgx.generar_par()
         fpriv, fpub = cgx.generar_par_firma()
         carpeta = os.path.join(raiz, "cifradas")
+        os.makedirs(carpeta)
         r = exportacion.hacer_copia(viva, carpeta, pub, fpriv, fpub)
         paso(f"copia cifrada y verificada por relectura ({r['bytes']} bytes)", True)
         info = restauracion.probar(os.path.join(carpeta, r["archivo"]),
@@ -334,6 +368,9 @@ def main(argv=None, t=None):
             raise Salida("orden no reconocida")
     except Salida as e:
         t.escribe(f"Error: {e}")
+        return 1
+    except (OSError, EOFError) as e:
+        t.escribe(f"Error: {type(e).__name__}: no se pudo completar la operación ({getattr(e, 'strerror', None) or 'entrada cerrada'})")
         return 1
     except cgx.ErrorCgx as e:
         t.escribe(f"Error: {e}")

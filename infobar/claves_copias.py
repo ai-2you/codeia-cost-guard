@@ -61,11 +61,26 @@ def clave_de_firma():
 # ---------------------------------------------------------------- clave privada del destinatario
 
 def _dentro_de(ruta, carpeta):
+    """¿`ruta` es `carpeta` o está dentro? Sin distinguir mayúsculas donde el sistema no las distingue (APFS, NTFS) y siguiendo
+    enlaces: la misma carpeta escrita con otro caso o por un enlace no salta la guarda."""
     ruta, carpeta = os.path.realpath(ruta), os.path.realpath(carpeta)
-    return ruta == carpeta or ruta.startswith(carpeta.rstrip(os.sep) + os.sep)
+    if os.path.normcase(ruta) == os.path.normcase(carpeta) or os.path.normcase(ruta).startswith(os.path.normcase(carpeta).rstrip(os.sep) + os.sep):
+        return True
+    actual = ruta
+    while actual and os.path.exists(actual):
+        try:
+            if os.path.exists(carpeta) and os.path.samefile(actual, carpeta):
+                return True
+        except OSError:
+            return False
+        padre = os.path.dirname(actual)
+        if padre == actual:
+            break
+        actual = padre
+    return False
 
 
-def guardar_privada(ruta, privada, frase=None, carpeta_copias=None):
+def guardar_privada(ruta, privada, frase=None, carpeta_copias=None, firmas_publicas=()):
     """Escribe la clave privada (texto con suma de control; con `frase`, dentro de un .cgx). Se niega si el destino está en la
     carpeta de copias o en una carpeta sincronizada/de red (ahí el cifrado a destinatario no serviría de nada) o ya existe."""
     destino = os.path.abspath(ruta)
@@ -74,7 +89,8 @@ def guardar_privada(ruta, privada, frase=None, carpeta_copias=None):
     motivo = plataforma.ruta_no_fiable(os.path.dirname(destino))
     if motivo:
         raise cgx.ErrorCgx(f"no guardes la clave privada en {motivo}")
-    texto = (cgx.codificar_clave("privada", privada) + "\n").encode()
+    lineas = [cgx.codificar_clave("privada", privada)] + [cgx.codificar_clave("firma_publica", f) for f in firmas_publicas]
+    texto = ("\n".join(lineas) + "\n").encode()           # la firma pública va con la privada: el fichero que SÍ conservas basta
     if frase:
         salida = io.BytesIO()
         cgx.cifrar_con_frase(io.BytesIO(texto), len(texto), salida, frase, tipo=cgx.TIPO_CLAVE)
@@ -86,7 +102,16 @@ def guardar_privada(ruta, privada, frase=None, carpeta_copias=None):
 
 
 def cargar_privada(ruta, frase_fn=None):
-    """(privada en bruto, avisos). `frase_fn()` devuelve la frase si el fichero está protegido. Nunca recibe la clave por argumento."""
+    """(privada en bruto, avisos). Ver `cargar_paquete`."""
+    privada, _firmas, avisos = cargar_paquete(ruta, frase_fn)
+    return privada, avisos
+
+
+def cargar_paquete(ruta, frase_fn=None):
+    """(privada en bruto, firmas públicas que el fichero lleva, avisos). `frase_fn()` devuelve la frase si el fichero está
+    protegido. Nunca recibe la clave por argumento."""
+    if not os.path.isfile(ruta):
+        raise cgx.ErrorCgx("la ruta de la clave no es un fichero")
     _permisos_cerrados(ruta)
     with open(ruta, "rb") as f:
         datos = f.read(1 << 20)
@@ -100,7 +125,12 @@ def cargar_privada(ruta, frase_fn=None):
         salida = io.BytesIO()
         cgx.descifrar_con_frase(io.BytesIO(datos), salida, frase_fn(), tipo=cgx.TIPO_CLAVE)
         datos = salida.getvalue()
-    return cgx.decodificar_clave("privada", datos.decode("utf-8", "replace")), avisos
+    lineas = [x.strip() for x in datos.decode("utf-8", "replace").splitlines() if x.strip()]
+    if not lineas:
+        raise cgx.ErrorCgx("el fichero de clave está vacío")
+    privada = cgx.decodificar_clave("privada", lineas[0])
+    firmas = [cgx.decodificar_clave("firma_publica", x) for x in lineas[1:] if x.lower().startswith(cgx.PREFIJOS["firma_publica"])]
+    return privada, firmas, avisos
 
 
 # ---------------------------------------------------------------- ensayo y generación
@@ -122,14 +152,23 @@ def ensayo(publica, ruta_privada, frase_fn, firma_privada, firma_publica):
         raise cgx.ErrorCgx("el ensayo falló: el contenido descifrado no coincide")
 
 
-def generar(ruta_privada, carpeta_copias=None, frase=None, frase_fn=None):
+def generar(ruta_privada, carpeta_copias=None, frase=None, frase_fn=None, crear_carpeta=False):
     """Par nuevo: guarda la privada, la ensaya y devuelve lo que hay que mostrar y guardar en la configuración.
     No toca `config.json`: lo hace el llamador solo si esto termina sin error."""
     if frase:
         cgx.comprueba_frase(frase)
     firma_priv, firma_pub = clave_de_firma()
     priv, pub = cgx.generar_par()
-    guardar_privada(ruta_privada, priv, frase, carpeta_copias)
+    if carpeta_copias and crear_carpeta:
+        try:
+            os.makedirs(carpeta_copias, exist_ok=True)
+            comprobacion = os.path.join(carpeta_copias, f".escritura-{os.getpid()}")
+            with open(comprobacion, "wb"):
+                pass
+            os.remove(comprobacion)
+        except OSError:
+            raise cgx.ErrorCgx("no se puede escribir en la carpeta de copias indicada") from None
+    guardar_privada(ruta_privada, priv, frase, carpeta_copias, firmas_publicas=[firma_pub])
     try:
         ensayo(pub, ruta_privada, frase_fn or (lambda: frase), firma_priv, firma_pub)
     except cgx.ErrorCgx:

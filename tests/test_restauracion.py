@@ -64,6 +64,7 @@ class Base(unittest.TestCase):
         # la copia que se restaurará: contiene "claude:nueva-1/2"
         origen = base_con(os.path.join(self.dir, "origen", "consumo.sqlite"), ["claude:nueva-1", "claude:nueva-2"], True)
         self.carpeta = os.path.join(self.dir, "cifradas")
+        os.makedirs(self.carpeta)
         r = exportacion.hacer_copia(origen, self.carpeta, self.pub, self.fpriv, self.fpub)
         origen.close()
         self.cgx_ruta = os.path.join(self.carpeta, r["archivo"])

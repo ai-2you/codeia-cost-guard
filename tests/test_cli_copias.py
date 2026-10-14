@@ -64,6 +64,7 @@ class Base(unittest.TestCase):
         self.fuera = os.path.join(self.dir, "extraible")
         os.makedirs(self.fuera)
         self.config_ant = cfg().get("copias")
+        os.makedirs(os.path.join(self.dir, "cifradas"))
         guardar_config({"copias": {"carpeta": os.path.join(self.dir, "cifradas"), "destinatario": [], "firmas_publicas": []}})
 
     def tearDown(self):
@@ -191,7 +192,6 @@ class TestCopiasAutomaticas(Base):
 
     def test_clave_privada_dentro_de_la_carpeta_de_copias_se_rechaza(self):
         carpeta = cfg()["copias"]["carpeta"]
-        os.makedirs(carpeta)
         self.assertEqual(cli_copias.main(["--claves-generar", os.path.join(carpeta, "k.txt")], Falso(textos=["SI"])), 1)
         self.assertEqual(os.listdir(carpeta), [])
 

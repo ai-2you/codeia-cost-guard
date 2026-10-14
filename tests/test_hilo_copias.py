@@ -34,6 +34,7 @@ class Base(unittest.TestCase):
         llena_base(rutas.ALMACEN)
         self.config_ant = cfg().get("copias")
         self.carpeta = os.path.join(self.dir, "cifradas")
+        os.makedirs(self.carpeta)
         self.priv, self.pub = cgx.generar_par()
 
     def configura(self, destinatario=True):
@@ -50,7 +51,7 @@ class TestUnaVez(Base):
     def test_sin_destinatario_no_hace_nada(self):
         self.configura(False)
         self.assertEqual(hilo_copias.una_vez(), "sin_destinatario")
-        self.assertFalse(os.path.exists(self.carpeta))
+        self.assertEqual(os.listdir(self.carpeta), [])
 
     def test_hace_la_copia_y_luego_no_toca(self):
         self.configura()

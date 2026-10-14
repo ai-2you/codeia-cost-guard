@@ -15,6 +15,9 @@ import aislamiento  # noqa: E402,F401
 from infobar import almacen, exportacion, rutas  # noqa: E402
 
 
+DISP = "aaaaaaaa"
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="cg-export-")
@@ -54,48 +57,45 @@ class TestOrigen(Base):
         d = exportacion.dir_tmp()
         for n in ("a.tmp", "b.tmp"):
             open(os.path.join(d, n), "w").close()
-        self.assertEqual(exportacion.barrer_tmp(), 2)
+        self.assertEqual(exportacion.barrer_tmp(edad_min_s=0), 2)
         self.assertEqual(os.listdir(d), [])
 
 
 class TestNombresYRotacion(Base):
     def test_nombre(self):
-        n = exportacion.nombre_copia(1_790_000_000)
-        self.assertRegex(n, r"^copia-\d{8}-\d{6}-[0-9a-f]{4}\.cgx$")
-        self.assertTrue(exportacion.nombre_copia(1_790_000_000, danada=True).endswith(".danada.cgx"))
-        self.assertNotEqual(exportacion.nombre_copia(1_790_000_000), exportacion.nombre_copia(1_790_000_000))
+        n = exportacion.nombre_copia(1_790_000_000, DISP)
+        self.assertRegex(n, r"^copia-aaaaaaaa-\d{8}-\d{6}-[0-9a-f]{4}\.cgx$")
+        self.assertTrue(exportacion.nombre_copia(1_790_000_000, DISP, danada=True).endswith(".danada.cgx"))
+        self.assertNotEqual(exportacion.nombre_copia(1_790_000_000, DISP), exportacion.nombre_copia(1_790_000_000, DISP))
 
     @staticmethod
-    def copia(dia, hora="030000", extra="aaaa"):
-        return f"copia-{dia}-{hora}-{extra}.cgx"
+    def copia(dia, hora="030000", extra="aaaa", disp=None):
+        return f"copia-{disp or DISP}-{dia}-{hora}-{extra}.cgx"
 
     def test_conserva_14_diarias_y_6_mensuales_y_no_toca_lo_ajeno(self):
         inicio = datetime.date(2026, 1, 1)
         nombres = [self.copia((inicio + datetime.timedelta(days=i)).strftime("%Y%m%d")) for i in range(300)]
-        ajenos = ["notas.txt", "copia-20260101-030000-aaaa.danada.cgx", "copia-mala.cgx", "clave.cgx"]
-        borrar = set(exportacion.a_borrar(nombres + ajenos))
+        ajenos = ["notas.txt", "copia-aaaaaaaa-20260101-030000-aaaa.danada.cgx", "copia-mala.cgx", "clave.cgx"]
+        borrar = set(exportacion.a_borrar(nombres + ajenos, DISP))
         self.assertFalse(borrar & set(ajenos))
         quedan = [n for n in nombres if n not in borrar]
         ultimos = nombres[-14:]
         self.assertTrue(set(ultimos) <= set(quedan))
-        primeras_de_mes = {n for n in nombres if n[12:14] == "01"}
-        self.assertTrue({n for n in primeras_de_mes if n[6:12] >= "202605"} <= set(quedan))     # mayo..octubre
+        primeras_de_mes = {n for n in nombres if n[21:23] == "01"}
+        self.assertTrue({n for n in primeras_de_mes if n[15:21] >= "202605"} <= set(quedan))     # mayo..octubre
         self.assertEqual(len(quedan), 14 + 6 - len(set(ultimos) & primeras_de_mes))
-        self.assertFalse({n for n in primeras_de_mes if n[6:12] < "202605"} & set(quedan))
+        self.assertFalse({n for n in primeras_de_mes if n[15:21] < "202605"} & set(quedan))
 
     def test_mismo_dia_se_queda_la_ultima(self):
         a, b = self.copia("20261014", "010000", "aaaa"), self.copia("20261014", "230000", "bbbb")
-        self.assertEqual(exportacion.a_borrar([a, b]), [])       # son la primera del mes y la última del día: ambas se conservan
+        self.assertEqual(exportacion.a_borrar([a, b], DISP), [])       # son la primera del mes y la última del día: ambas se conservan
         c = self.copia("20261014", "120000", "cccc")
-        self.assertEqual(exportacion.a_borrar([a, c, b]), [c])
+        self.assertEqual(exportacion.a_borrar([a, c, b], DISP), [c])
 
     def test_una_sola_copia_nunca_se_borra(self):
-        self.assertEqual(exportacion.a_borrar([self.copia("20260101")]), [])
-        self.assertEqual(exportacion.a_borrar([]), [])
+        self.assertEqual(exportacion.a_borrar([self.copia("20260101")], DISP), [])
+        self.assertEqual(exportacion.a_borrar([], DISP), [])
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 try:
@@ -114,6 +114,7 @@ class TestCopia(Base):
         self.priv, self.pub = cgx.generar_par()
         self.firma_priv, self.firma_pub = cgx.generar_par_firma()
         self.carpeta = os.path.join(self.dir, "copias-cifradas")
+        os.makedirs(self.carpeta)                                     # una carpeta configurada tiene que existir (disco montado)
         self.con = almacen.abrir(os.path.join(self.dir, "viva", "consumo.sqlite"))
         q = almacen.identidad("barra")
         almacen.adquirir_escritura(self.con, q)
@@ -136,7 +137,7 @@ class TestCopia(Base):
     def test_copia_verificada_se_descifra_con_la_privada(self):
         import io
         r = self.copia(ahora=1_790_000_000)
-        self.assertRegex(r["archivo"], r"^copia-\d{8}-\d{6}-[0-9a-f]{4}\.cgx$")
+        self.assertRegex(r["archivo"], r"^copia-[0-9a-f]{8}-\d{8}-\d{6}-[0-9a-f]{4}\.cgx$")
         self.assertFalse(r["danada"])
         self.assertEqual(self.restos(), [])
         salida = io.BytesIO()
@@ -206,7 +207,8 @@ class TestCopia(Base):
         self.assertFalse(exportacion.toca_copia(1_790_000_000 + 3600))
         self.assertTrue(exportacion.toca_copia(1_790_000_000 + 86400))
         exportacion.registrar_copia({"archivo": "x", "ts": 1_790_100_000, "danada": True, "huella": "h", "bytes": 1})
-        self.assertTrue(exportacion.toca_copia(1_790_100_100))             # una .danada no cuenta como copia hecha
+        self.assertFalse(exportacion.toca_copia(1_790_100_100))            # una .danada cuenta como hecha: como mucho una al día
+        self.assertTrue(exportacion.toca_copia(1_790_100_000 + 86400))
 
 
 class TestReemplazo(Base):
@@ -228,3 +230,7 @@ class TestReemplazo(Base):
         with mock.patch.object(os, "replace", side_effect=PermissionError("en uso")):
             with self.assertRaises(PermissionError):
                 exportacion.reemplazar(a, b, intentos=3, espera=0)
+
+
+if __name__ == "__main__":
+    unittest.main()

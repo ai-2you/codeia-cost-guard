@@ -91,6 +91,13 @@ class Ingestor:
     def vuelta(self, presupuesto_s=PRESUPUESTO_S, ahora=None):
         """Una vuelta sobre todas las fuentes. Devuelve {escritor, nuevos, subidos, anomalias, ficheros, completo, s}."""
         t0 = time.monotonic()
+        if almacen.marcador_activo():                   # hay una restauración en curso: no tocar la base y soltar el puesto
+            if self.con is not None:
+                try:
+                    almacen.soltar_escritura(self.con, self.quien)
+                except Exception:                        # noqa: BLE001
+                    pass
+            return {"escritor": False, "nuevos": 0, "subidos": 0, "anomalias": 0, "ficheros": 0, "fallos": 0, "completo": True, "s": 0.0}
         res = {"escritor": False, "nuevos": 0, "subidos": 0, "anomalias": 0, "ficheros": 0, "fallos": 0, "completo": False, "s": 0.0}
         con = self._abre()
         if not almacen.adquirir_escritura(con, self.quien):
