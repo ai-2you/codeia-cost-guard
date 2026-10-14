@@ -104,6 +104,37 @@
       c.ultimo_error ? h("p", {class: "ayuda"}, "Último error: " + c.ultimo_error) : null);
   }
 
+  const nivelColor = n => n >= 100 ? "#c0392b" : n >= 80 ? "#d68910" : "";
+  function filaPresupuesto(f, st){
+    const sel = (k, opciones, actual) => h("select", {"data-pk": k}, ...opciones.map(([v, t]) => h("option", {value: v, selected: v === actual}, t)));
+    const barra = st ? h("div", {class: "pista mini"}, h("span", {class: "barra", style: "width:" + Math.min(100, st.pct) + "%" + (nivelColor(st.nivel) ? ";background:" + nivelColor(st.nivel) : "")})) : null;
+    const uso = st ? h("span", {class: "pista-texto", style: nivelColor(st.nivel) ? "color:" + nivelColor(st.nivel) + ";font-weight:600" : ""},
+      fmt(st.usado) + " de " + fmt(st.tokens) + " · " + st.pct + " %" + (st.visto ? "" : " · sin consumo con ese nombre")) : null;
+    return h("tr", {"data-pres": ""},
+      h("td", {}, sel("ambito", [["proyecto", "Proyecto"], ["plan", "Plan"]], f.ambito)),
+      h("td", {}, h("input", {class: "ancho", "data-pk": "nombre", value: f.nombre || "", list: "nombres-presupuesto", maxlength: 200, placeholder: "nombre mostrado"})),
+      h("td", {}, sel("periodo", [["mes", "Mes"], ["semana", "Semana (lunes)"]], f.periodo)),
+      h("td", {}, h("input", {class: "num-in", "data-pk": "tokens", value: f.tokens || "", inputmode: "numeric", placeholder: "tokens"})),
+      h("td", {}, uso, barra),
+      h("td", {}, h("button", {onclick: ev => { leer(); const i = [...ev.target.closest("tbody, table").querySelectorAll("[data-pres]")].indexOf(ev.target.closest("tr"));
+        A.config.presupuestos.splice(i, 1); $("vista-ajustes").replaceChildren(...pinta()); }}, "Quitar")));
+  }
+  function seccionPresupuestos(c){
+    const P = A.presupuestos || {disponible: false, motivo: "", estados: []};
+    c.presupuestos = c.presupuestos || [];
+    const estado = f => (P.estados || []).find(e => e.clave === f.ambito + "|" + f.nombre + "|" + f.periodo);
+    const nombres = [...new Set([...Object.keys(A.proyectos || {}).map(k => ((c.proyectos[k] || {}).alias || k)), ...c.proveedores.map(p => p.nombre)])].sort();
+    return h("section", {}, h("h2", {}, "Presupuestos"),
+      h("p", {class: "ayuda"}, "Un tope de tokens por proyecto o por plan, por mes o por semana natural (de lunes a domingo). Cuentan entrada, salida y caché, como tus cuotas. ",
+        "Avisa al llegar al 80 % y al 100 %, una vez por periodo. El nombre es el que ves en el panel (el alias si lo has puesto)."),
+      P.disponible ? null : h("p", {class: "ayuda", style: "color:#d68910"}, P.motivo || "Los presupuestos no están disponibles."),
+      h("datalist", {id: "nombres-presupuesto"}, ...nombres.map(n => h("option", {value: n}))),
+      c.presupuestos.length ? h("table", {id: "pres-lista"}, h("tr", {}, h("th", {}, "Ámbito"), h("th", {style: "text-align:left"}, "Nombre"), h("th", {}, "Periodo"), h("th", {}, "Tokens"), h("th", {}, "Uso"), h("th", {})),
+        ...c.presupuestos.map(f => filaPresupuesto(f, estado(f)))) : h("p", {class: "vacio", id: "pres-vacio"}, "Aún no hay presupuestos."),
+      h("div", {class: "prov-cab", style: "margin-top:8px"}, h("button", {onclick: () => { leer(); c.presupuestos.push({ambito: "proyecto", nombre: "", periodo: "mes", tokens: 0}); $("vista-ajustes").replaceChildren(...pinta()); }}, "Añadir presupuesto"),
+        h("label", {style: "margin-left:14px"}, h("input", {type: "checkbox", id: "g-avisos", checked: c.avisos_presupuesto !== false}), " Avisar con una notificación del sistema")));
+  }
+
   function pinta(){
     const c = A.config;
     const orig = Object.entries(A.origenes).sort((a, b) => b[1] - a[1]);
@@ -127,15 +158,14 @@
             h("td", {}, h("input", {class: "ancho", "data-origen": k, value: c.aliases[k] || "", list: "planes", placeholder: "p. ej. NaN, OpenCode Go"})))))),
       h("datalist", {id: "planes"}, ...c.proveedores.map(p => h("option", {value: p.nombre}))),
       h("section", {}, h("h2", {}, "Proyectos"),
-        h("p", {class: "ayuda"}, "Renombra, oculta de las listas o pon un presupuesto mensual en tokens (0 = sin presupuesto). Ocultar no cambia los totales."),
-        proy.length ? h("table", {}, h("tr", {}, h("th", {}, "Detectado"), h("th", {}, "Tokens 30 d"), h("th", {style: "text-align:left"}, "Nombre a mostrar"), h("th", {}, "Presupuesto mes"), h("th", {}, "Ocultar")),
-          ...proy.map(([k, v]) => { const e = c.proyectos[k] || {}; const pct = e.presupuesto_mes_tokens ? Math.min(100, v / e.presupuesto_mes_tokens * 100) : 0;
-            return h("tr", {}, h("td", {}, h("code", {}, k)),
-              h("td", {}, fmt(v), e.presupuesto_mes_tokens ? h("div", {class: "pista mini"}, h("span", {class: "barra", style: "width:" + pct + "%"})) : null),
+        h("p", {class: "ayuda"}, "Renombra o oculta de las listas. Ocultar no cambia los totales. Los presupuestos se ponen en su propia sección."),
+        proy.length ? h("table", {}, h("tr", {}, h("th", {}, "Detectado"), h("th", {}, "Tokens 30 d"), h("th", {style: "text-align:left"}, "Nombre a mostrar"), h("th", {}, "Ocultar")),
+          ...proy.map(([k, v]) => { const e = c.proyectos[k] || {};
+            return h("tr", {}, h("td", {}, h("code", {}, k)), h("td", {}, fmt(v)),
               h("td", {}, h("input", {class: "ancho", "data-proy": k, "data-c": "alias", value: e.alias || ""})),
-              h("td", {}, h("input", {class: "num-in", "data-proy": k, "data-c": "presupuesto_mes_tokens", value: e.presupuesto_mes_tokens || 0, inputmode: "numeric"})),
               h("td", {}, h("input", {type: "checkbox", "data-proy": k, "data-c": "oculto", checked: !!e.oculto}))); }))
           : h("p", {class: "vacio"}, "Aún no hay proyectos detectados.")),
+      seccionPresupuestos(c),
       h("section", {}, h("h2", {}, "Servidores (VPS)"),
         h("p", {class: "ayuda"}, "Monitor por SSH de solo lectura: CPU, memoria, disco, servicios, intentos de acceso, fail2ban, puertos abiertos y protección. Para dar de alta uno nuevo, ejecuta una vez ", h("code", {}, "infobar/remoto/alta-servidor.sh usuario@IP"), " (crea el usuario de solo lectura en el servidor) y añádelo aquí. Guía: docs/guia-servidores.md."),
         ...(c.servidores || []).map(servidor),
@@ -174,6 +204,13 @@
     const py = Object.assign({}, c.proyectos); raiz.querySelectorAll("[data-proy]").forEach(i => { const e = py[i.dataset.proy] = py[i.dataset.proy] || {};
       e[i.dataset.c] = i.dataset.c === "oculto" ? i.checked : (i.dataset.c === "alias" ? i.value.trim() : entero(i.value)); });
     c.proyectos = py;
+    if ($("pres-lista") || $("pres-vacio")) {
+      c.presupuestos = [...raiz.querySelectorAll("[data-pres]")].map(tr => {
+        const v = k => tr.querySelector('[data-pk="' + k + '"]').value;
+        return {ambito: v("ambito"), nombre: v("nombre").trim(), periodo: v("periodo"), tokens: entero(v("tokens"))};
+      }).filter(f => f.nombre && f.tokens > 0);
+      if ($("g-avisos")) c.avisos_presupuesto = $("g-avisos").checked;
+    }
     if (c.servidores) {
       raiz.querySelectorAll("[data-servidor]").forEach(div => {
         const s = c.servidores[+div.dataset.servidor]; if (!s) return;
