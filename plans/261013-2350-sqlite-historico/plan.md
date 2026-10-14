@@ -60,6 +60,7 @@ excluye siempre la caché. **Límite aceptado:** las cookies no se separan por p
 podría leerla (documentado en el README); la solución real es un socket Unix o la aplicación final.
 
 ## Fase 1 — almacén de turnos (solo añadir) — v3, tras la segunda ronda
+**Avance (rama `feat/fase1-almacen`):** 1.1 hecho — `infobar/plataforma.py` (directorio de datos por sistema, rutas no fiables) y `infobar/almacen.py` (esquema `STRICT`, PRAGMA por conexión y WAL verificado, upsert monótono con anomalías, `horas` materializado en la misma transacción, escritor único por latido, solo-lectura `mode=ro`, copias con la API de backup) con 31 tests. **Pendiente:** 1.2 ingesta por agente con sus claves, 1.3 `consultar()` desde la base y partir `escanear()`, 1.4 sombra, 1.5 export cifrado.
 Informes: `../reports/red-team-fase1-261014.md` y `../reports/pre-mortem-fase1-261014.md`.
 
 **Esquema** (`consumo.sqlite`, aparte del futuro `servidores.sqlite`; `STRICT`):

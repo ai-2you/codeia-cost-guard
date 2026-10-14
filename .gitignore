@@ -18,3 +18,9 @@ venv/
 docs/chuleta-personal.md
 # tus servidores (hosts, usuarios): fuera de git; plantilla en servidores.example.json
 servidores.json
+
+# base de datos de consumo y sus copias (datos sensibles): viven en el directorio de datos de la aplicacion, nunca en git
+consumo.sqlite*
+*.sqlite-wal
+*.sqlite-shm
+copias/

@@ -1,0 +1,1 @@
+- [Entorno y decisiones SQLite](project_entorno_y_decisiones_sqlite.md) — EVO990 sin propiedad por usuario, instalación en ~/.cost-guard, formatos de ids reales, decisiones del dueño (2026-10-14)
