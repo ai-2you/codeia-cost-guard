@@ -5,13 +5,15 @@ Reglas que sostienen todo: el texto en claro solo toca un temporal privado de `D
 la nueva; una base que falla `quick_check` se copia igual con sufijo `.danada` y queda fuera de la rotación.
 """
 import datetime
+import json
 import os
 import re
 import secrets
 import sqlite3
 import tempfile
+import time
 
-from . import rutas
+from . import cgx, rutas
 
 DIARIAS = 14
 MENSUALES = 6
@@ -86,3 +88,88 @@ def a_borrar(nombres):
     meses = sorted(por_mes)[-MENSUALES:]
     conservar = {por_dia[d] for d in dias} | {por_mes[m] for m in meses}
     return sorted(n for _, n in copias if n not in conservar)
+
+
+# ---------------------------------------------------------------- escritura verificada
+
+def reemplazar(origen, destino, intentos=6, espera=0.2):
+    """`os.replace` con reintentos: en Windows un antivirus o el indexador pueden tener el fichero abierto unos instantes."""
+    for n in range(intentos):
+        try:
+            return os.replace(origen, destino)
+        except PermissionError:
+            if n == intentos - 1:
+                raise
+            time.sleep(espera)
+
+
+def _borra(ruta):
+    try:
+        os.remove(ruta)
+    except OSError:
+        pass
+
+
+def hacer_copia(con, carpeta, publica, firma_privada, firma_publica, ahora=None):
+    """Copia cifrada a `publica` de la base de `con` (solo lectura basta). Escribe en un `.part` de la carpeta de destino,
+    RELEE el fichero escrito con la clave simétrica que aún está en memoria (etiquetas, firma y SHA-256 del claro) y solo
+    entonces lo renombra y rota las antiguas; si algo falla no queda nada a medias y no se borra ninguna copia. Una base que
+    falla `quick_check` se copia igual con sufijo `.danada` y fuera de la rotación. Devuelve el resumen de la copia."""
+    ahora = int(ahora if ahora is not None else time.time())
+    os.makedirs(carpeta, exist_ok=True)
+    origen, estado = copiar_base(con)
+    parte = None
+    try:
+        danada = estado != "ok"
+        destino = os.path.join(carpeta, nombre_copia(ahora, danada))
+        fd, parte = tempfile.mkstemp(prefix=".copia-", suffix=".part", dir=carpeta)
+        tam = os.path.getsize(origen)
+        with os.fdopen(fd, "wb") as salida, open(origen, "rb") as entrada:
+            r = cgx.cifrar_a_destinatario(entrada, tam, salida, publica, firma_privada, ahora=ahora)
+            salida.flush()
+            os.fsync(salida.fileno())
+        with open(parte, "rb") as releido:
+            if cgx.verificar_con_clave(releido, r["clave"], [firma_publica]) != r["sha256_claro"]:
+                raise cgx.ErrorCgx("la copia escrita no coincide con el origen")
+        if os.path.exists(destino):
+            raise cgx.ErrorCgx("ya existe una copia con ese nombre")
+        reemplazar(parte, destino)
+        parte = None
+        rotadas = [] if danada else a_borrar(os.listdir(carpeta))
+        for n in rotadas:
+            _borra(os.path.join(carpeta, n))
+        return {"archivo": os.path.basename(destino), "bytes": os.path.getsize(destino), "danada": danada,
+                "estado": estado, "huella": cgx.huella(publica), "rotadas": len(rotadas), "ts": ahora}
+    finally:
+        _borra(origen)
+        if parte:
+            _borra(parte)
+
+
+# ---------------------------------------------------------------- cuándo toca (en un fichero de DATOS, no en la carpeta de copias)
+
+def _ruta_ultima():
+    return os.path.join(rutas.DATOS, "ultima_copia.json")
+
+
+def registrar_copia(resumen):
+    os.makedirs(rutas.DATOS, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".ultima-", dir=rutas.DATOS)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({k: resumen[k] for k in ("archivo", "ts", "danada", "huella", "bytes")}, f)
+    reemplazar(tmp, _ruta_ultima())
+
+
+def ultima_copia():
+    try:
+        with open(_ruta_ultima(), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def toca_copia(ahora=None, cada_s=86400):
+    """True si la última copia BUENA tiene más de `cada_s` (o no hay ninguna). Una `.danada` no cuenta como copia hecha."""
+    u = ultima_copia()
+    ahora = ahora if ahora is not None else time.time()
+    return not u or u.get("danada") or ahora - u.get("ts", 0) >= cada_s
