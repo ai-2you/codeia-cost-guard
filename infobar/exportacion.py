@@ -1,0 +1,88 @@
+"""Copias cifradas de la base: origen consistente, nombres, rotación y (más adelante) escritura verificada y restauración.
+
+Reglas que sostienen todo: el texto en claro solo toca un temporal privado de `DATOS/tmp` (0600, nombre aleatorio, borrado en
+`finally` y barrido al arrancar); la rotación nunca borra nada que no sea una copia con nuestro nombre y nunca antes de verificar
+la nueva; una base que falla `quick_check` se copia igual con sufijo `.danada` y queda fuera de la rotación.
+"""
+import datetime
+import os
+import re
+import secrets
+import sqlite3
+import tempfile
+
+from . import rutas
+
+DIARIAS = 14
+MENSUALES = 6
+NOMBRE = re.compile(r"^copia-(\d{8})-(\d{6})-([0-9a-f]{4})(\.danada)?\.cgx$")
+
+
+def dir_tmp():
+    d = os.path.join(rutas.DATOS, "tmp")
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    if os.name != "nt":
+        os.chmod(d, 0o700)
+    return d
+
+
+def barrer_tmp():
+    """Al arrancar: un cierre en seco puede haber dejado temporales (con la base en claro)."""
+    d = os.path.join(rutas.DATOS, "tmp")
+    if not os.path.isdir(d):
+        return 0
+    n = 0
+    for f in os.listdir(d):
+        try:
+            os.remove(os.path.join(d, f))
+            n += 1
+        except OSError:
+            pass
+    return n
+
+
+def copiar_base(con, danada_ok=True):
+    """Copia consistente de la base viva en un temporal sin WAL (`journal_mode=DELETE`) y la comprueba con `quick_check`.
+    Devuelve (ruta del temporal, "ok" o el primer problema). El llamador lo borra en `finally`."""
+    fd, ruta = tempfile.mkstemp(prefix="base-", suffix=".tmp", dir=dir_tmp())
+    os.close(fd)
+    if os.name != "nt":
+        os.chmod(ruta, 0o600)
+    destino = sqlite3.connect(ruta)
+    try:
+        con.backup(destino)
+        destino.execute("PRAGMA journal_mode=DELETE")
+        estado = str(destino.execute("PRAGMA quick_check(1)").fetchone()[0])[:200]
+    except BaseException:
+        destino.close()
+        os.remove(ruta)
+        raise
+    destino.close()
+    return ruta, estado
+
+
+def nombre_copia(ahora, danada=False):
+    """`copia-AAAAMMDD-HHMMSS-<4 hex>.cgx` (UTC); el sufijo aleatorio evita choques de dos procesos en el mismo segundo."""
+    t = datetime.datetime.fromtimestamp(int(ahora), datetime.timezone.utc)
+    return f"copia-{t:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}{'.danada' if danada else ''}.cgx"
+
+
+def _fecha(nombre):
+    m = NOMBRE.match(nombre)
+    if not m or m.group(4):
+        return None
+    return datetime.datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+
+
+def a_borrar(nombres):
+    """Qué copias sobran: se conserva la más reciente de cada uno de los últimos 14 días con copia y la más antigua de cada uno de
+    los últimos 6 meses con copia. Los ficheros que no tienen nuestro nombre y las `.danada` no se tocan nunca."""
+    copias = sorted((f, n) for n in nombres if (f := _fecha(n)))
+    por_dia, por_mes = {}, {}
+    for f, n in copias:
+        por_dia[f.date()] = n                              # la última del día
+        por_mes.setdefault((f.year, f.month), n)           # la primera del mes
+    dias = sorted(por_dia)[-DIARIAS:]
+    meses = sorted(por_mes)[-MENSUALES:]
+    conservar = {por_dia[d] for d in dias} | {por_mes[m] for m in meses}
+    return sorted(n for _, n in copias if n not in conservar)
