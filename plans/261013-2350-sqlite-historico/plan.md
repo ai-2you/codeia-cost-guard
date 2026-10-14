@@ -188,6 +188,18 @@ las divergencias aceptadas.
 - Clasificación por columna (público / interno / personal / secreto) en `almacen.py`, para que export y API
   filtren por clase y no por lista a mano.
 
+**Avance de la fase 2 (rama `feat/fase1-ingesta-hermes`, diseño v2 en `fase2-diseno.md`):** hechos los 12 cambios del diseño tras
+`../reports/revision-diseno-fase2-261014.md`: (1) panel sin XSS almacenado —escape en la frontera de `app.js`, JSON incrustado a salvo
+de `</script>`, sin manejadores en línea y CSP con nonce—, (2) `avisos.json` propio con un solo escritor, (3) histórico y presupuestos
+solo con `almacen: activo` y con las mismas funciones de clasificación que el informe (`agregacion.proyecto_mostrado`,
+`plan_del_consumo`, `es_ignorado`), contrastado con la base real: 32 de 32 días iguales, (5) límites de día, semana y mes con la librería
+C (probado en 25-10-2026 y 28-03-2027), (6) CSV cifrado con tipo propio `TIPO_CSV`, (7) neutralización de fórmulas y limpieza de
+invisibles, (8) validación estricta de fechas y tope de puntos, (9) migración única de `presupuesto_mes_tokens`, (10) `almacen.CLASES`
+con test de cobertura, (12) recarga suspendida en Histórico. Módulos: `historico.py`, `presupuestos.py`, `avisos.py`, `exportacion_csv.py`.
+**Pendiente:** revisión independiente de código (`../reports/revision-codigo-fase2-261014.md`), avisos nativos de Windows, pintar la
+alerta de presupuesto en el icono de la barra y la reinstalación tras los arreglos de la revisión. Mutaciones comprobadas: 9 en el
+histórico, 10 en presupuestos y avisos y 11 en el CSV.
+
 ## Fase 3 — servidores
 - `servidores.sqlite` aparte. Se graba **solo lo nuevo** por ciclo (hoy el ciclo repite lecturas ~12× por hora).
 - Métricas tipadas (calibre o contador con reinicios), muestra cruda N días y luego compactada por hora.
