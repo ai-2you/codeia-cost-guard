@@ -10,7 +10,9 @@ cada sistema, separados del código y de la configuración:
 import os
 import sys
 
-NUBE = ("icloud", "mobile documents", "dropbox", "onedrive", "google drive", "googledrive", "box sync", "pcloud", "nextcloud")
+NUBE = {"icloud", "icloud drive", "mobile documents", "dropbox", "onedrive", "google drive", "googledrive", "box sync",
+        "pcloud", "pcloud drive", "nextcloud", "cloudstorage"}
+PREFIJOS_NUBE = ("onedrive-", "dropbox (", "google drive (", "googledrive-", "nextcloud-")
 
 
 def dir_datos():
@@ -27,12 +29,17 @@ def dir_datos():
 
 def ruta_no_fiable(ruta):
     """Motivo (texto) si la ruta está en una carpeta sincronizada o de red, donde SQLite en WAL puede corromperse
-    o la base acabar copiada a un tercero; "" si parece un disco local."""
-    real = os.path.realpath(ruta).lower().replace("\\", "/")
-    for n in NUBE:
-        if n in real:
-            return f"carpeta sincronizada ({n})"
-    if real.startswith("//") or real.startswith("/net/") or real.startswith("/mnt/nfs"):
+    o la base acabar copiada a un tercero; "" si parece un disco local. Compara componentes enteros de la ruta
+    (no subcadenas): un usuario "box" o una carpeta "dropbox-clone" no son nube. No ve volúmenes de red montados
+    con un nombre cualquiera: ahí manda la comprobación de WAL al abrir."""
+    real = os.path.realpath(ruta)
+    if real.startswith("\\\\") or real.replace("\\", "/").startswith("//"):
+        return "recurso de red"
+    partes = [p.lower() for p in real.replace("\\", "/").split("/") if p]
+    for p in partes:
+        if p in NUBE or p.startswith(PREFIJOS_NUBE):
+            return f"carpeta sincronizada ({p})"
+    if partes[:1] in (["net"],) or partes[:2] == ["mnt", "nfs"]:
         return "recurso de red"
     return ""
 

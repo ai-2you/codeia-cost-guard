@@ -29,16 +29,17 @@ class Base(unittest.TestCase):
         self.dir = tempfile.mkdtemp(prefix="cg-almacen-")
         self.ruta = os.path.join(self.dir, "datos", "consumo.sqlite")
         self.con = almacen.abrir(self.ruta)
-        self.esp = almacen.espacio(self.con)
-        self.fue = almacen.fuente(self.con, self.esp, "claude", "sesion-1")
-        self.assertTrue(almacen.adquirir_escritura(self.con, "barra"))
+        self.quien = almacen.identidad("barra")
+        self.assertTrue(almacen.adquirir_escritura(self.con, self.quien))
+        self.esp = almacen.espacio(self.con, self.quien)
+        self.fue = almacen.fuente(self.con, self.quien, self.esp, "claude", "sesion-1")
 
     def tearDown(self):
         self.con.close()
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def ingiere(self, turnos, quien="barra", ahora=None):
-        return almacen.ingerir_turnos(self.con, quien, self.esp, self.fue, turnos, ahora=ahora)
+    def ingiere(self, turnos, quien=None, ahora=None):
+        return almacen.ingerir_turnos(self.con, quien or self.quien, self.esp, self.fue, turnos, ahora=ahora)
 
     def filas(self):
         return {f["clave"]: (f["gi"], f["go"], f["cr"], f["cw"], f["hora_utc"], f["modelo"]) for f in self.con.execute("SELECT * FROM turnos")}
@@ -46,6 +47,21 @@ class Base(unittest.TestCase):
     def suma_horas(self):
         f = self.con.execute("SELECT COALESCE(SUM(gi),0) a, COALESCE(SUM(go),0) b, COALESCE(SUM(cr),0) c, COALESCE(SUM(cw),0) d, COALESCE(SUM(turnos),0) n FROM horas").fetchone()
         return tuple(f)
+
+    def horas_esperadas(self):
+        """Lo que `horas` debería valer, recalculado desde cero a partir de `turnos`."""
+        esperado = {}
+        for f in self.con.execute("SELECT * FROM turnos"):
+            k = (f["espacio_id"], f["hora_utc"] - f["hora_utc"] % 3600, f["agente"], f["proveedor"], f["modelo"], f["proyecto_raw"])
+            a = esperado.setdefault(k, [0, 0, 0, 0, 0])
+            for i, c in enumerate(("gi", "go", "cr", "cw")):
+                a[i] += f[c]
+            a[4] += 1
+        return {k: tuple(v) for k, v in esperado.items()}
+
+    def horas_reales(self):
+        return {(f["espacio_id"], f["hora"], f["agente"], f["proveedor"], f["modelo"], f["proyecto_raw"]): (f["gi"], f["go"], f["cr"], f["cw"], f["turnos"])
+                for f in self.con.execute("SELECT * FROM horas")}
 
     def suma_turnos(self):
         f = self.con.execute("SELECT COALESCE(SUM(gi),0), COALESCE(SUM(go),0), COALESCE(SUM(cr),0), COALESCE(SUM(cw),0), COUNT(*) FROM turnos").fetchone()
@@ -157,6 +173,7 @@ class EscrituraMonotonaTest(Base):
         self.ingiere([turno("claude:a", hora=H0 + 10), turno("claude:b", hora=H0 + 3700), turno("claude:c", hora=H0 + 3800, modelo="m2")])
         self.ingiere([turno("claude:a", hora=H0 + 10, go=50), turno("claude:d", hora=H0 + 7300)])
         self.assertEqual(self.suma_horas(), self.suma_turnos())
+        self.assertEqual(self.horas_reales(), self.horas_esperadas())             # y clave a clave, no solo en total
         t = almacen.totales(self.con, self.esp, H0, H0 + 3600, agrupar=("modelo",))
         self.assertEqual(sum(f["turnos"] for f in t), 1)
 
@@ -178,28 +195,29 @@ class EscrituraMonotonaTest(Base):
 class EscritorUnicoTest(Base):
     def test_solo_escribe_el_escritor_vigente(self):
         with self.assertRaises(almacen.SinEscritura):
-            self.ingiere([turno()], quien="cli")
+            self.ingiere([turno()], quien=almacen.identidad("cli"))
         self.assertEqual(self.filas(), {})
 
     def test_otro_no_toma_el_puesto_mientras_hay_latido(self):
-        self.assertFalse(almacen.adquirir_escritura(self.con, "cli"))
-        self.assertTrue(almacen.adquirir_escritura(self.con, "barra"))          # el dueño se renueva
+        self.assertFalse(almacen.adquirir_escritura(self.con, almacen.identidad("cli")))
+        self.assertTrue(almacen.adquirir_escritura(self.con, self.quien))       # el dueño se renueva
 
     def test_el_cli_toma_el_relevo_sin_latido(self):
         pasado = int(almacen.meta(self.con, "escritor_latido")) + almacen.LATIDO_TTL_S
-        self.assertTrue(almacen.adquirir_escritura(self.con, "cli", ahora=pasado))
+        cli = almacen.identidad("cli")
+        self.assertTrue(almacen.adquirir_escritura(self.con, cli, ahora=pasado))
         with self.assertRaises(almacen.SinEscritura):
-            self.ingiere([turno()], quien="barra", ahora=pasado)
-        self.assertEqual(self.ingiere([turno()], quien="cli", ahora=pasado)["nuevos"], 1)
+            self.ingiere([turno()], ahora=pasado)
+        self.assertEqual(self.ingiere([turno()], quien=cli, ahora=pasado)["nuevos"], 1)
 
     def test_el_escritor_caducado_no_puede_seguir_escribiendo(self):
         tarde = int(almacen.meta(self.con, "escritor_latido")) + almacen.LATIDO_TTL_S + 1
         with self.assertRaises(almacen.SinEscritura):
-            self.ingiere([turno()], quien="barra", ahora=tarde)
+            self.ingiere([turno()], ahora=tarde)
 
     def test_soltar_deja_el_puesto_libre(self):
-        almacen.soltar_escritura(self.con, "barra")
-        self.assertTrue(almacen.adquirir_escritura(self.con, "cli"))
+        almacen.soltar_escritura(self.con, self.quien)
+        self.assertTrue(almacen.adquirir_escritura(self.con, almacen.identidad("cli")))
 
     def test_el_lector_en_otra_conexion_no_escribe_pero_ve_lo_escrito(self):
         self.ingiere([turno()])
@@ -208,6 +226,159 @@ class EscritorUnicoTest(Base):
         with self.assertRaises(sqlite3.OperationalError):
             lector.execute("UPDATE meta SET valor='x'")
         lector.close()
+
+
+class HallazgosRevisionTest(Base):
+    def test_nul_y_surrogate_se_rechazan_sin_tumbar_el_lote(self):
+        lote = [turno("claude:ok1"), turno("claude:nul", modelo="a\x00b"), turno("claude:sur", proyecto_raw="x\ud800"),
+                turno("claude:ctl", modelo="a\x1fb"), turno("claude:nl", proveedor="a\nb"), turno("claude:ok2")]
+        r = self.ingiere(lote)
+        self.assertEqual((r["nuevos"], r["anomalias"]), (2, 4))
+        self.assertEqual(set(self.filas()), {"claude:ok1", "claude:ok2"})
+        self.assertEqual(self.ingiere(lote)["nuevos"], 0)                       # y la relectura tampoco falla
+
+    def test_la_anomalia_de_una_clave_con_sustitutos_se_anota_sin_fallar(self):
+        self.ingiere([turno("claude:\ud800x", gi=-1)])
+        self.assertEqual(len(almacen.anomalias(self.con)), 1)
+
+    def test_la_clave_debe_llevar_el_prefijo_del_agente(self):
+        r = self.ingiere([turno("openai:msg_1")])
+        self.assertEqual((r["nuevos"], r["anomalias"]), (0, 1))
+
+    def test_identidad_distinta_no_sube_contadores(self):
+        self.ingiere([turno(gi=10, go=5)])
+        r = self.ingiere([turno(modelo="otro", gi=10 ** 11, go=10 ** 11), turno(hora=H0 + 5 * 86400, gi=10 ** 11)])
+        self.assertEqual(self.filas()["claude:msg_1"][:4], (10, 5, 100, 20))
+        self.assertEqual((r["subidos"], r["anomalias"]), (0, 2))
+        self.assertEqual(self.horas_reales(), self.horas_esperadas())
+
+    def test_el_agregado_va_al_espacio_de_la_fila_y_otro_espacio_no_lo_toca(self):
+        self.ingiere([turno()])
+        esp2 = almacen.espacio(self.con, self.quien, "otro")
+        almacen.ingerir_turnos(self.con, self.quien, esp2, self.fue, [turno(go=999)])
+        self.assertEqual(self.horas_reales(), self.horas_esperadas())
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM horas WHERE espacio_id=?", (esp2,)).fetchone()[0], 0)
+        self.assertTrue(any(a["tipo"] == "cambio_espacio" for a in almacen.anomalias(self.con)))
+
+    def test_borrar_una_fuente_no_borra_turnos(self):
+        self.ingiere([turno()])
+        self.con.execute("DELETE FROM fuentes WHERE id=?", (self.fue,))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM turnos").fetchone()[0], 1)
+        self.assertEqual(self.horas_reales(), self.horas_esperadas())
+
+    def test_ruta_de_solo_lectura_con_caracteres_especiales(self):
+        for nombre in ("a#b.sqlite", "a?b=c.sqlite", "a b%20c.sqlite"):
+            ruta = os.path.join(self.dir, nombre)
+            almacen.abrir(ruta).close()
+            con = almacen.abrir(ruta, solo_lectura=True)
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='turnos'").fetchone()[0], 1, nombre)
+            con.close()
+        self.assertEqual(sorted(f for f in os.listdir(self.dir) if f.endswith(".sqlite")), ["a b%20c.sqlite", "a#b.sqlite", "a?b=c.sqlite"])
+
+    def test_solo_lectura_es_mode_ro_aunque_se_quite_query_only(self):
+        con = almacen.abrir(self.ruta, solo_lectura=True)
+        con.execute("PRAGMA query_only=OFF")
+        with self.assertRaises(sqlite3.OperationalError):
+            con.execute("INSERT INTO espacios(nombre) VALUES('x')")
+        con.close()
+
+    def test_dos_procesos_creando_la_base_a_la_vez_no_fallan(self):
+        import threading
+        ruta = os.path.join(self.dir, "carrera.sqlite")
+        errores = []
+        def abre():
+            try:
+                almacen.abrir(ruta).close()
+            except Exception as e:                     # noqa: BLE001
+                errores.append(repr(e))
+        hilos = [threading.Thread(target=abre) for _ in range(6)]
+        [h.start() for h in hilos]
+        [h.join() for h in hilos]
+        self.assertEqual(errores, [])
+
+    def test_el_puesto_no_se_comparte_entre_procesos_con_el_mismo_rol(self):
+        otra = almacen.identidad("barra")
+        self.assertNotEqual(otra, self.quien)
+        self.assertFalse(almacen.adquirir_escritura(self.con, otra))
+
+    def test_espacio_y_fuente_exigen_ser_el_escritor(self):
+        intruso = almacen.identidad("cli")
+        with self.assertRaises(almacen.SinEscritura):
+            almacen.espacio(self.con, intruso, "x")
+        with self.assertRaises(almacen.SinEscritura):
+            almacen.fuente(self.con, intruso, self.esp, "claude", "otra")
+        self.assertFalse(self.con.in_transaction)
+
+    def test_un_reloj_que_retrocede_no_bloquea_el_relevo(self):
+        antes = int(almacen.meta(self.con, "escritor_latido")) - almacen.LATIDO_TTL_S * 3
+        self.assertTrue(almacen.adquirir_escritura(self.con, almacen.identidad("cli"), ahora=antes))
+
+    def test_las_anomalias_no_se_repiten_en_cada_relectura(self):
+        self.ingiere([turno()])
+        for _ in range(5):
+            self.ingiere([turno(modelo="otro")])
+        self.assertEqual(len(almacen.anomalias(self.con)), 1)
+
+    def test_cambio_de_proveedor_o_proyecto_se_anota_y_no_cambia_lo_guardado(self):
+        self.ingiere([turno(proveedor="anthropic", proyecto_raw="Users/yo/proy")])
+        self.ingiere([turno(proveedor="otro", proyecto_raw="proy")])
+        f = self.con.execute("SELECT proveedor, proyecto_raw FROM turnos").fetchone()
+        self.assertEqual(tuple(f), ("anthropic", "Users/yo/proy"))
+        self.assertEqual({a["tipo"] for a in almacen.anomalias(self.con)}, {"cambio_proveedor", "cambio_proyecto_raw"})
+
+    def test_la_rotacion_solo_borra_copias_del_mismo_prefijo(self):
+        d = os.path.join(self.dir, "copias2")
+        os.makedirs(d)
+        ajena = os.path.join(d, "consumo.sqlite.premigracion.20250101-000000")
+        open(ajena, "w").close()
+        for _ in range(4):
+            almacen.copia(self.con, d, conservar=2)
+        self.assertTrue(os.path.exists(ajena))
+        self.assertEqual(len([f for f in os.listdir(d) if ".copia." in f]), 2)
+
+    def test_copias_en_el_mismo_segundo_no_colisionan(self):
+        d = os.path.join(self.dir, "copias3")
+        with mock.patch("time.strftime", return_value="20261025-020000"):
+            a, b = almacen.copia(self.con, d), almacen.copia(self.con, d)
+        self.assertNotEqual(a, b)
+
+    @unittest.skipIf(os.name == "nt", "umask no aplica en Windows")
+    def test_la_copia_es_privada_aunque_la_umask_sea_laxa(self):
+        antes = os.umask(0o000)
+        try:
+            ruta = almacen.copia(self.con, os.path.join(self.dir, "copias4"))
+        finally:
+            os.umask(antes)
+        self.assertEqual(stat.S_IMODE(os.stat(ruta).st_mode), 0o600)
+
+    def test_rollback_no_tapa_el_error_original(self):
+        con = mock.MagicMock()
+        con.execute.side_effect = [None, sqlite3.OperationalError("database or disk is full"), sqlite3.OperationalError("cannot rollback")]
+        with self.assertRaises(sqlite3.OperationalError) as cm:
+            almacen.soltar_escritura(con, "x")
+        self.assertEqual(str(cm.exception), "database or disk is full")     # el visible es el original, no el del ROLLBACK
+        self.assertEqual(con.execute.call_count, 3)                          # BEGIN, la consulta que falló y el ROLLBACK intentado
+
+
+class EsquemaTest(unittest.TestCase):
+    def test_sentencias_no_se_cortan_por_un_punto_y_coma_en_comentario_o_literal(self):
+        sql = "CREATE TABLE a(x TEXT DEFAULT 'a;b'); -- comentario; con punto y coma\nCREATE TABLE b(y INTEGER);\n"
+        self.assertEqual(len(list(almacen._sentencias(sql))), 2)
+        self.assertEqual(len(list(almacen._sentencias(almacen.ESQUEMA_V1))), 7)
+
+    def test_un_esquema_incompleto_falla(self):
+        with self.assertRaises(almacen.ErrorAlmacen):
+            list(almacen._sentencias("CREATE TABLE a(x"))
+
+
+class RutasNoFiablesTest(unittest.TestCase):
+    def test_componentes_enteros_no_subcadenas(self):
+        no_nube = ("/Users/box/proyectos/c.sqlite", "/Users/x/dropbox-clone/c.sqlite", "/Users/x/onedriver/c.sqlite", "/Users/x/mega/c.sqlite")
+        for r in no_nube:
+            self.assertEqual(plataforma.ruta_no_fiable(r), "", r)
+        for r in ("/Users/x/Dropbox/c.sqlite", "/Users/x/OneDrive/c.sqlite", "/Users/x/OneDrive-Empresa/c.sqlite",
+                  "/Users/x/Library/CloudStorage/Box-Box/c.sqlite", "/Users/x/Library/Mobile Documents/c.sqlite"):
+            self.assertNotEqual(plataforma.ruta_no_fiable(r), "", r)
 
 
 class ConsultaTest(Base):
