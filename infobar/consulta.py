@@ -5,10 +5,13 @@ por llamada (las conexiones de SQLite no se comparten entre hilos) y no importa 
 """
 import collections
 import datetime
+import glob
+import json
+import os
 import sqlite3
 import time
 
-from . import almacen
+from . import almacen, plataforma, rutas
 from .agregacion import VENTANA_H, agregar
 from .planes_y_tarifas import CLIFF, tarifa
 
@@ -110,16 +113,39 @@ def vistos_desde(con, dias, zona=None, ahora=None):
     return {f"almacen:{k[0]}|{k[1]}|{k[2]}": v for k, v in registros.items()}, bases
 
 
+def perfiles_hermes(con, eid, dias, home=None, ahora=None):
+    """Tokens por perfil de Hermes. La base no guarda el nombre (la fuente es un hash de la ruta): se recupera calculando el hash
+    de cada perfil que existe en el disco. Un perfil ya borrado sale como `hermes/<huella corta>`."""
+    home = home or rutas.HOME
+    conocidos = {}
+    raiz = os.path.join(home, ".hermes", "state.db")
+    conocidos[plataforma.id_fuente(raiz, home)] = "predeterminado"
+    for ruta in glob.glob(os.path.join(home, ".hermes", "profiles", "*", "state.db")):
+        conocidos[plataforma.id_fuente(ruta, home)] = os.path.basename(os.path.dirname(ruta))
+    desde = int(ahora if ahora is not None else time.time()) - (int(dias) + 1) * 86400
+    res = {}
+    for f in con.execute("SELECT f.id_fuente, SUM(t.gi+t.go+t.cr+t.cw) FROM turnos t JOIN fuentes f ON f.id=t.fuente_id "
+                         "WHERE t.espacio_id=? AND t.agente='hermes' AND t.hora_utc>=? GROUP BY f.id_fuente", (eid, desde)):
+        res[conocidos.get(f[0]) or f"hermes/{f[0][:8]}"] = int(f[1] or 0)
+    return res
+
+
 def consultar(dias=None, zona=None):
     """Mismo informe que `escanear()`, leído de la base. Lanza `SinAlmacen` si no puede."""
     con = _abrir()
     try:
         try:
             vistos, bases = vistos_desde(con, dias or 31, zona)
+            eid = con.execute("SELECT id FROM espacios WHERE nombre='local'").fetchone()[0]
+            hermes = perfiles_hermes(con, eid, dias or 31)
+            vuelta = json.loads(almacen.meta(con, "ultima_vuelta") or "{}")
+        except (ValueError, TypeError):
+            hermes, vuelta = {}, {}
         except sqlite3.Error as e:
             raise SinAlmacen(f"base ilegible ({type(e).__name__})") from e
     finally:
         con.close()
     r = agregar(vistos, 0, dias)
+    r["perfiles_hermes"], r["nuevos"] = hermes, int(vuelta.get("nuevos") or 0) if time.time() - int(vuelta.get("en") or 0) < 120 else 0
     r["fuentes"], r["bases"] = sum(n for _, n in bases), [f"{a} ({n})" for a, n in bases]
     return r

@@ -15,6 +15,7 @@ import sqlite3
 import stat
 
 from . import almacen
+from .plataforma import id_fuente  # noqa: F401  (vive en plataforma: la consulta lo necesita y no puede importar la ingesta)
 
 MAX_LECTURA = 8 * 1024 * 1024          # bytes por pasada y fichero: la ingesta es reanudable y no monopoliza la barra
 MAX_LINEA = 2 * 1024 * 1024            # una línea mayor no es un turno
@@ -59,13 +60,6 @@ def a_epoch_utc(v):
     return int(dt.timestamp()) - desplazamiento
 
 
-def id_fuente(ruta, base):
-    """Id estable y portable de una fuente: hash de la ruta RELATIVA a `base` (nunca la ruta absoluta con el usuario)."""
-    try:
-        rel = os.path.relpath(os.path.realpath(ruta), os.path.realpath(base)).replace("\\", "/")
-    except ValueError:                                  # Windows: otra unidad
-        rel = os.path.realpath(ruta).replace("\\", "/")
-    return hashlib.sha256(rel.encode("utf-8", "replace")).hexdigest()[:32]
 
 
 TOPE_LINEA_ENORME = 64 * 1024 * 1024    # una línea de más de esto se da por perdida y se salta hasta el final del fichero

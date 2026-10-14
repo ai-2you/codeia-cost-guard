@@ -155,6 +155,8 @@ las divergencias aceptadas.
 
 **Decisiones del dueño sobre 1.3 (2026-10-14):** (1) **Codex con otro proveedor:** un consumo hecho con Codex pero con un `model_provider` distinto de `openai` se muestra en la cuenta de ese proveedor y no afecta al plan de suscripción de Codex; es lo que ya hace `plan_de()` y queda firmado como divergencia respecto al informe antiguo. (2) **Nombres de proyecto unificados** (un directorio es un solo proyecto en todos los agentes). (3) El resto, a criterio del asistente: **no se instrumenta `parsear()` para contar los forks** (el lector antiguo se retira al pasar a `activo`; basta la dirección y el tamaño de la diferencia, ya clasificados en la sombra), **la hora de Hermes se queda en `first_seen`** y documentada (el reparto por diferencias horarias se valora tras la fase 2, si las vistas de 5 h y de hoy lo exigen), y **el nombre del perfil de Hermes** se mostrará en Ajustes/orígenes recuperándolo por diccionario de huellas, sin guardarlo en la base.
 
+**1.3 cerrado (2026-10-14):** perfil de Hermes por diccionario de huellas (`perfiles_hermes` en el informe y en `/origenes`; `id_fuente` pasó a `plataforma.py` para que la consulta no importe la ingesta), `nuevos` desde `meta.ultima_vuelta` solo si la vuelta es de menos de 2 min, aviso de volumen sin propiedad de ficheros (`plataforma.volumen_sin_propietarios`, lee `mount`) y sección del README. 304 tests.
+
 ## Fase 2 — histórico, presupuestos y exportador
 - Vista histórica en el panel (meses, comparativas, proyección de fin de mes).
 - Presupuestos por proyecto **y** por plan (`ambito`, `nombre`, `periodo`, `tokens`), con alertas en la barra.

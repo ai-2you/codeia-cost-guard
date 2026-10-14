@@ -10,7 +10,7 @@ import threading
 import time
 import traceback
 
-from . import almacen, ingesta, ingesta_claude, ingesta_codex, ingesta_hermes, ingesta_opencode, ingesta_pi, rutas
+from . import almacen, plataforma, ingesta, ingesta_claude, ingesta_codex, ingesta_hermes, ingesta_opencode, ingesta_pi, rutas
 from .config_y_estado import log
 
 PRESUPUESTO_S = 5.0            # tiempo máximo de una vuelta: el latido (90 s) se refresca al empezar cada una
@@ -60,6 +60,9 @@ class Ingestor:
                 self.al_dia.clear()
         if self.con is None:
             self.con = almacen.abrir(self.ruta_base)
+            if plataforma.volumen_sin_propietarios(self._ruta()):
+                log("ingesta: la base está en un volumen sin propiedad de ficheros: el permiso 0600 no impide que otro usuario "
+                    "del equipo la lea. Usa un disco con propietarios o cifra el volumen")
             self.inodo = os.stat(self._ruta()).st_ino
             self._carga_al_dia()
         return self.con

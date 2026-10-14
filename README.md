@@ -206,6 +206,23 @@ lista de cada modelo.
 que se agota es lo mismo que aquí se mide — *tokens × turnos*. Los agentes que corren en la nube no
 dejan log en tu máquina: ejecuta el medidor **en esas máquinas** y suma los totales.
 
+## Base de datos de consumo (en transición)
+
+Además de leer los logs, la barra guarda cada turno de Claude Code, Codex, pi, OpenCode y Hermes en una base SQLite
+(`consumo.sqlite`) para conservar el histórico aunque los agentes borren sus logs (Claude Code los borra a los 30 días).
+
+- **Dónde:** en el directorio de datos de tu sistema, aparte del código y de la configuración:
+  macOS `~/Library/Application Support/CostGuard`, Windows `%LOCALAPPDATA%\CostGuard`, Linux `~/.local/share/costguard`
+  (`COSTGUARD_DATOS` lo sustituye). No puede estar en una carpeta sincronizada (iCloud, Dropbox, OneDrive) ni de red.
+  La base solo la lee tu usuario (0600); si está en un volumen sin propiedad de ficheros, la barra lo avisa en el log.
+- **Quién escribe:** solo la barra (en su propio hilo) o `python3 costbar.py --ingerir [--una]` si no usas la barra.
+  El panel, el servidor local y el temporizador de la barra solo leen.
+- **Interruptor `almacen` en `config.json`:** `sombra` (por defecto: las cifras siguen saliendo de los logs, la base se llena y se
+  compara cada hora en `sombra.jsonl`), `activo` (las cifras salen de la base; si no se puede leer, vuelven a los logs),
+  `apagado` (lee los logs pero sigue guardando) y `desactivado` (ni guarda). Volver atrás nunca borra la base.
+- **Nombres de proyecto:** un directorio es un solo proyecto en todos los agentes; los alias que ya tenías siguen valiendo.
+- **Codex con otro proveedor:** se muestra en la cuenta de ese proveedor, no en tu suscripción de Codex.
+
 ## Tests
 
 ```bash

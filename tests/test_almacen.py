@@ -236,6 +236,21 @@ class EscritorUnicoTest(Base):
         lector.close()
 
 
+class VolumenTest(unittest.TestCase):
+    SALIDA = ("/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)\n"
+              "/dev/disk4s1 on /Volumes/EVO990 (apfs, local, nodev, nosuid, journaled, noowners)\n"
+              "/dev/disk3s5 on /System/Volumes/Data (apfs, local, journaled, protect)\n")
+
+    def test_externo_sin_propietarios(self):
+        self.assertTrue(plataforma.volumen_sin_propietarios("/Volumes/EVO990/x/consumo.sqlite", self.SALIDA))
+
+    def test_disco_con_propietarios(self):
+        self.assertFalse(plataforma.volumen_sin_propietarios("/System/Volumes/Data/Users/yo/a.sqlite", self.SALIDA))
+
+    def test_mount_ilegible(self):
+        self.assertFalse(plataforma.volumen_sin_propietarios("/x", "basura"))
+
+
 class HallazgosRevisionTest(Base):
     def test_nul_y_surrogate_se_rechazan_sin_tumbar_el_lote(self):
         lote = [turno("claude:ok1"), turno("claude:nul", modelo="a\x00b"), turno("claude:sur", proyecto_raw="x\ud800"),

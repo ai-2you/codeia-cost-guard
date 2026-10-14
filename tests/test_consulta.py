@@ -149,6 +149,31 @@ class TestInforme(Base):
         self.assertEqual(r["cinco_h"]["tok"], 135)
 
 
+class TestPerfilesYNuevos(Base):
+    def test_perfil_de_hermes_por_huella_y_perfil_borrado(self):
+        from infobar import plataforma
+        home = os.path.join(self.dir, "home")
+        d = os.path.join(home, ".hermes", "profiles", "trabajo")
+        os.makedirs(d)
+        open(os.path.join(d, "state.db"), "w").close()
+        h_trabajo = plataforma.id_fuente(os.path.join(d, "state.db"), home)
+        h_viejo = plataforma.id_fuente(os.path.join(home, ".hermes", "profiles", "borrado", "state.db"), home)
+        ahora = time.time()
+        for hid, clave in ((h_trabajo, "hermes:s1:a"), (h_viejo, "hermes:s2:b")):
+            fid = almacen.fuente(self.con, self.q, self.esp, "hermes", hid)
+            almacen.ingerir_turnos(self.con, self.q, self.esp, fid, [turno(clave, ahora - 60, agente="hermes", proveedor="x")])
+        res = consulta.perfiles_hermes(self.con, self.esp, 31, home=home)
+        self.assertEqual(res["trabajo"], 135)
+        self.assertEqual(res[f"hermes/{h_viejo[:8]}"], 135)
+
+    def test_nuevos_solo_si_la_vuelta_es_reciente(self):
+        self.completa()
+        import json
+        for en, esperado in ((int(time.time()), 7), (int(time.time()) - 3600, 0)):
+            almacen.guardar_meta(self.con, self.q, "ultima_vuelta", json.dumps({"nuevos": 7, "en": en}))
+            self.assertEqual(consulta.consultar()["nuevos"], esperado)
+
+
 class TestConcurrencia(Base):
     def test_cuatro_consultores_mientras_el_escritor_aplica_lotes(self):
         import threading
