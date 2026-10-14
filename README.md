@@ -246,8 +246,32 @@ Requiere la librería `cryptography` (la instala `install.sh`; sin ella solo se 
 - **Windows:** `python costbar.py --autoprueba-copias` hace la ida y vuelta completa en un directorio temporal y dice si todo
   funciona en tu máquina; pega su salida si algo falla.
 - Las frases y las claves privadas **nunca** van por la línea de órdenes, el panel web ni la barra: solo se piden en la terminal.
-- El estado de las copias (`al_dia`, `atrasada`, `danada`, `nunca`, `reloj`, último error y si toca ensayar) va en el informe y en
-  `/origenes`; todavía no se pinta en la barra.
+- El estado de las copias (`al_dia`, `atrasada`, `danada`, `nunca`, `reloj`, último error y si toca ensayar) se ve en **Ajustes →
+  Copias cifradas**, con un aviso si están atrasadas, salieron de una base dañada, la carpeta está en este mismo equipo o hace
+  tiempo que no pruebas a restaurar. Todavía no se pinta en el icono de la barra.
+
+### Histórico, presupuestos y CSV
+
+Necesitan `almacen: activo` en `config.json` (con `sombra` el panel sale de los logs y las cifras no coincidirían; la aplicación lo
+avisa en vez de enseñar otras).
+
+- **Pestaña Histórico:** consumo por día, semana (de lunes a domingo) o mes en tu hora local, agrupado por proyecto, plan o agente, con
+  la comparación con el periodo anterior y una proyección lineal de fin de mes (estimación, desde el día 3). Usa el mismo criterio de
+  proyecto mostrado, plan y modelos ignorados que el panel. Los proyectos ocultos cuentan en el total y salen como «(ocultos)». La
+  recarga automática del panel se suspende mientras lo miras.
+- **Presupuestos (Ajustes → Presupuestos):** un tope de tokens totales (entrada, salida y caché, igual que tus cuotas) por proyecto o por
+  plan, por mes o por semana natural. El nombre es el que ves en el panel (si renombras el alias, la fila avisa de que ya no hay consumo
+  con ese nombre). Avisa al 80 % y al 100 %, **una vez por umbral y periodo**, con una notificación del sistema en macOS (sin el
+  nombre del proyecto en el texto, porque se vería en la pantalla de bloqueo; se puede desactivar). En Windows solo hay aviso visual por
+  ahora. Lo ya avisado vive en `avisos.json`, en el directorio de datos. Los presupuestos mensuales por proyecto que tuvieras pasan solos a
+  la lista nueva (el campo antiguo se conserva en `config.json` pero ya no se edita).
+- **CSV:** en la pestaña Histórico, «Descargar CSV» (sin cifrar, se genera al momento y no se guarda en el servidor), o desde la terminal
+  `python3 costbar.py --exportar-csv [--desde AAAA-MM-DD] [--hasta AAAA-MM-DD] [--paso dia|semana|mes] [--agrupa ninguno|proyecto|plan|agente] [--cifrar]`.
+  Sin `--cifrar` queda en `exportaciones/` (carpeta 0700, fichero 0600, nombre generado) y te avisa de que está en claro; con `--cifrar`
+  pide una frase y deja un `.csv.cgx` que se abre con `--descifrar-csv RUTA.csv.cgx`. Separador `;` y UTF-8 con BOM (Excel en español lo
+  abre directo); todo entrecomillado; los nombres de proyecto salen sin caracteres de control ni invisibles y con una comilla delante si
+  una hoja de cálculo los tomaría por fórmula. Solo contiene periodo, grupo, tokens y turnos: nunca hosts, IPs ni rutas completas.
+  Cada exportación deja una línea en `exportaciones.log` (cuándo, rango y número de filas; nunca contenido).
 
 ## Tests
 

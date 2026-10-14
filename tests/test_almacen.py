@@ -462,3 +462,28 @@ class PlataformaTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClasesDeColumna(unittest.TestCase):
+    def test_todas_las_columnas_estan_clasificadas_y_no_sobra_ninguna(self):
+        import tempfile, shutil, sqlite3 as _sq
+        d = tempfile.mkdtemp(prefix="cg-clases-")
+        self.addCleanup(lambda: shutil.rmtree(d, ignore_errors=True))
+        con = almacen.abrir(os.path.join(d, "c.sqlite"))
+        try:
+            reales = {t: {c[1] for c in con.execute(f"PRAGMA table_info({t})")}
+                      for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+        finally:
+            con.close()
+        self.assertEqual(set(reales), set(almacen.CLASES), "tabla sin clasificar (o clasificada y ya inexistente)")
+        for t, cols in reales.items():
+            self.assertEqual(cols, set(almacen.CLASES[t]), f"columnas de {t} sin clasificar o sobrantes")
+            self.assertTrue(set(almacen.CLASES[t].values()) <= set(almacen.ORDEN_CLASES))
+
+    def test_lo_que_nombra_proyectos_o_rutas_es_personal(self):
+        self.assertEqual(almacen.CLASES["horas"]["proyecto_raw"], "personal")
+        self.assertEqual(almacen.CLASES["fuentes"]["id_fuente"], "personal")
+        self.assertEqual(almacen.CLASES["anomalias"]["detalle"], "personal")
+        self.assertNotIn("proyecto_raw", almacen.columnas_hasta("horas", "interno"))
+        self.assertIn("gi", almacen.columnas_hasta("horas", "interno"))
+        self.assertIn("proyecto_raw", almacen.columnas_hasta("horas", "personal"))

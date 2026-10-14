@@ -29,6 +29,30 @@ TOLERANCIA_HORA_S = 3600                     # las líneas de un mismo mensaje s
 COLUMNAS_AGRUPABLES = {"hora", "agente", "proveedor", "modelo", "proyecto_raw"}
 CONTADORES = ("gi", "go", "cr", "cw")
 
+# Clase de cada columna, para que lo que sale de la base (API, exportaciones, copias parciales) se decida por clase y no por una lista a
+# mano. publico: no identifica nada; interno: técnico o contadores; personal: puede nombrar a un cliente, un proyecto o una ruta;
+# secreto: nunca sale (hoy no se guarda ninguno). Un test falla si aparece una columna sin clasificar.
+CLASES = {
+    "meta": {"clave": "interno", "valor": "interno"},
+    "espacios": {"id": "interno", "nombre": "interno"},
+    "fuentes": {"id": "interno", "espacio_id": "interno", "dispositivo_id": "interno", "agente": "publico", "id_fuente": "personal", "visto_en": "interno"},
+    "turnos": {"clave": "personal", "espacio_id": "interno", "fuente_id": "interno", "hora_utc": "interno", "agente": "publico", "proveedor": "publico",
+               "modelo": "publico", "gi": "interno", "go": "interno", "cr": "interno", "cw": "interno", "proyecto_raw": "personal",
+               "productor_version": "interno", "actualizado_en": "interno"},
+    "horas": {"espacio_id": "interno", "hora": "interno", "agente": "publico", "proveedor": "publico", "modelo": "publico", "proyecto_raw": "personal",
+              "gi": "interno", "go": "interno", "cr": "interno", "cw": "interno", "turnos": "interno"},
+    "lecturas": {"fuente_id": "interno", "inodo": "interno", "tam": "interno", "mtime_ns": "interno", "desplazamiento": "interno", "cab_len": "interno",
+                 "hash_cab": "interno", "cola_len": "interno", "hash_cola": "interno", "contexto": "personal", "leido_en": "interno"},
+    "anomalias": {"id": "interno", "ts": "interno", "tipo": "interno", "clave": "personal", "fuente_id": "interno", "detalle": "personal"},
+}
+ORDEN_CLASES = ("publico", "interno", "personal", "secreto")
+
+
+def columnas_hasta(tabla, clase_maxima):
+    """Columnas de `tabla` cuya clase no supera `clase_maxima` (publico < interno < personal < secreto)."""
+    tope = ORDEN_CLASES.index(clase_maxima)
+    return [c for c, k in CLASES[tabla].items() if ORDEN_CLASES.index(k) <= tope]
+
 
 class ErrorAlmacen(Exception):
     """La base no se puede abrir o usar con seguridad (ruta no fiable, versión, WAL...)."""
