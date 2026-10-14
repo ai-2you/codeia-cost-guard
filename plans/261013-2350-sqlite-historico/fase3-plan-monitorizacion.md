@@ -166,3 +166,9 @@ recursos desde el primer día; aceptados explícitamente los cambios de la revis
 **3.2** (API Dokploy, condicionada a D-A: solo `settings.health`, `overview.services`, `overview.backups`, `docker.getServerHealth`; historial propio de
 «última copia buena» por servicio, histéresis y desaparición tras dos ciclos, cabecera `Date` del panel como reloj) → **3.5** (reglas honestas: el estado vivo sale
 de contenedores, no de `done`) → **3.4** (EasyPanel tras exploración propia) → **3.6** (pestaña) → **3.3b** (`recoger-bd`, condicionada).
+
+**Avance de 3.0 (2026-10-14):** hechos y probados en macOS: cerrojo portable (`plataforma.bloqueo_de_fichero`: `flock` y `msvcrt.locking` con tiempo máximo),
+`matar_arbol`/`grupo_nuevo_kwargs` en lugar de `os.killpg`/`start_new_session`, ningún módulo importa `fcntl`/`resource` al cargar (test), exclusión de copias del sistema
+verificada (`tmutil` en macOS, «no indexar» en Windows), poda de IPs de la caché a 48 h, purga horaria de las imágenes del desplegable (también en Windows),
+`Trabajador(pintar=False)` y `costbar.py --demonio`. **Pendiente de 3.0:** almacén de secretos de Windows (Administrador de credenciales) y probar todo en un
+Windows real con `--autoprueba-copias` ampliada; el código de Windows está probado con simulaciones, no en el sistema.
