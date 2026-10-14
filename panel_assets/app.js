@@ -1,7 +1,16 @@
 /* Estado, agregacion y pintado. Los datos ya vienen resueltos en __DATOS__ (D);
    aqui solo se filtra/suma en cliente — sin fetch salvo el configurador (/origenes, /guardar),
    que ya existia. Los graficos (barras, lineas, tarta...) los pone panel_assets/graficos.js. */
-const D = __DATOS__;
+/* Todo texto que viene de los logs (modelos, proyectos, planes) se escapa una vez aqui, antes de que ninguna plantilla lo
+   use: asi cabe en HTML y en atributos entre comillas. Los clics no llevan datos en codigo: botones con data-a/data-v. */
+function esc(s){ return String(s).replace(/[&<>"'`\\]/g, c => "&#" + c.charCodeAt(0) + ";"); }
+function escapar(v){
+  if(typeof v === "string") return esc(v);
+  if(Array.isArray(v)) return v.map(escapar);
+  if(v && typeof v === "object"){ const o = {}; for(const k of Object.keys(v)) o[esc(k)] = escapar(v[k]); return o; }
+  return v;
+}
+const D = escapar(__DATOS__);
 
 let periodo = "semana", plan = "todos", diasVer = 30, orden = ["mes", -1];
 let periodoModelo = "semana", planModelo = "todos";
@@ -22,6 +31,15 @@ function etiquetaDia(d){ const hoy=dias[dias.length-1], ayer=dias[dias.length-2]
   const x = new Date(d+"T12:00:00");
   return DIASEM[x.getDay()]+" "+d.slice(8); }
 const planes = () => Object.keys(D.proveedores);
+const ACCIONES = {
+  setPeriodo, setPlan, setOrden, setVistaDia, setVistaModelo, setVistaProyecto, setVistaMatriz, setPeriodoModelo, setPlanModelo,
+  setPeriodoProyecto, setPlanProyecto, setDias: v => setDias(+v), cerrarDetalle: () => { limpiarSeleccion(); pintarTablas(); },
+  vista: v => window.vista(v), cambiarTema: () => cambiarTema()};
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-a]");
+  const f = el && Object.prototype.hasOwnProperty.call(ACCIONES, el.dataset.a) ? ACCIONES[el.dataset.a] : null;
+  if(f) f(esc(el.dataset.v === undefined ? "" : el.dataset.v));     // el atributo llega decodificado: se escapa igual que las claves de D
+});
 function cambiarTema(){const r=document.documentElement,n=r.getAttribute("data-tema")==="claro"?"oscuro":"claro";
   r.setAttribute("data-tema",n);localStorage.setItem("tema",n);document.getElementById("tema").textContent=n==="claro"?"Modo oscuro":"Modo claro";}
 // tu eleccion si la hay; si no, la apariencia del sistema (como el desplegable de la barra)
@@ -85,15 +103,15 @@ function totalesPlan(diasSel, planFiltro){
 /* --- filtros: botones reusables (periodo y plan), globales y por seccion --- */
 function botonesPeriodo(actual, fn, conTodo){
   const ops = [["hoy","Hoy"],["semana","7 dias"],["mes","30 dias"]].concat(conTodo?[["todo","Todo"]]:[]);
-  return ops.map(p => `<button class="${actual===p[0]?"on":""}" onclick="${fn}('${p[0]}')">${p[1]}</button>`).join("");
+  return ops.map(p => `<button class="${actual===p[0]?"on":""}" data-a="${fn}" data-v="${p[0]}">${p[1]}</button>`).join("");
 }
 function botonesPlan(actual, fn){
-  return [`<button class="${actual==="todos"?"on":""}" onclick="${fn}('todos')">Todos</button>`]
-    .concat(planes().map(p => `<button class="${actual===p?"on":""}" onclick="${fn}('${p.replace(/'/g,"")}')">${p}</button>`)).join("");
+  return [`<button class="${actual==="todos"?"on":""}" data-a="${fn}" data-v="todos">Todos</button>`]
+    .concat(planes().map(p => `<button class="${actual===p?"on":""}" data-a="${fn}" data-v="${p}">${p}</button>`)).join("");
 }
 function botonesPestanas(opciones, actual, fn){
   return `<div class="pestanas">${opciones.map(o =>
-    `<button class="${actual===o[0]?"on":""}" onclick="${fn}('${o[0]}')">${ICONOS[o[0]]||""}${o[1]}</button>`).join("")}</div>`;
+    `<button class="${actual===o[0]?"on":""}" data-a="${fn}" data-v="${o[0]}">${ICONOS[o[0]]||""}${o[1]}</button>`).join("")}</div>`;
 }
 
 function pintarFiltros(){
@@ -150,7 +168,7 @@ function tablaPlanes(){
     ${cuotas.map(c=>`<tr><td>${c.modelo} ${c.fuente==="api"?'<span class="auto">en vivo</span>':(c.sin_tope&&c.plan?'<span class="auto">solo logs</span>':'')}</td><td style="color:var(--suave)">${c.plan}</td><td style="text-align:right">${fmt(c.mes)}</td><td style="text-align:right">${c.limite?fmt(c.limite):"—"}</td><td style="text-align:right">${c.pct!=null?c.pct+" %":"sin tope"}</td></tr>`).join("")}</table>` : "";
   return `<section><h2>Por plan (proveedor) <span style="text-transform:none;letter-spacing:0">· pulsa una cabecera para ordenar</span></h2><table>
   <tr>${cab.map(c=>{const act=orden[0]===c[0];const f=act?(orden[1]<0?"▼":"▲"):"↕";
-    return `<th class="${act?"act":""}" onclick="setOrden('${c[0]}')">${c[1]} <span class="f">${f}</span></th>`;}).join("")}<th>Modelos</th></tr>
+    return `<th class="${act?"act":""}" data-a="setOrden" data-v="${c[0]}">${c[1]} <span class="f">${f}</span></th>`;}).join("")}<th>Modelos</th></tr>
   ${filas.map(([n,x],i)=>`<tr><td><span class="punto" style="background:${colorI(i)}"></span>${n}${x.auto?"<span class='auto'>auto</span>":""}</td>
     <td>${fmt(x.cinco_h)}${x.pct_5h?" ("+x.pct_5h+" %)":""}</td><td>${fmt(x.semana)}${x.pct_semana?" ("+x.pct_semana+" %)":""}</td>
     <td>${fmt(x.mes)}</td><td>${fmt(x.hoy)}</td><td style="color:var(--suave);font-size:11.5px">${(x.modelos||[]).join(", ")||"-"}</td></tr>`).join("")}
@@ -167,7 +185,7 @@ function seccionDia(){
   const ops = opcionesDias();
   const controlDias = `<div class="fila-b"><span class="etq">Dias en el grafico</span>` +
     (ops.length===1 ? `<button class="on" disabled>solo hoy</button>`
-      : ops.map(n=>`<button class="${nver===n?"on":""}" onclick="setDias(${n})">${n}</button>`).join("")) +
+      : ops.map(n=>`<button class="${nver===n?"on":""}" data-a="setDias" data-v="${n}">${n}</button>`).join("")) +
     `<span class="sub" style="margin-left:6px">(el periodo elige el maximo · pulsa o arrastra sobre el grafico)</span></div>`;
   let grafico;
   if(vistaDia==="barrasV") grafico = barrasV(datosGrafico, {fmt, seleccionadas});
@@ -287,7 +305,7 @@ function pintarDetalleSeleccion(){
   const listaLD = arr => arr.length ? arr.map(x => `<div class="linea-det"><span>${x[0]}</span><span>${fmt(x[1])}</span></div>`).join("")
     : "<div class='linea-det'><span class='vacio'>sin datos</span></div>";
   document.getElementById("detalle-dia").innerHTML = `
-    <span class="cerrar" onclick="limpiarSeleccion();pintarTablas()">✕</span>
+    <span class="cerrar" data-a="cerrarDetalle">✕</span>
     <h3>${titulo}</h3>
     <div class="linea-det"><span>Total</span><span>${fmt(totTok)}</span></div>
     <div class="linea-det"><span>Turnos</span><span>${turnos}</span></div>

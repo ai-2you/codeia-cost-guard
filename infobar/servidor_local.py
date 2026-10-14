@@ -29,6 +29,14 @@ def _estado_copias():
         return None
 
 
+def html_con_nonce(html):
+    """El panel solo ejecuta su único <script>, marcado con un nonce nuevo en cada respuesta; sin manejadores en línea ni nada externo."""
+    nonce = secrets.token_urlsafe(18)
+    html = html.replace(b"<script>", f'<script nonce="{nonce}">'.encode(), 1)
+    return html, (f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; img-src 'self' data:; "
+                  "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+
+
 PUERTO = 47391              # panel/configurador local: un puerto alto que casi nada usa
 # campos que nunca salen por HTTP ni se aceptan desde el panel: nombres exactos y sufijos con '_'.
 # Los limite_*_tokens son cuotas (acaban en _tokens, no en _token): por eso no vale un patron *token*
@@ -167,8 +175,10 @@ def crear_servidor(puerto=PUERTO):
             p = self.server.server_address[1]
             return {f"127.0.0.1:{p}", f"localhost:{p}"}
 
-        def _manda(self, codigo, cuerpo, tipo):
+        def _manda(self, codigo, cuerpo, tipo, csp=None):
             self.send_response(codigo)
+            # todo lo que no es el panel no necesita cargar nada; el panel solo ejecuta su script con nonce
+            self.send_header("Content-Security-Policy", csp or "default-src 'none'; frame-ancestors 'none'")
             self.send_header("Content-Type", tipo)
             self.send_header("Content-Length", str(len(cuerpo)))
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -223,7 +233,8 @@ def crear_servidor(puerto=PUERTO):
                     # se regenera al abrir: asi el panel siempre lleva los datos de ahora
                     with generando:
                         subprocess.run([sys.executable, f"{base}/panel.py"], capture_output=True, timeout=120)
-                    self._manda(200, open(f"{base}/panel.html", "rb").read(), "text/html; charset=utf-8")
+                    html, csp = html_con_nonce(open(f"{base}/panel.html", "rb").read())
+                    self._manda(200, html, "text/html; charset=utf-8", csp=csp)
                 except Exception as e:
                     self._manda(500, str(e).encode(), "text/plain")
             elif ruta == "/origenes":

@@ -64,11 +64,19 @@ def _datos():
     }
 
 
+def json_para_script(d):
+    """JSON seguro dentro de un <script>: ni `</script>` ni `<!--` ni los separadores de línea de JS pueden salir de una cadena."""
+    txt = json.dumps(d, ensure_ascii=False)
+    for c, e in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"), ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
+        txt = txt.replace(c, e)
+    return txt
+
+
 def construye(d):
     """Ensambla el unico panel.html a partir de panel_assets/ (fuente separada, salida inline)."""
     cuerpo = _leer("plantilla.html")
     estilos = _leer("estilos.css")
-    app_js = _leer("app.js").replace("__DATOS__", json.dumps(d, ensure_ascii=False))
+    app_js = _leer("app.js").replace("__DATOS__", json_para_script(d))
     graficos_js = _leer("graficos.js")
     html = f"""<!doctype html><html lang="es" data-tema="claro"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
