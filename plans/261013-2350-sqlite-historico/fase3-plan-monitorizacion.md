@@ -1,6 +1,6 @@
-# Fase 3 ampliada — monitorización completa de servidores, paneles, servicios y bases de datos (plan v1, pendiente de pre-mortem y red team)
+# Fase 3 ampliada — monitorización completa de servidores, paneles, servicios y bases de datos (plan v2, pendiente de pre-mortem y red team)
 
-Estado: **plan v1 sin código**. Fecha: 2026-10-14. Sustituye el alcance de `fase3-diseno.md` (historial de servidores e IPs): ese diseño y su
+Estado: **plan v2 sin código** (incorpora las respuestas del dueño y una exploración de solo lectura del Dokploy real). Fecha: 2026-10-14. Sustituye el alcance de `fase3-diseno.md` (historial de servidores e IPs): ese diseño y su
 revisión (`../reports/revision-diseno-fase3-261014.md`) pasan a ser la **fase 3.1** de este plan, con sus correcciones. Lo nuevo es todo lo
 que hay *dentro* de los servidores.
 
@@ -30,6 +30,29 @@ o a un SIEM · guardar logs de aplicaciones · guardar contenido de bases de dat
   ninguna llamada a la API del panel.** Los textos dicen «solo lectura», pero las claves de Dokploy y EasyPanel heredan los permisos del
   usuario que las crea: hay que comprobarlo, no suponerlo (riesgo principal de 3.3).
 - Ciclo de servidores en el hilo trabajador de la barra; no arranca en Windows (`fcntl`, `os.killpg`).
+
+## Lo que se ha visto en el Dokploy real (exploración de solo lectura, 2026-10-14)
+Se usaron solo `GET` de listado y resumen (el detalle de una aplicación o base de datos se evitó a propósito: trae variables de entorno y
+contraseñas). Sin nombres de clientes en este documento.
+- **Versión y salud:** Dokploy v0.30.7; `settings.health` → `ok`. Un solo servidor local (`server.all` vacío): hoy no hay servidores remotos
+  registrados en el panel, así que «todo el servidor» es el propio host de Dokploy.
+- **`project.homeStats`** (una llamada, sin parámetros): 7 proyectos, 7 entornos, 7 aplicaciones, 11 composes, 6 bases de datos, 24 servicios;
+  estado agregado `running 16 / error 1 / idle 7`.
+- **`overview.services`** (una llamada = **todo el inventario**): por servicio `id`, `name`, `appName`, `status` (`done|idle|error`), `createdAt`,
+  `serverId/serverName` (null = local), `projectId/Name`, `environmentId/Name`, `type` (`application|compose|postgres|…`), `lastDeployAt`
+  y `icon`. **`icon` puede ser un PNG en base64 de ~10 KB**: la lista de campos permitidos lo descarta (tamaño y datos no fiables).
+- **`overview.backups`** (una llamada): los últimos ~20 trabajos de copia (`kind` = `backup` de base de datos o `volumeBackup`), con `status`,
+  `createdAt`, `destinationName`, `databaseType`, `serviceName` y `serviceOwnerId`. Sirve para «antigüedad de la última copia buena por
+  servicio». **Ojo:** en la muestra solo 2 de las 6 bases de datos aparecen con copias recientes. Puede ser real (sin copia programada) o un
+  efecto de que la lista es corta; **no se avisará de «sin copia» sin consultar la configuración de copias de cada base de datos** (endpoint por
+  servicio que hay que revisar con cuidado de no leer contraseñas).
+- **`docker.getServerHealth`** (una llamada): contenedores y servicios Swarm (36 y 17), memoria total y usada (5,6 de 8,3 GB), CPUs, disco
+  (68,4 de 102,9 GB), uso de cada red Docker y errores del demonio. Es casi todo lo que `recoger-root` obtiene por SSH, ya agregado.
+- Hallazgos reales del recuento: 1 aplicación en `error` desde su último despliegue; 7 servicios `idle`; 6 bases de datos, todas PostgreSQL.
+- Las **IDs son estables** (`serviceOwnerId`, `projectId`): son la identidad correcta del recurso, no el nombre, que el dueño puede cambiar.
+
+**Consecuencia de diseño:** el colector de Dokploy necesita **cuatro o cinco `GET` por ciclo**, no cientos. La mayor parte de la fase 3.2 es una lista
+de campos permitidos, validación estricta de tipos y estados, y comparación entre ciclos (apariciones, desapariciones, cambios de estado).
 
 ## Arquitectura propuesta
 
@@ -97,26 +120,30 @@ IPs con caducidad (sólo tras un clic). Todo por DOM, sin `innerHTML` (regla de 
 estado y el número de incidencias.
 
 ## Fases (cada una pasa pre-mortem + red team antes de codificar, y revisión de código al terminar)
+Orden acordado con el dueño: lo que más valor da primero (proyectos y estado de lo que corre), usando la API del panel en solo lectura.
 | Fase | Contenido | Depende de |
 |---|---|---|
-| **3.0** | Portabilidad Windows del ciclo y de los secretos; retención fuera de la base (caché 48 h, PNG, exclusión Time Machine real/Windows) | — |
-| **3.1** | `servidores.sqlite`, historial de host e IPs (diseño revisado), dedupe por `ok_en`, `id` estable, `guardar_ips` | 3.0 |
-| **3.2** | `docker_ssh` y `recoger` v2: inventario y salud de contenedores y servicios, eventos de aparición/desaparición | 3.1 |
-| **3.3** | `bd_local` (`recoger-bd`): bases de datos en el propio servidor, sin credenciales en el Mac; certificados | 3.2 |
-| **3.4** | `panel_api` Dokploy (solo lectura, lista blanca) y luego EasyPanel: despliegues y copias programadas | 3.2 |
-| **3.5** | Reglas, previsión de disco y avisos | 3.1–3.4 |
-| **3.6** | Pestaña Servidores completa, árbol y línea de tiempo | 3.5 |
+| **3.0** | Portabilidad Windows del ciclo y de los secretos; retención fuera de la base (caché 48 h, PNG, exclusión Time Machine real y equivalente en Windows) | — |
+| **3.1** | `servidores.sqlite`, historial de host e IPs de intentos de acceso (diseño revisado en `fase3-diseno.md`), `id` estable, `guardar_ips` | 3.0 |
+| **3.2** | Colector **Dokploy** de solo lectura: inventario (`overview.services`), copias (`overview.backups`), salud de Docker, estados, despliegues; eventos de aparición, desaparición y cambio de estado | 3.1 |
+| **3.3** | Contenedores y bases de datos **por SSH** (`recoger` v2 y `recoger-bd`): sin credenciales en el Mac, cubre también servidores sin panel | 3.1 |
+| **3.4** | Colector **EasyPanel** (mismo contrato) y certificados de las webs | 3.2 |
+| **3.5** | Reglas, previsión de disco y avisos (copia sin hacer, contenedor en bucle, servicio nuevo, certificado) | 3.1–3.4 |
+| **3.6** | Pestaña «Servidores» completa: árbol servidor → proyecto → servicio/base de datos, línea de tiempo, IPs con caducidad | 3.5 |
 
-## Preguntas abiertas para el dueño
-1. ¿Qué paneles usas de verdad en tus servidores y en los de clientes: solo Dokploy y EasyPanel, o también otros (Coolify, Portainer, CapRover…)?
-2. Dijiste «cualquier servicio orquestado, igual que Google»: ¿te refieres a **Kubernetes**? ¿Algún servidor tuyo lo usa hoy?
-3. ¿Qué motores de bases de datos hay y cuáles importan más? (PostgreSQL, MySQL/MariaDB, MongoDB, Redis, otros). ¿Corren en contenedores o instaladas
-   directamente en el servidor?
-4. Las claves API de los paneles suelen **poder escribir** (no existe «solo lectura» salvo con roles de pago en Dokploy). ¿Prefieres
-   empezar sin API de panel (todo por SSH y Docker, sin credenciales nuevas) y dejar la API como opción posterior con riesgo aceptado?
-5. ¿Aceptas instalar scripts nuevos de solo lectura en los servidores (`recoger` v2 y `recoger-bd`), también en los de clientes, o en esos
-   solo lo que ya existe?
-6. ¿Orden de prioridad? Propuesta: 3.0 → 3.1 → 3.2 (contenedores) → 3.3 (bases de datos) → 3.4 (panel) → 3.5 → 3.6.
+**Uptime:** se rotula **disponibilidad observada**. La app mide mientras el Mac está encendido; los huecos se muestran como «sin datos», no como caída.
+Un porcentaje de uptime real exigiría medir desde algo siempre encendido (otra fase, si se quiere).
+
+## Respuestas del dueño y preguntas que quedan
+Respondido: hay **Dokploy y EasyPanel**, también en el mismo servidor; las **bases de datos están en el mismo servidor** y hay URLs de conexión por proyecto;
+tiene los MCP de ambos paneles y puede administrar todo el servidor por SSH o por MCP; Windows es requisito (sin Time Machine); la API del panel se acepta.
+Quedan abiertas:
+1. **Clave de panel de CostGuard.** Las claves de Dokploy y EasyPanel heredan los permisos de quien las crea. ¿Creamos una clave **dedicada a CostGuard**
+   (usuario de solo lectura si el panel lo permite) en lugar de reutilizar la del MCP? Recomendación: sí.
+2. **«Orquestado, igual que Google».** ¿Kubernetes? ¿Algún servidor tuyo lo usa hoy?
+3. **Scripts nuevos en los servidores** (`recoger` v2 y `recoger-bd`): ¿también en los de clientes, o solo en los tuyos?
+4. **Copias de las bases de datos.** En la muestra solo 2 de 6 aparecen con copias recientes: ¿es lo esperado?
+5. **Servidores remotos.** Dokploy puede gestionar servidores remotos (`serverId`); hoy no hay ninguno. ¿Habrá? Cambia cómo se agrupa el árbol.
 
 ## Verificación
 Cada fase: pre-mortem y red team independientes antes de escribir código; tests con servidores, paneles y bases de datos **simulados y hostiles**
