@@ -2,7 +2,7 @@
 import collections, glob, os, time
 
 from . import ajustes
-from .config_y_estado import cfg, guardar_estado, leer_estado
+from .config_y_estado import cfg, guardar_estado, leer_estado, log
 from .cuota_nan import uso_nan
 from .lectores_logs import FUENTES, NOMBRE_FUENTE, PI_DIR, _dia_hora, _funde, leer_bases, parsear, parsear_pi
 from .planes_y_tarifas import corto, modelo_nativo, plan_final, proveedor_de, proveedores_de, tarifa
@@ -88,6 +88,23 @@ def escanear(dias=None):
     return r
 
 
+def informe(dias=None):
+    """Único punto por el que los llamadores piden el informe. `almacen: activo` lo lee de la base; si la base no puede
+    (no existe, versión que no entiende, dañada o aún sin construir) cae a los logs y lo anota una vez por proceso."""
+    if str(cfg().get("almacen") or "sombra").lower() == "activo":
+        from . import consulta
+        try:
+            return consulta.consultar(dias)
+        except consulta.SinAlmacen as e:
+            if str(e) not in _AVISADO and len(_AVISADO) < 20:
+                _AVISADO.add(str(e))
+                log(f"informe: se usan los logs: {e}")
+    return escanear(dias)
+
+
+_AVISADO = set()
+
+
 def vacio():
     return {"gi": 0, "go": 0, "cr": 0, "cw": 0, "tok": 0, "turnos": 0, "usd": 0.0}
 
@@ -126,7 +143,7 @@ def agregar(vistos, nuevos=0, periodo=None):
     ignora = [str(x).lower() for x in (cfg().get("ignorar") or ["synthetic", "<synthetic>", "sin-modelo"])]
     for f, r in vistos.items():
         proy_raw = r.get("proyecto", "otros")
-        proy_n, proy_oculto = ajustes.nombre_proyecto(proy_raw, conf)
+        proy_n, proy_oculto = ajustes.nombre_proyecto(proy_raw, conf, r.get("proyecto_alt") or ())
         for d, mods in r.get("dia", {}).items():
             if not d or d < desde:
                 continue
@@ -171,12 +188,15 @@ def agregar(vistos, nuevos=0, periodo=None):
             if d and d >= desde:
                 dias[d]["turnos"] += n
         for h, v in r.get("horas", {}).items():
-            if len(h) < 13:
+            if isinstance(h, int):             # la base entrega el inicio del cubo en epoch: sin ambigüedad en el día de 25 h
+                hm = h
+            elif len(h) < 13:
                 continue
-            try:
-                hm = time.mktime(time.strptime(h, "%Y-%m-%dT%H"))
-            except ValueError:
-                continue
+            else:
+                try:
+                    hm = time.mktime(time.strptime(h, "%Y-%m-%dT%H"))
+                except ValueError:
+                    continue
             edad = ahora - hm
             if edad < 3600:
                 ritmo["tok"] += v.get("tok", 0)

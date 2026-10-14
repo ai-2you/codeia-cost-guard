@@ -10,6 +10,8 @@ Hechos verificados el 2026-10-14 (no derivables del código):
 - Logs reales: Claude Code y Codex llevan marcas `Z` al 100 %; un backend no-Anthropic usado desde Claude Code genera ids `msg_<ms>_<5-6 chars>`; OpenCode usa prefijo `msg_` también; `opencode-.db` está vacía (2 mensajes); Hermes `started_at` es epoch real.
 - En 11 de ~30k mensajes de Claude la última línea acumula dos peticiones (caché ≈ ×2): la regla "el máximo gana" es la correcta.
 - No hay `cryptography` ni `pynacl` instalados; Python 3.14.6 con SQLite 3.53.4 en el sistema.
+- `~/.cost-guard/config.json` (2026-10-14): 13 claves en `proyectos` (12 ya con forma unificada `a/b/c`, 1 con prefijo `pi · `), 22 `aliases` (3 con `://`, ninguno con `?` o `@`). `~/.ccs/backups` tiene 65 ficheros pero `plan_ccs` es código muerto. La base `consumo.sqlite` instalada aún no existe. Claude Code borra logs a los 30 días (`cleanupPeriodDays: 30`).
+- Revisión del diseño 1.3 en `plans/reports/revision-diseno-1-3-261014.md` (bloqueantes: sombra por agente/día y latido que caduca con la barra ociosa).
 
 Decisiones del dueño cerradas (plan v2): export cifrado propio portable a Windows (no Time Machine), sombra de 7 días, IPs de atacantes 90 días, bajada ~40 % de cifras de Claude aceptada, cada fase pasa por pre-mortem + red team antes de codificar.
 

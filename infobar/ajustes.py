@@ -22,9 +22,11 @@ def api_soportada(prov):
     return slug(prov.get("nombre", "")) in API_SOPORTADAS or str(prov.get("uso_api") or "").lower() in API_SOPORTADAS
 
 
-def nombre_proyecto(raw, config):
-    """(nombre a mostrar, oculto) segun config['proyectos'][raw] = {alias, oculto}."""
-    p = (config.get("proyectos") or {}).get(raw) or {}
+def nombre_proyecto(raw, config, antiguos=()):
+    """(nombre a mostrar, oculto) segun config['proyectos'][raw] = {alias, oculto}. `antiguos`: nombres con los que el informe
+    anterior mostraba el proyecto; valen si el nuevo no tiene entrada, para que un alias ya guardado no se pierda."""
+    tabla = config.get("proyectos") or {}
+    p = tabla.get(raw) or next((tabla[a] for a in antiguos if tabla.get(a)), None) or {}
     return (str(p.get("alias") or "").strip() or raw), bool(p.get("oculto"))
 
 
