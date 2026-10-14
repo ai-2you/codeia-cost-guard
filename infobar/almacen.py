@@ -468,6 +468,25 @@ def guardar_lectura(con, quien, fuente_id, inodo, tam, mtime_ns, desplazamiento,
         raise
 
 
+def leer_marca(con, fuente_id, tipo):
+    """Marca de avance de una fuente que no es un fichero (una base ajena): `tipo` es "marca" o "firma". "" si no hay."""
+    return meta(con, f"{tipo}:{int(fuente_id)}", "")
+
+
+def guardar_marca(con, quien, fuente_id, tipo, valor, ahora=None):
+    if tipo not in ("marca", "firma"):
+        raise ValueError("tipo de marca no válido")
+    ahora = int(ahora if ahora is not None else time.time())
+    _transaccion_de_escritor(con, quien, ahora)
+    try:
+        con.execute("INSERT INTO meta(clave, valor) VALUES(?, ?) ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor",
+                    (f"{tipo}:{int(fuente_id)}", str(valor)[:200]))
+        con.execute("COMMIT")
+    except Exception:
+        _rollback(con)
+        raise
+
+
 def anotar(con, quien, tipo, clave, fuente_id, detalle, ahora=None):
     """Anota una anomalía de ingesta (líneas rotas, marcas sin zona...). Única por tipo+clave+detalle."""
     ahora = int(ahora if ahora is not None else time.time())
