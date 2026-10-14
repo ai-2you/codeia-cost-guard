@@ -105,7 +105,7 @@ def vistos_desde(con, dias, zona=None, ahora=None):
             over = gi > CLIFF
             h["usd"] += (gi * tr[0] * (2 if over else 1) + cr * tr[2] * (2 if over else 1) + cw * tr[3] * (2 if over else 1)
                          + go * tr[1] * (1.5 if over else 1)) / 1e6
-    bases = [f"{NOMBRES.get(f[0], f[0])} ({f[1]})" for f in con.execute(
+    bases = [(NOMBRES.get(f[0], f[0]), f[1]) for f in con.execute(
         "SELECT agente, COUNT(*) FROM fuentes WHERE espacio_id=? GROUP BY agente ORDER BY agente", (eid,))]
     return {f"almacen:{k[0]}|{k[1]}|{k[2]}": v for k, v in registros.items()}, bases
 
@@ -121,5 +121,5 @@ def consultar(dias=None, zona=None):
     finally:
         con.close()
     r = agregar(vistos, 0, dias)
-    r["fuentes"], r["bases"] = len(bases), bases
+    r["fuentes"], r["bases"] = sum(n for _, n in bases), [f"{a} ({n})" for a, n in bases]
     return r

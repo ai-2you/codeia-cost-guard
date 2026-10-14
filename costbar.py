@@ -37,11 +37,16 @@ AQUI = rutas.RAIZ
 def ingerir_cli():
     """python3 costbar.py --ingerir [--una]: ingiere los logs a la base (sin la barra: Windows, servidores, cron).
     Sin --una se queda en bucle. Si la barra ya es la escritora, espera su turno sin escribir."""
-    from infobar import ingestor
+    from infobar import almacen, ingestor
     ing = ingestor.Ingestor(rol="cli")
     try:
         while True:
-            r = ing.vuelta()
+            try:
+                r = ing.vuelta()
+            except almacen.SinEscritura:
+                print("ingesta: otro proceso es ahora el escritor; se espera su turno", flush=True)
+                time.sleep(ingestor.PAUSA_AL_DIA_S)
+                continue
             print(f"ingesta: escritor={r['escritor']} nuevos={r['nuevos']} subidos={r['subidos']} anomalias={r['anomalias']} "
                   f"ficheros={r['ficheros']} completo={r['completo']} ({r['s']} s)", flush=True)
             if "--una" in sys.argv and (r["completo"] or not r["escritor"]):

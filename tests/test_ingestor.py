@@ -100,10 +100,71 @@ class TestVuelta(Base):
         self.assertEqual(v["nuevos"], 1)
 
 
+class TestRevision(Base):
+    def test_linea_enorme_sin_terminar_no_gira_para_siempre(self):
+        r = os.path.join(self.proy, "g.jsonl")
+        with open(r, "w", encoding="utf-8") as f:
+            f.write(linea("msg_01AAAAAAAAAAAAAAAA") + "\n")
+            f.write("x" * (9 * 1024 * 1024))                     # sin salto de línea: se está escribiendo
+        vueltas = 0
+        while not self.ing.vuelta()["completo"]:
+            vueltas += 1
+            self.assertLess(vueltas, 4, "la ingesta no termina")
+        self.assertTrue(self.n_turnos()[1])
+        self.assertEqual(self.n_turnos()[0], 1)
+
+    def test_el_puesto_se_readquiere_en_cada_vuelta(self):
+        self.fichero("a.jsonl", [linea("msg_01AAAAAAAAAAAAAAAA")])
+        self.assertTrue(self.ing.vuelta()["escritor"])
+        con = almacen.abrir(self.ruta)
+        try:
+            con.execute("UPDATE meta SET valor='0' WHERE clave LIKE 'latido%'")
+            con.execute("DELETE FROM meta WHERE clave LIKE '%escritor%' OR clave LIKE 'latido%'")
+            self.assertTrue(almacen.adquirir_escritura(con, almacen.identidad("cli")))
+            self.assertFalse(self.ing.vuelta()["escritor"])
+        finally:
+            con.close()
+
+    def test_una_fuente_que_falla_no_marca_la_base_como_construida(self):
+        from unittest import mock
+        self.fichero("a.jsonl", [linea("msg_01AAAAAAAAAAAAAAAA")])
+        with mock.patch("infobar.ingesta.ingerir_fichero", side_effect=RuntimeError("x")):
+            r = self.ing.vuelta()
+        self.assertEqual(r["fallos"], 1)
+        self.assertFalse(self.n_turnos()[1])
+
+    def test_base_borrada_con_la_barra_en_marcha_se_recrea(self):
+        self.fichero("a.jsonl", [linea("msg_01AAAAAAAAAAAAAAAA")])
+        self.ing.vuelta()
+        for sufijo in ("", "-wal", "-shm"):
+            if os.path.exists(self.ruta + sufijo):
+                os.remove(self.ruta + sufijo)
+        r = self.ing.vuelta()
+        self.assertEqual(r["nuevos"], 1)
+        self.assertEqual(self.n_turnos()[0], 1)
+
+    def test_un_arranque_nuevo_no_repasa_lo_que_la_base_ya_leyo(self):
+        self.fichero("a.jsonl", [linea("msg_01AAAAAAAAAAAAAAAA")])
+        self.ing.vuelta()
+        self.ing.cierra()
+        otro = ingestor.Ingestor(home=self.home, ruta_base=self.ruta)
+        try:
+            self.assertEqual(otro.vuelta()["ficheros"], 0)
+        finally:
+            otro.cierra()
+
+
 class TestSoloLectura(unittest.TestCase):
     PROHIBIDOS = ("ingestor", "ingesta", "ingesta_claude", "ingesta_codex", "ingesta_pi", "ingesta_opencode", "ingesta_hermes")
     LECTORES = ("panel.py", "popover.py", "analizar_gasto.py", "infobar/servidor_local.py", "infobar/consulta.py",
                 "infobar/agregacion.py", "infobar/trabajador_barra.py")
+
+    def test_importar_los_lectores_no_carga_la_ingesta(self):
+        import subprocess
+        codigo = ("import sys; sys.path.insert(0, %r); import infobar.consulta, infobar.sombra, infobar.servidor_local, "
+                  "infobar.trabajador_barra; print(sorted(m for m in sys.modules if m.startswith(('infobar.ingest', 'infobar.ingesta'))))") % RAIZ
+        out = subprocess.run([sys.executable, "-I", "-c", codigo], capture_output=True, text=True, timeout=60).stdout.strip()
+        self.assertEqual(out, "[]")
 
     def test_los_lectores_no_importan_la_ingesta(self):
         for rel in self.LECTORES:

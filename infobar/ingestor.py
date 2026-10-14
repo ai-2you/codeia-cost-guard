@@ -38,13 +38,43 @@ class Ingestor:
         self.con = None
         self.espacio = None
         self.al_dia = {}                      # ruta -> firma de la última pasada que terminó entera
+        self.leidos = {}                      # id_fuente -> firma que la base ya tenía al abrir
+        self.inodo = None
         self.ultimo_mantenimiento = 0.0
         self.ultima_comprobacion = 0.0
 
+    def _ruta(self):
+        return os.path.abspath(self.ruta_base or rutas.ALMACEN)
+
     def _abre(self):
+        """Conexión del hilo. Si el fichero de la base cambió de inodo o desapareció (borrada o restaurada con la barra en
+        marcha) se cierra y se reabre: escribir en un fichero borrado perdería la ingesta sin avisar."""
+        if self.con is not None:
+            try:
+                igual = os.stat(self._ruta()).st_ino == self.inodo
+            except OSError:
+                igual = False
+            if not igual:
+                self.con.close()
+                self.con, self.espacio = None, None
+                self.al_dia.clear()
         if self.con is None:
             self.con = almacen.abrir(self.ruta_base)
+            self.inodo = os.stat(self._ruta()).st_ino
+            self._carga_al_dia()
         return self.con
+
+    def _carga_al_dia(self):
+        """Lo que la base ya sabe de cada fichero: si su firma no cambió y lo que queda por leer cabe en una pasada, no hace
+        falta entrar (un arranque no repasa los ~1.400 ficheros con una transacción cada uno)."""
+        self.leidos = {}
+        for f in self.con.execute("SELECT f.id_fuente, l.inodo, l.tam, l.mtime_ns, l.desplazamiento FROM fuentes f "
+                                  "JOIN lecturas l ON l.fuente_id=f.id"):
+            if f[4] >= 0 and f[2] - f[4] < ingesta.MAX_LECTURA:
+                self.leidos[f[0]] = (f[1], f[2], f[3])
+
+    def _al_dia(self, ruta, firma):
+        return self.al_dia.get(ruta) == firma or self.leidos.get(ingesta.id_fuente(ruta, self.home)) == firma
 
     def cierra(self):
         if self.con is not None:
@@ -58,7 +88,7 @@ class Ingestor:
     def vuelta(self, presupuesto_s=PRESUPUESTO_S, ahora=None):
         """Una vuelta sobre todas las fuentes. Devuelve {escritor, nuevos, subidos, anomalias, ficheros, completo, s}."""
         t0 = time.monotonic()
-        res = {"escritor": False, "nuevos": 0, "subidos": 0, "anomalias": 0, "ficheros": 0, "completo": False, "s": 0.0}
+        res = {"escritor": False, "nuevos": 0, "subidos": 0, "anomalias": 0, "ficheros": 0, "fallos": 0, "completo": False, "s": 0.0}
         con = self._abre()
         if not almacen.adquirir_escritura(con, self.quien):
             return res
@@ -79,7 +109,7 @@ class Ingestor:
                     firma = _firma(f)
                 except OSError:
                     continue
-                if self.al_dia.get(f) == firma:
+                if self._al_dia(f, firma):
                     continue
                 if time.monotonic() > limite:
                     pendiente = True
@@ -92,6 +122,7 @@ class Ingestor:
                     raise
                 except Exception as e:                       # noqa: BLE001 — un fichero malo no para el resto
                     log(f"ingesta {agente}: {type(e).__name__}")
+                    res["fallos"] += 1
                     continue
                 suma(r)
                 if r["completo"]:
@@ -114,13 +145,14 @@ class Ingestor:
                 raise
             except Exception as e:                           # noqa: BLE001
                 log(f"ingesta {agente}: {type(e).__name__}")
+                res["fallos"] += 1
                 continue
             suma(r)
             if not r.get("completo", True):
                 pendiente = True
         res["completo"] = not pendiente
         res["s"] = round(time.monotonic() - t0, 2)
-        if res["completo"] and not almacen.meta(con, "construccion_completa"):
+        if res["completo"] and not res["fallos"] and not almacen.meta(con, "construccion_completa"):
             almacen.guardar_meta(con, self.quien, "construccion_completa", int(ahora if ahora is not None else time.time()))
         if res["nuevos"] or res["subidos"] or res["anomalias"]:
             almacen.guardar_meta(con, self.quien, "ultima_vuelta", json.dumps(
@@ -155,7 +187,7 @@ class HiloIngesta(threading.Thread):
                 espera = PAUSA_AL_DIA_S
                 try:
                     r = self.ingestor.vuelta()
-                    espera = PAUSA_PENDIENTE_S if (r["escritor"] and not r["completo"]) else PAUSA_AL_DIA_S
+                    espera = PAUSA_PENDIENTE_S if (r["escritor"] and not r["completo"]) else 60 if r["fallos"] else PAUSA_AL_DIA_S
                 except almacen.ErrorAlmacen as e:
                     log(f"ingesta: {e}")
                     if not isinstance(e, almacen.SinEscritura):

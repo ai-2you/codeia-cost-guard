@@ -112,7 +112,7 @@ def leer_nuevas(ruta, estado, max_bytes=MAX_LECTURA):
         f.seek(desde)
         trozo = f.read(max_bytes)
         ultimo = trozo.rfind(b"\n")
-        enormes = 0
+        enormes, fin = 0, False
         if ultimo >= 0:
             avance, lineas = ultimo + 1, trozo[:ultimo + 1].split(b"\n")[:-1]
         elif len(trozo) >= max_bytes:                   # una sola línea mayor que max_bytes: buscar su final sin acumularla
@@ -122,6 +122,7 @@ def leer_nuevas(ruta, estado, max_bytes=MAX_LECTURA):
                 if not bloque:
                     avance = 0 if desde + avance >= st.st_size else avance      # sin final aún: no avanzar (se está escribiendo)
                     enormes = 0 if avance == 0 else 1
+                    fin = True                      # se llegó al final del fichero: no queda nada que leer ahora
                     break
                 i = bloque.find(b"\n")
                 if i >= 0:
@@ -138,7 +139,7 @@ def leer_nuevas(ruta, estado, max_bytes=MAX_LECTURA):
         cola = f.read(cola_len) if cola_len else b""
     info = {"desplazamiento": nuevo, "tam": st.st_size, "inodo": st.st_ino, "mtime_ns": st.st_mtime_ns,
             "cab_len": cab_len, "hash_cab": hash_cab, "cola_len": len(cola), "hash_cola": _hash(cola) if cola else "",
-            "completo": nuevo >= st.st_size or len(trozo) < max_bytes, "enormes": enormes, "reanudado": desde > 0}
+            "completo": nuevo >= st.st_size or len(trozo) < max_bytes or fin, "enormes": enormes, "reanudado": desde > 0}
     return lineas, info
 
 

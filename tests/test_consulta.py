@@ -114,6 +114,32 @@ class TestInforme(Base):
         consulta.consultar()
         self.assertEqual(antes, huella())
 
+    def test_lectura_no_crea_ficheros_nuevos_con_el_escritor_abierto(self):
+        self.mete([turno("claude:m1", time.time() - 60)])
+        self.completa()
+        antes = sorted(os.listdir(os.path.dirname(rutas.ALMACEN)))
+        consulta.consultar()
+        self.assertEqual(antes, sorted(os.listdir(os.path.dirname(rutas.ALMACEN))))
+
+    def test_recargo_por_contexto_largo_en_la_ventana_de_cinco_horas(self):
+        from infobar.planes_y_tarifas import CLIFF, tarifa
+        t = tarifa("claude-sonnet-5")
+        self.assertTrue(t)
+        ahora = time.time()
+        self.mete([turno("claude:corto", ahora - 100, gi=1000, go=0, cr=0, cw=0),
+                   turno("claude:largo", ahora - 120, gi=CLIFF + 1000, go=0, cr=0, cw=0)])
+        self.completa()
+        usd = consulta.consultar()["cinco_h"]["usd"]
+        esperado = (1000 * t[0] + (CLIFF + 1000) * t[0] * 2) / 1e6
+        self.assertAlmostEqual(usd, esperado, places=6)
+
+    def test_la_ventana_de_dias_recorta(self):
+        ahora = time.time()
+        self.mete([turno("claude:viejo", ahora - 10 * 86400), turno("claude:nuevo", ahora - 60)])
+        self.completa()
+        self.assertEqual(consulta.consultar(dias=3)["mes"]["tok"], 135)
+        self.assertEqual(consulta.consultar(dias=20)["mes"]["tok"], 270)
+
     def test_ritmo_usa_epoch_sin_ambiguedad(self):
         ahora = time.time()
         self.mete([turno("claude:m1", ahora - 7200)])

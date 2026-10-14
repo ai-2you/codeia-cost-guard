@@ -65,29 +65,40 @@ def lado_nuevo(con, dias, ahora, zona=None):
 
 
 def dias_cerrados(ahora, zona=None):
-    """Días locales completos y recientes: de ayer hacia atrás hasta MAX_EDAD_DIAS."""
-    return {consulta._dia(ahora - n * 86400, zona) for n in range(1, MAX_EDAD_DIAS + 1)}
+    """Días locales completos y recientes: de ayer hacia atrás hasta MAX_EDAD_DIAS (por fecha, no por restas de 24 h: el día de
+    25 h y el de 23 h no desplazan la lista)."""
+    hoy = datetime.date.fromisoformat(consulta._dia(ahora, zona))
+    return {(hoy - datetime.timedelta(days=n)).isoformat() for n in range(1, MAX_EDAD_DIAS + 1)}
+
+
+GRANDE = 0.10                    # una diferencia mayor del 10 % del día no se explica con forks ni re-emisiones: se mira a mano
 
 
 def comparar(antiguo, nuevo):
-    """Una fila por (agente, día) con la diferencia, su dirección y si es solo atribución de modelo o cruce de día."""
-    agentes_dias = sorted({(a, d) for a, d, _ in list(antiguo) + list(nuevo) if a != "hermes"})
+    """Una fila por (agente, día): los cuatro contadores por separado, la dirección de la diferencia y su clase. Una diferencia
+    grande (> 10 %) nunca se archiva como «explicada»: la clase lleva el sufijo `_grande`."""
+    claves = list(antiguo) + list(nuevo)
     filas = {}
-    for a, d in agentes_dias:
-        modelos = {m for aa, dd, m in list(antiguo) + list(nuevo) if (aa, dd) == (a, d)}
-        ant = [sum((antiguo.get((a, d, m)) or [0] * 4)[i] for m in modelos) for i in range(4)]
-        nue = [sum((nuevo.get((a, d, m)) or [0] * 4)[i] for m in modelos) for i in range(4)]
-        por_modelo = sum(1 for m in modelos if (antiguo.get((a, d, m)) or [0] * 4) != (nuevo.get((a, d, m)) or [0] * 4))
+    for a, d in sorted({(a, d) for a, d, _ in claves if a != "hermes"}):
+        modelos = {m for aa, dd, m in claves if (aa, dd) == (a, d)}
+        cero = [0] * 4
+        ant = [sum((antiguo.get((a, d, m)) or cero)[i] for m in modelos) for i in range(4)]
+        nue = [sum((nuevo.get((a, d, m)) or cero)[i] for m in modelos) for i in range(4)]
+        distintas = sum(1 for m in modelos if (antiguo.get((a, d, m)) or cero) != (nuevo.get((a, d, m)) or cero))
         filas[(a, d)] = {"agente": a, "dia": d, "antiguo": sum(ant), "nuevo": sum(nue), "diff": sum(nue) - sum(ant),
-                         "celdas_distintas": por_modelo}
+                         "diff_contadores": [n - o for n, o in zip(nue, ant)], "celdas_distintas": distintas}
     for (a, d), f in filas.items():
-        sig = filas.get((a, (datetime.date.fromisoformat(d) + datetime.timedelta(days=1)).isoformat()))
-        if f["diff"] == 0:
+        dia = datetime.date.fromisoformat(d)
+        sig = filas.get((a, (dia + datetime.timedelta(days=1)).isoformat()))
+        ant_ = filas.get((a, (dia - datetime.timedelta(days=1)).isoformat()))
+        if not any(f["diff_contadores"]):
             f["clase"] = "igual" if f["celdas_distintas"] == 0 else "atribucion_de_modelo"
-        elif sig and sig["diff"] == -f["diff"]:
+        elif any(v and v["diff"] == -f["diff"] for v in (sig, ant_)):
             f["clase"] = "cruce_de_dia"
         else:
             f["clase"] = "el_antiguo_cuenta_de_mas" if f["diff"] < 0 else "la_base_cuenta_de_mas"
+            if abs(f["diff"]) > GRANDE * max(1, f["antiguo"], f["nuevo"]):
+                f["clase"] += "_grande"
     return [filas[k] for k in sorted(filas)]
 
 

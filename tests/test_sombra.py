@@ -34,8 +34,34 @@ class TestComparar(unittest.TestCase):
         f = {(x["agente"], x["dia"]): x for x in sombra.comparar(ant, nue)}
         self.assertEqual(f[("claude", "2026-09-01")]["clase"], "igual")
         self.assertEqual(f[("claude", "2026-09-05")]["clase"], "atribucion_de_modelo")
-        self.assertEqual(f[("codex", "2026-09-01")]["clase"], "el_antiguo_cuenta_de_mas")
-        self.assertEqual(f[("pi", "2026-09-01")]["clase"], "la_base_cuenta_de_mas")
+        self.assertEqual(f[("codex", "2026-09-01")]["clase"], "el_antiguo_cuenta_de_mas_grande")
+        self.assertEqual(f[("pi", "2026-09-01")]["clase"], "la_base_cuenta_de_mas_grande")
+
+    def test_pequeña_diferencia_y_traspaso_entre_contadores(self):
+        ant = {("codex", "2026-09-01", "m"): [1000, 0, 0, 0], ("claude", "2026-09-01", "m"): [500, 0, 500, 0]}
+        nue = {("codex", "2026-09-01", "m"): [980, 0, 0, 0], ("claude", "2026-09-01", "m"): [0, 0, 1000, 0]}
+        f = {x["agente"]: x for x in sombra.comparar(ant, nue)}
+        self.assertEqual(f["codex"]["clase"], "el_antiguo_cuenta_de_mas")
+        self.assertNotEqual(f["claude"]["clase"], "atribucion_de_modelo")      # mismo total, otros contadores: se ve
+
+    def test_perdida_de_la_base_no_se_archiva_como_explicada(self):
+        f = sombra.comparar({("codex", "2026-09-01", "m"): [1000, 0, 0, 0]}, {("codex", "2026-09-01", "m"): [10, 0, 0, 0]})
+        self.assertTrue(f[0]["clase"].endswith("_grande"))
+
+    def test_cruce_de_dia_marca_los_dos_dias(self):
+        ant = {("claude", "2026-09-10", "m"): [10, 0, 0, 0], ("claude", "2026-09-11", "m"): [0, 0, 0, 5]}
+        nue = {("claude", "2026-09-10", "m"): [4, 0, 0, 0], ("claude", "2026-09-11", "m"): [6, 0, 0, 5]}
+        self.assertEqual({x["clase"] for x in sombra.comparar(ant, nue)}, {"cruce_de_dia"})
+
+    def test_dias_cerrados_en_cambio_de_hora(self):
+        from zoneinfo import ZoneInfo
+        z = ZoneInfo("Europe/Madrid")
+        import datetime as dt
+        ahora = int(dt.datetime(2026, 10, 25, 23, 30, tzinfo=z).timestamp())
+        self.assertNotIn("2026-10-25", sombra.dias_cerrados(ahora, z))
+        self.assertIn("2026-10-24", sombra.dias_cerrados(ahora, z))
+        ahora = int(dt.datetime(2026, 3, 30, 0, 30, tzinfo=z).timestamp())
+        self.assertIn("2026-03-29", sombra.dias_cerrados(ahora, z))
 
     def test_cruce_de_dia(self):
         ant = {("claude", "2026-09-10", "m"): [10, 0, 0, 0], ("claude", "2026-09-11", "m"): [0, 0, 0, 5]}

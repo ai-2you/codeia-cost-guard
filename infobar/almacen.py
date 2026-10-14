@@ -135,12 +135,12 @@ def abrir(ruta=None, solo_lectura=False, espera_ms=2000):
         con.execute("PRAGMA foreign_keys=ON")
         con.execute("PRAGMA secure_delete=ON")
         if not solo_lectura:
-            modo = con.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+            modo = _con_reintentos(lambda: con.execute("PRAGMA journal_mode=WAL").fetchone()[0], espera_ms)
             if str(modo).lower() != "wal":
                 raise ErrorAlmacen(f"este volumen no admite WAL (journal_mode={modo}): usa un disco local")
             con.execute("PRAGMA journal_size_limit=67108864")
             con.execute("PRAGMA synchronous=NORMAL")
-            _migrar(con, ruta)
+            _con_reintentos(lambda: _migrar(con, ruta), espera_ms)
             for sufijo in ("-wal", "-shm"):
                 if os.path.exists(ruta + sufijo):
                     _privado(ruta + sufijo, 0o600)
@@ -151,6 +151,19 @@ def abrir(ruta=None, solo_lectura=False, espera_ms=2000):
         con.close()
         raise
     return con
+
+
+def _con_reintentos(accion, espera_ms):
+    """Cambiar a WAL o migrar mientras otro proceso crea la base a la vez puede devolver «locked» sin pasar por el busy_timeout:
+    se reintenta unos instantes antes de rendirse."""
+    limite = time.monotonic() + max(espera_ms, 1000) / 1000
+    while True:
+        try:
+            return accion()
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() or time.monotonic() > limite:
+                raise
+            time.sleep(0.02)
 
 
 def _tablas(con):
