@@ -14,11 +14,19 @@ cosas a localhost. Por eso:
 """
 import hmac, json, os, secrets, subprocess, sys, threading, time
 
-from . import ajustes, claves, rutas
+from . import ajustes, claves, exportacion, rutas
 from . import cuota_nan
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_config, log, olvidar_cache
 from .servidores import errores_ips, errores_servidores
+
+
+def _estado_copias():
+    """Estado de las copias cifradas para Ajustes: se calcula aquí porque el informe desde logs no lo trae."""
+    try:
+        return exportacion.estado_copias(cfg().get("copias"))
+    except Exception:
+        return None
 
 
 PUERTO = 47391              # panel/configurador local: un puerto alto que casi nada usa
@@ -221,7 +229,7 @@ def crear_servidor(puerto=PUERTO):
             elif ruta == "/origenes":
                 try:
                     r = informe()
-                    self._json(200, {"origenes": r.get("origenes", {}), "perfiles_hermes": r.get("perfiles_hermes", {}), "copias": r.get("copias"),
+                    self._json(200, {"origenes": r.get("origenes", {}), "perfiles_hermes": r.get("perfiles_hermes", {}), "copias": _estado_copias(),
                                      "planes": [p["nombre"] for p in (cfg().get("proveedores") or [])],
                                      "config": sin_secretos(cfg())})
                 except Exception as e:
@@ -239,7 +247,7 @@ def crear_servidor(puerto=PUERTO):
                         if cuenta:
                             paneles[s["nombre"]] = {"cuenta": cuenta, "clave_guardada": bool(claves.leer_clave(cuenta))}
                     self._json(200, {"config": c, "origenes": r.get("origenes", {}), "proyectos": r.get("proyectos_origen", {}),
-                                     "proveedores": provs, "paneles": paneles, "keychain": claves.hay_llavero(),
+                                     "proveedores": provs, "paneles": paneles, "keychain": claves.hay_llavero(), "copias": _estado_copias(),
                                      "alta_servidor": "infobar/remoto/alta-servidor.sh"})
                 except Exception as e:
                     self._json(500, {"error": str(e)[:200]})

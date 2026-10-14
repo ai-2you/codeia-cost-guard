@@ -154,6 +154,11 @@ class ServidorAjustes(unittest.TestCase):
         self.assertEqual(d["paneles"]["prod"]["cuenta"], "dokploy:d.example.com")
         self.assertNotIn("x" * 20, json.dumps(d))
 
+    def test_ajustes_trae_el_estado_de_las_copias(self):
+        st, d = self._pide("GET", "/ajustes")
+        self.assertEqual(st, 200)
+        self.assertIn("estado", d["copias"])
+
     def test_clave_se_guarda_y_se_borra(self):
         st, d = self._pide("POST", "/clave", {"proveedor": "OpenCode Go", "clave": "abcdefgh12345678"})
         self.assertEqual((st, d["ok"]), (200, True))

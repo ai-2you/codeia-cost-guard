@@ -84,6 +84,26 @@
       k ? k.fila : (s.panel ? h("p", {class: "ayuda"}, "Guarda los ajustes y aquí podrás poner la clave del panel.") : null));
   }
 
+  const AVISO_COPIAS = {
+    sin_destinatario: ["Sin copias cifradas", "No hay copias automáticas. Actívalas con: python3 ~/.cost-guard/costbar.py --claves-generar RUTA_CLAVE --carpeta CARPETA", true],
+    nunca: ["Todavía no hay ninguna copia", "Se hará la primera en unos minutos.", false],
+    al_dia: ["Copias al día", "", false],
+    atrasada: ["Copias atrasadas", "La última copia buena tiene más de 48 h. Revisa que la carpeta esté montada y mira el último error.", true],
+    danada: ["La última copia salió de una base dañada", "Las copias siguen, pero comprueba la base antes de fiarte de ellas.", true],
+    reloj: ["El reloj del equipo parece mal", "La última copia tiene fecha futura; no se rota nada hasta que se corrija.", true],
+  };
+  function copias(c){
+    if (!c) return h("p", {class: "vacio"}, "Sin información de copias.");
+    const [titulo, texto, alerta] = AVISO_COPIAS[c.estado] || [c.estado, "", true];
+    const edad = c.edad_h == null ? "" : (c.edad_h < 48 ? Math.round(c.edad_h) + " h" : Math.round(c.edad_h / 24) + " d");
+    return h("div", {},
+      h("p", {style: alerta ? "color:#b45309;font-weight:600" : "font-weight:600"}, titulo + (edad ? " · última hace " + edad : "")),
+      texto ? h("p", {class: "ayuda"}, texto) : null,
+      c.local && c.estado !== "sin_destinatario" ? h("p", {class: "ayuda"}, "La carpeta está en este mismo equipo: si pierdes el equipo, pierdes las copias. Elige otra con --claves-generar --carpeta.") : null,
+      c.ensayo_atrasado && c.estado !== "sin_destinatario" ? h("p", {class: "ayuda"}, "Hace tiempo que no pruebas a restaurar: costbar.py --probar-restauracion COPIA.cgx --clave-privada RUTA.") : null,
+      c.ultimo_error ? h("p", {class: "ayuda"}, "Último error: " + c.ultimo_error) : null);
+  }
+
   function pinta(){
     const c = A.config;
     const orig = Object.entries(A.origenes).sort((a, b) => b[1] - a[1]);
@@ -124,6 +144,9 @@
           h("label", {}, "IPs conocidas (coma): una sesión desde otra sale en ámbar", h("input", {class: "ancho", id: "g-ips", value: (c.ips_conocidas || []).join(", ")})),
           h("label", {}, "Revisión normal (s)", h("input", {class: "num-in", id: "g-int-n", value: c.intervalo_normal_s || "", placeholder: "300", inputmode: "numeric"})),
           h("label", {}, "Revisión en incidencia (s)", h("input", {class: "num-in", id: "g-int-i", value: c.intervalo_incidencia_s || "", placeholder: "60", inputmode: "numeric"})))),
+      h("section", {}, h("h2", {}, "Copias cifradas"),
+        h("p", {class: "ayuda"}, "Copias diarias de la base de consumo, cifradas con una clave pública. La clave privada no está en este equipo."),
+        copias(A.copias)),
       h("section", {}, h("h2", {}, "General"),
         h("div", {class: "campos"},
           h("label", {}, "Alerta de ritmo por hora (tokens)", h("input", {class: "num-in", id: "g-hora", value: c.limite_hora_tokens || 0, inputmode: "numeric"})),
