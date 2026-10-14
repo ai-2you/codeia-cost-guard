@@ -136,6 +136,17 @@ Copias con `VACUUM INTO`/backup, con la misma caducidad que los datos personales
 Limpieza menor: no recorrer los 1.263 `*.json` sueltos de `~/.claude/projects`; el `CLIFF` por turno en Hermes va a
 las divergencias aceptadas.
 
+### 1.3 — diseño (borrador para pre-mortem y red team, 2026-10-14)
+**Objetivo:** que el informe salga de la base sin cambiar `agregar()` ni el formato del informe, y que el panel, la barra y el servidor nunca escriban.
+
+1. `infobar/consulta.py` (solo lectura, `mode=ro`): `vistos_desde_almacen(con, zona, desde)` reconstruye la estructura que ya consume `agregar()`: un registro por (agente, proyecto, plan) con `dia`, `turnos` y `horas`. La hora UTC de `horas` pasa a día/hora **local** aquí y solo aquí (zona inyectada). `consultar(dias=None)` = `agregar(vistos_desde_almacen(...))`.
+2. **Plan (proveedor de suscripción) y nombre de proyecto**: el informe antiguo los fabricaba por fuente (`plan_ccs(fecha)` o "Claude (Max)" para Claude; "OpenAI (Codex)" para Codex; proveedor del turno en pi; `providerID` en OpenCode; URL o proveedor facturador en Hermes; proyectos "OpenCode · dir", "Hermes/<perfil> · cwd", "pi · a/b"). `consulta.py` tiene una tabla única `plan_de(agente, proveedor, hora)` y `proyecto_de(agente, proyecto_raw)` que los reproduce desde lo guardado. Lo que no se pueda reproducir (perfil de Hermes) es divergencia a firmar.
+3. **Coste (USD)**: la base no guarda dinero. Las horas de la ventana de 5 h y del ritmo se calculan desde `turnos` (últimas ~6 h, con el recargo por contexto largo por turno, como hoy); los días usan la suma diaria sin recargo, igual que hoy.
+4. `infobar/ingestor.py`: `ingerir()` recorre las cinco fuentes con un único escritor (latido), un lote acotado por vuelta y devuelve un resumen; corre en un hilo propio de la barra y, si la barra está cerrada, el CLI (`costbar.py --ingerir`) y el panel pueden tomar el relevo. Nunca desde el temporizador ni desde los endpoints.
+5. **Interruptor** `almacen` en config: `apagado` (todo como hoy), `sombra` (los llamadores siguen con `escanear()`; el hilo ingiere y compara `consultar()` con `escanear()` en días cerrados, anotando divergencias en un fichero de la carpeta de datos) y `activo` (los llamadores usan `consultar()`). Un único punto `informe(dias)` en `agregacion.py` decide; los 8 llamadores pasan por él. Valor inicial: `sombra`.
+6. Si la base no existe, está corrupta o la versión es mayor que la que entiende, `informe()` cae a `escanear()` y lo anota (nunca un panel vacío).
+7. Criterios: con la base vacía y 4 consultores a la vez ninguno tarda más de 1 s y los servidores siguen entregando; `panel.py` y el servidor no ejecutan ningún `INSERT/UPDATE/DELETE` (test que abre la base con un autorizador que lo prohíbe); mismo informe para los mismos datos en 3 zonas horarias y en los días de 23 h y 25 h.
+
 ## Fase 2 — histórico, presupuestos y exportador
 - Vista histórica en el panel (meses, comparativas, proyección de fin de mes).
 - Presupuestos por proyecto **y** por plan (`ambito`, `nombre`, `periodo`, `tokens`), con alertas en la barra.
