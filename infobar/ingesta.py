@@ -5,6 +5,7 @@ prompt): se acota todo, nada de lo leído se interpreta como SQL ni como ruta, y
 anota en `anomalias`. Releer es inocuo porque el almacén es monótono, así que perder el desplazamiento solo cuesta tiempo.
 """
 import datetime
+import getpass
 import hashlib
 import json
 import os
@@ -134,7 +135,7 @@ def leer_nuevas(ruta, estado, max_bytes=MAX_LECTURA):
         cola = f.read(cola_len) if cola_len else b""
     info = {"desplazamiento": nuevo, "tam": st.st_size, "inodo": st.st_ino, "mtime_ns": st.st_mtime_ns,
             "cab_len": cab_len, "hash_cab": hash_cab, "cola_len": len(cola), "hash_cola": _hash(cola) if cola else "",
-            "completo": nuevo >= st.st_size, "enormes": enormes}
+            "completo": nuevo >= st.st_size, "enormes": enormes, "reanudado": desde > 0}
     return lineas, info
 
 
@@ -150,12 +151,15 @@ def ingerir_fichero(con, quien, espacio_id, ruta, agente, extractor, base, conte
     una sola línea hostil no puede bloquear un fichero para siempre. Devuelve {nuevos, subidos, iguales, anomalias, lineas,
     rotas, completo}. Reanudable: si no termina, la siguiente pasada sigue donde quedó."""
     fid = almacen.fuente(con, quien, espacio_id, agente, id_fuente(ruta, base), ahora=ahora)
+    estado_previo = almacen.estado_lectura(con, fid)
     try:
-        lineas, info = leer_nuevas(ruta, almacen.estado_lectura(con, fid), max_bytes)
+        lineas, info = leer_nuevas(ruta, estado_previo, max_bytes)
     except OSError as e:
         almacen.anotar(con, quien, "ingesta", "", fid, f"fichero no legible: {type(e).__name__}", ahora=ahora)
         return {"nuevos": 0, "subidos": 0, "iguales": 0, "anomalias": 1, "lineas": 0, "rotas": 0, "completo": True}
     ctx = dict(contexto or {})
+    guardado = _contexto_guardado(estado_previo) if info["reanudado"] else {}
+    ctx.update(guardado)                                 # lo aprendido en pasadas anteriores (sesión, modelo) si seguimos en el mismo contenido
     turnos, rotas, grandes, otras = {}, 0, info["enormes"], {}
 
     def cuenta(texto):
@@ -208,9 +212,48 @@ def ingerir_fichero(con, quien, espacio_id, ruta, agente, extractor, base, conte
     for texto, n in otras.items():
         almacen.anotar(con, quien, "ingesta", "", fid, f"fuente {fid}: {_ctrl_fuera(texto)}: {n}"[:200], ahora=ahora)
     almacen.guardar_lectura(con, quien, fid, info["inodo"], info["tam"], info["mtime_ns"], info["desplazamiento"],
-                            info["cab_len"], info["hash_cab"], info["cola_len"], info["hash_cola"], ahora=ahora)
+                            info["cab_len"], info["hash_cab"], info["cola_len"], info["hash_cola"],
+                            contexto=_serializa_contexto(ctx), ahora=ahora)
     total.update(lineas=len(lineas), rotas=rotas, completo=info["completo"])
     return total
+
+
+def _contexto_guardado(estado):
+    try:
+        d = json.loads((estado or {}).get("contexto") or "{}")
+    except ValueError:
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _serializa_contexto(ctx):
+    """Solo valores de texto cortos (sesión, modelo, proyecto...): el contexto no puede crecer sin límite ni llevar basura."""
+    limpio = {k: v for k, v in ctx.items() if isinstance(k, str) and len(k) <= 30 and isinstance(v, str) and len(v) <= 200}
+    texto = json.dumps(limpio, ensure_ascii=False)
+    return texto if len(texto) <= 1000 else "{}"
+
+
+def proyecto_de_slug(slug, usuario=None):
+    """Nombre crudo de proyecto a partir de un slug de ruta (`-Users-yo-Proyectos-demo-app`): los 3 últimos trozos, sin
+    `Users/<usuario>`, `home/<usuario>` ni la unidad de Windows. Es el mismo criterio para todos los agentes, así un proyecto
+    se llama igual en Claude Code y en Codex. El usuario actual se quita entero aunque lleve guion o punto."""
+    trozos = [x for x in slug.split("-") if x]
+    if len(trozos) > 1 and len(trozos[0]) == 1 and trozos[0].isalpha() and trozos[1].lower() == "users":
+        trozos = trozos[1:]                            # Windows: C--Users-nombre-...
+    if len(trozos) >= 2 and trozos[0].lower() in ("users", "home"):
+        mios = usuario if usuario is not None else _trozos_usuario()
+        resto = [x.lower() for x in trozos[1:1 + len(mios)]]
+        trozos = trozos[1 + len(mios):] if mios and resto == mios else trozos[2:]
+    nombre = "/".join(trozos[-3:]) if trozos else "otros"
+    return re.sub(r"[\x00-\x1f\x7f-\x9f]", "_", nombre)[:200]
+
+
+def _trozos_usuario():
+    try:
+        usuario = getpass.getuser()
+    except Exception:                                  # noqa: BLE001
+        usuario = os.path.basename(os.path.expanduser("~"))
+    return [x.lower() for x in re.split(r"[^A-Za-z0-9]+", usuario) if x]
 
 
 def _ctrl_fuera(texto):

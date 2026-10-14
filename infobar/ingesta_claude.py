@@ -5,43 +5,23 @@ aquí cada línea es el MISMO turno (clave = id del mensaje) y el almacén se qu
 coincide con la última línea. No se filtra `isSidechain` (los subagentes consumen de verdad). Nunca `requestId`: a un
 8 % de las líneas les falta.
 """
-import getpass
-import os
 import re
 import urllib.parse
 
+from . import ingesta
 from .ingesta import a_epoch_utc
 
 AGENTE = "claude"
 _ID_ANTHROPIC = re.compile(r"^msg_[0-9A-Za-z]{10,40}$")
 
 
-def _trozos_usuario():
-    try:
-        usuario = getpass.getuser()
-    except Exception:                                  # noqa: BLE001
-        usuario = os.path.basename(os.path.expanduser("~"))
-    return [x.lower() for x in re.split(r"[^A-Za-z0-9]+", usuario) if x]
-
-
 def proyecto_de_ruta(ruta, usuario=None):
-    """Nombre crudo del proyecto, igual que el que usa hoy el panel (los 3 últimos trozos de la carpeta de proyecto) pero sin el
-    prefijo `Users/<usuario>`, `home/<usuario>` ni `C:/Users/<usuario>`, que llevaría el nombre del dueño del Mac a la base.
-    La carpeta de Claude Code sustituye `/`, `.` y `-` por `-`, así que un usuario `jean-luc` ocupa dos trozos: se quita el
-    nombre del usuario actual entero (si es otro, solo `Users/<un trozo>`)."""
+    """Nombre crudo del proyecto de un log de Claude Code, a partir de la carpeta `projects/<slug>` (criterio común en
+    `ingesta.proyecto_de_slug`)."""
     plano = ruta.replace("\\", "/")
     if "/projects/" not in plano:
         return "otros"
-    carpeta = urllib.parse.unquote(plano.split("/projects/")[-1].split("/")[0])
-    trozos = [x for x in carpeta.split("-") if x]
-    if trozos and len(trozos[0]) == 1 and trozos[0].isalpha() and len(trozos) > 1 and trozos[1].lower() == "users":
-        trozos = trozos[1:]                            # Windows: C--Users-nombre-...
-    if len(trozos) >= 2 and trozos[0].lower() in ("users", "home"):
-        mios = usuario if usuario is not None else _trozos_usuario()
-        resto = [x.lower() for x in trozos[1:1 + len(mios)]]
-        trozos = trozos[1 + len(mios):] if mios and resto == mios else trozos[2:]
-    nombre = "/".join(trozos[-3:]) if trozos else "otros"
-    return re.sub(r"[\x00-\x1f\x7f-\x9f]", "_", nombre)[:200]
+    return ingesta.proyecto_de_slug(urllib.parse.unquote(plano.split("/projects/")[-1].split("/")[0]), usuario)
 
 
 def contexto_de_fichero(ruta):
