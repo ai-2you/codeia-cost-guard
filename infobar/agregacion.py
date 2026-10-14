@@ -8,6 +8,7 @@ from .lectores_logs import FUENTES, NOMBRE_FUENTE, PI_DIR, _dia_hora, _funde, le
 from .planes_y_tarifas import corto, modelo_nativo, plan_final, proveedor_de, proveedores_de, tarifa
 
 
+ULTIMOS = {}                # el `vistos` de la última pasada de escanear(): lo lee la comparación en sombra, solo lectura
 DIAS = 31                   # periodo por defecto; escanear(dias=N) lo cambia para una pasada
 
 
@@ -82,6 +83,7 @@ def escanear(dias=None):
         vistos[f"sqlite:{proy}|{plan}"] = datos
     estado["ficheros"] = vistos
     guardar_estado(estado)
+    ULTIMOS["vistos"] = vistos
     r = agregar(vistos, nuevos, dias)
     r["fuentes"] = r["fuentes"] + len(nombres_bases)
     r["bases"] = nombres_fuentes + nombres_bases

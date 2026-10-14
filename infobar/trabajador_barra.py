@@ -8,7 +8,8 @@ cambia imagenes. Una excepcion se registra y el bucle sigue: el hilo no muere.
 import threading, time, traceback
 
 from . import cuota_nan, desplegable_png, servidores_ciclo
-from .agregacion import informe
+from . import sombra
+from .agregacion import ULTIMOS, informe
 from .config_y_estado import cfg, log
 
 CADA_AGENTES = 60           # s entre escaneos de logs (icono)
@@ -47,6 +48,8 @@ class Trabajador(threading.Thread):
                 if r is None or forzar or ahora - ultimo_scan >= CADA_AGENTES:
                     r = informe()
                     ultimo_scan = ahora
+                    if str(cfg().get("almacen") or "sombra").lower() == "sombra":
+                        sombra.registrar_si_toca(ULTIMOS.get("vistos"))
                     self.entregar("agentes", {"cinco_h": r["cinco_h"]["tok"], "hoy": r["hoy"]["tok"],
                                               "turnos": r["hoy"]["turnos"], "pct_5h": r.get("pct_5h", 0)})
                 if self.conjunto is None:
