@@ -10,7 +10,7 @@ import contextlib, fcntl, glob, json, os, tempfile, time
 from . import rutas
 
 
-VERSION_ESTADO = 12         # subir cuando cambie el formato del cache o lo que cuenta el parser: obliga a reescanear
+VERSION_ESTADO = 13         # subir cuando cambie el formato del cache o lo que cuenta el parser: obliga a reescanear
 
 
 def log(msg):
