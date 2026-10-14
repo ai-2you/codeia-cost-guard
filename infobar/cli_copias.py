@@ -15,7 +15,7 @@ import tempfile
 import time
 import warnings
 
-from . import almacen, cgx, claves_copias, exportacion, restauracion, rutas
+from . import almacen, cgx, claves_copias, exportacion, plataforma, restauracion, rutas
 from .config_y_estado import cfg, guardar_config
 
 ORDENES = ("--exportar", "--importar", "--claves-generar", "--copia-ahora", "--probar-restauracion", "--frase-sugerir",
@@ -111,6 +111,9 @@ def claves_generar(argv, t):
     destino = _valor(argv, "--claves-generar")
     if not destino:
         raise Salida("uso: costbar.py --claves-generar RUTA_DE_LA_CLAVE_PRIVADA [--con-frase] [--carpeta CARPETA_DE_COPIAS]")
+    if plataforma.es_checkout_de_desarrollo(rutas.RAIZ):
+        raise Salida("estás en un checkout del repositorio: la configuración se guardaría en su config.json y la barra no la vería. "
+                     "Ejecuta la orden desde la instalación (~/.cost-guard/costbar.py) o define COSTGUARD_DATOS")
     cc = _config_copias()
     t.escribe(claves_copias.AVISO)
     if not _confirma_si(t, "¿Entiendes que no hay forma de recuperar la clave si la pierdes?"):

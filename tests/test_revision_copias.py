@@ -32,6 +32,9 @@ T0 = 1_790_000_000
 class Base(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="cg-rev-")
+        env = mock.patch.dict(os.environ, {"COSTGUARD_DATOS": self.dir})
+        env.start()
+        self.addCleanup(env.stop)
         self.ant = (rutas.DATOS, rutas.ALMACEN, rutas.COPIAS)
         rutas.DATOS = os.path.join(self.dir, "datos")
         rutas.ALMACEN = os.path.join(rutas.DATOS, "consumo.sqlite")

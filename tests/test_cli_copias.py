@@ -56,6 +56,9 @@ def llena_base(ruta):
 class Base(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="cg-cli-")
+        env = mock.patch.dict(os.environ, {"COSTGUARD_DATOS": self.dir})
+        env.start()
+        self.addCleanup(env.stop)
         self.ant = (rutas.DATOS, rutas.ALMACEN, rutas.COPIAS)
         rutas.DATOS = os.path.join(self.dir, "datos")
         rutas.ALMACEN = os.path.join(rutas.DATOS, "consumo.sqlite")
@@ -87,6 +90,15 @@ class TestSeguridadDeEntrada(Base):
         with mock.patch.object(sys.stdin, "isatty", return_value=False), mock.patch("getpass.getpass", side_effect=AssertionError("no debe pedirla")):
             self.assertEqual(cli_copias.main(["--exportar", destino], t), 1)
         self.assertFalse(os.path.exists(destino))
+
+    def test_claves_generar_desde_un_checkout_no_escribe_en_su_config(self):
+        clave = os.path.join(self.fuera, "k.txt")
+        t = Falso(textos=["SI"])
+        with mock.patch.dict(os.environ):
+            os.environ.pop("COSTGUARD_DATOS", None)
+            self.assertEqual(cli_copias.main(["--claves-generar", clave], t), 1)
+        self.assertIn("checkout", t.todo)
+        self.assertFalse(os.path.exists(clave))
 
     def test_orden_desconocida(self):
         self.assertEqual(cli_copias.main(["--nada"], Falso()), 1)
