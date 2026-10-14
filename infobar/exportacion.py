@@ -20,6 +20,11 @@ MENSUALES = 6
 NOMBRE = re.compile(r"^copia-(\d{8})-(\d{6})-([0-9a-f]{4})(\.danada)?\.cgx$")
 
 
+def carpeta_por_defecto():
+    """Las copias cifradas van en una carpeta distinta de `rutas.COPIAS` (copias en claro previas a migraciones)."""
+    return os.path.join(rutas.DATOS, "copias-cifradas")
+
+
 def dir_tmp():
     d = os.path.join(rutas.DATOS, "tmp")
     os.makedirs(d, mode=0o700, exist_ok=True)
@@ -173,3 +178,17 @@ def toca_copia(ahora=None, cada_s=86400):
     u = ultima_copia()
     ahora = ahora if ahora is not None else time.time()
     return not u or u.get("danada") or ahora - u.get("ts", 0) >= cada_s
+
+
+def estado_copias(config_copias, ahora=None):
+    """Para mostrar en la barra y en el informe: {estado, ultima, edad_h}. Estados: `sin_destinatario` (no hay copias automáticas),
+    `nunca`, `al_dia` (la última buena tiene menos de 48 h), `atrasada` (más de 48 h) o `danada` (la última salió de una base dañada)."""
+    ahora = ahora if ahora is not None else time.time()
+    if not (config_copias or {}).get("destinatario"):
+        return {"estado": "sin_destinatario", "ultima": None, "edad_h": None}
+    u = ultima_copia()
+    if not u:
+        return {"estado": "nunca", "ultima": None, "edad_h": None}
+    edad = (ahora - u.get("ts", 0)) / 3600
+    estado = "danada" if u.get("danada") else "atrasada" if edad > 48 else "al_dia"
+    return {"estado": estado, "ultima": u.get("archivo"), "edad_h": round(edad, 1)}

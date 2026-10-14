@@ -69,7 +69,7 @@ def _sin_volcados():
 
 def _config_copias():
     c = cfg().get("copias") or {}
-    return {"carpeta": c.get("carpeta") or os.path.join(rutas.DATOS, "copias-cifradas"),
+    return {"carpeta": c.get("carpeta") or exportacion.carpeta_por_defecto(),
             "destinatario": list(c.get("destinatario") or []), "firmas_publicas": list(c.get("firmas_publicas") or [])}
 
 

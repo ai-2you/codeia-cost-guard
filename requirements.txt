@@ -1,5 +1,8 @@
 # Solo para la barra de menús en macOS. El medidor y el panel funcionan sin nada de esto.
 pillow>=10.0
 pyobjc-framework-Cocoa>=9.2
+# Copias cifradas y exportación (costbar.py --claves-generar / --exportar / --importar). Sin ella todo lo demás funciona.
+# Versión exacta; pendiente de decidir un lock con hashes por plataforma (cffi y pycparser también deberían fijarse).
+cryptography==46.0.7
 # opcionales: la barra antigua basada en el menú nativo
 # rumps>=0.4

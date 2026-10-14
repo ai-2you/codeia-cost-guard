@@ -151,7 +151,12 @@ class Barra(NSObject):
             from infobar.ingestor import HiloIngesta        # solo la barra (y costbar.py --ingerir) escribe en la base
             self.ingesta = HiloIngesta()
             self.ingesta.start()
-        log("icono listo, trabajador e ingesta en marcha")
+        self.copias = None
+        if self.ingesta is not None:
+            from infobar.hilo_copias import HiloCopias      # copias cifradas a destinatario: solo claves públicas, sin frases
+            self.copias = HiloCopias()
+            self.copias.start()
+        log("icono listo, trabajador, ingesta y copias en marcha")
         return self
 
     # --- del trabajador al hilo principal ---

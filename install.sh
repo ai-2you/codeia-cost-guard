@@ -41,7 +41,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
   echo "-> Python + pillow + pyobjc"
   python3 -m venv "$DESTINO/venv" 2>/dev/null || true
   "$DESTINO/venv/bin/pip" install --quiet --upgrade pip
-  "$DESTINO/venv/bin/pip" install --quiet pillow pyobjc-framework-Cocoa
+  "$DESTINO/venv/bin/pip" install --quiet pillow pyobjc-framework-Cocoa "cryptography==46.0.7"
 
   if [ ! -e "/Applications/Google Chrome.app" ] && ! command -v chromium >/dev/null 2>&1; then
     echo "  aviso: sin Chrome/Chromium el desplegable no se pinta (el icono si funciona)."

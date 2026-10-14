@@ -223,6 +223,24 @@ Además de leer los logs, la barra guarda cada turno de Claude Code, Codex, pi, 
 - **Nombres de proyecto:** un directorio es un solo proyecto en todos los agentes; los alias que ya tenías siguen valiendo.
 - **Codex con otro proveedor:** se muestra en la cuenta de ese proveedor, no en tu suscripción de Codex.
 
+### Copias cifradas y exportación
+
+Requiere la librería `cryptography` (la instala `install.sh`; sin ella solo se desactiva esto). Todo se hace desde la terminal:
+
+- **Copias automáticas (recomendado):** `python3 costbar.py --claves-generar RUTA_DE_LA_CLAVE` genera una clave **privada** que
+  guardas **fuera de este equipo** y una pública que se queda en `config.json` (`copias.destinatario`). Sin la privada las copias
+  son irrecuperables y no existe recuperación: el comando te lo advierte, la vuelve a leer del fichero que guardaste y ensaya
+  un descifrado antes de activar nada. La barra hace una copia al día en `copias.carpeta` (por defecto `copias-cifradas` en la
+  carpeta de datos; puede ser una carpeta sincronizada porque está cifrada), la **relee y verifica** antes de rotar y conserva
+  las últimas 14 diarias y la primera de cada uno de los últimos 6 meses. `--copia-ahora` fuerza una.
+- **Exportar a mano:** `--exportar RUTA.cgx` (te pide una frase de paso, mínimo 12 caracteres; `--frase-sugerir` propone una).
+- **Restaurar:** `--importar RUTA.cgx [--clave-privada RUTA] [--forzar]` descifra, comprueba, te muestra fecha y número de turnos y
+  pide confirmar; guarda antes una copia de la base actual. Se niega si la barra está escribiendo (ciérrala antes).
+  `--probar-restauracion RUTA.cgx` ensaya sin tocar nada (haz el ensayo cada pocos meses).
+- **Windows:** `python costbar.py --autoprueba-copias` hace la ida y vuelta completa en un directorio temporal y dice si todo
+  funciona en tu máquina; pega su salida si algo falla.
+- Las frases y las claves privadas **nunca** van por la línea de órdenes, el panel web ni la barra: solo se piden en la terminal.
+
 ## Tests
 
 ```bash

@@ -221,7 +221,7 @@ def crear_servidor(puerto=PUERTO):
             elif ruta == "/origenes":
                 try:
                     r = informe()
-                    self._json(200, {"origenes": r.get("origenes", {}), "perfiles_hermes": r.get("perfiles_hermes", {}),
+                    self._json(200, {"origenes": r.get("origenes", {}), "perfiles_hermes": r.get("perfiles_hermes", {}), "copias": r.get("copias"),
                                      "planes": [p["nombre"] for p in (cfg().get("proveedores") or [])],
                                      "config": sin_secretos(cfg())})
                 except Exception as e:

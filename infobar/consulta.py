@@ -11,7 +11,8 @@ import os
 import sqlite3
 import time
 
-from . import almacen, plataforma, rutas
+from . import almacen, exportacion, plataforma, rutas
+from .config_y_estado import cfg
 from .agregacion import VENTANA_H, agregar
 from .planes_y_tarifas import CLIFF, tarifa
 
@@ -146,6 +147,7 @@ def consultar(dias=None, zona=None):
     finally:
         con.close()
     r = agregar(vistos, 0, dias)
+    r["copias"] = exportacion.estado_copias(cfg().get("copias"))
     r["perfiles_hermes"], r["nuevos"] = hermes, int(vuelta.get("nuevos") or 0) if time.time() - int(vuelta.get("en") or 0) < 120 else 0
     r["fuentes"], r["bases"] = sum(n for _, n in bases), [f"{a} ({n})" for a, n in bases]
     return r
