@@ -161,15 +161,27 @@ class TestExcluirDeCopias(unittest.TestCase):
             self.assertTrue(plataforma.excluir_de_copias_del_sistema(self.dir))
         self.assertEqual(run.call_count, 1)
 
-    def test_macos_la_excluye_si_no_lo_estaba(self):
-        respuestas = [mock.Mock(stdout="[Included]  /x", returncode=0), mock.Mock(stdout="", returncode=0)]
-        with mock.patch.object(sys, "platform", "darwin"), mock.patch.object(plataforma.subprocess, "run", side_effect=respuestas) as run:
+    def test_macos_la_excluye_si_no_lo_estaba_y_lo_verifica(self):
+        respuestas = [mock.Mock(stdout="[Included]  /x", returncode=0), mock.Mock(stdout="", returncode=0), mock.Mock(stdout="[Excluded]  /x", returncode=0)]
+        with mock.patch.object(sys, "platform", "darwin"), mock.patch.object(plataforma.subprocess, "run", side_effect=respuestas) as run, \
+                mock.patch("time.sleep"):
             self.assertTrue(plataforma.excluir_de_copias_del_sistema(self.dir))
-        self.assertEqual(run.call_args[0][0][:2], ["tmutil", "addexclusion"])
+        self.assertEqual([c[0][0][1] for c in run.call_args_list], ["isexcluded", "addexclusion", "isexcluded"])
+
+    def test_macos_si_el_sistema_tarda_en_reflejarlo_reintenta(self):
+        incluida, ok = mock.Mock(stdout="[Included]", returncode=0), mock.Mock(stdout="", returncode=0)
+        respuestas = [incluida, ok, incluida, ok, mock.Mock(stdout="[Excluded]", returncode=0)]
+        with mock.patch.object(sys, "platform", "darwin"), mock.patch.object(plataforma.subprocess, "run", side_effect=respuestas), mock.patch("time.sleep"):
+            self.assertTrue(plataforma.excluir_de_copias_del_sistema(self.dir))
+
+    def test_macos_si_nunca_queda_excluida_dice_que_no(self):
+        incluida, ok = mock.Mock(stdout="[Included]", returncode=0), mock.Mock(stdout="", returncode=0)
+        with mock.patch.object(sys, "platform", "darwin"), mock.patch.object(plataforma.subprocess, "run", side_effect=[incluida, ok] * 3), mock.patch("time.sleep"):
+            self.assertFalse(plataforma.excluir_de_copias_del_sistema(self.dir))
 
     def test_macos_si_tmutil_falla_dice_que_no(self):
         respuestas = [mock.Mock(stdout="[Included]", returncode=0), mock.Mock(stdout="", returncode=1)]
-        with mock.patch.object(sys, "platform", "darwin"), mock.patch.object(plataforma.subprocess, "run", side_effect=respuestas):
+        with mock.patch.object(sys, "platform", "darwin"), mock.patch.object(plataforma.subprocess, "run", side_effect=respuestas), mock.patch("time.sleep"):
             self.assertFalse(plataforma.excluir_de_copias_del_sistema(self.dir))
         with mock.patch.object(sys, "platform", "darwin"), mock.patch.object(plataforma.subprocess, "run", side_effect=OSError("sin tmutil")):
             self.assertFalse(plataforma.excluir_de_copias_del_sistema(self.dir))

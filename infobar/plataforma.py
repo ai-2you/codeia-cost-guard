@@ -170,10 +170,15 @@ def excluir_de_copias_del_sistema(ruta):
         return False
     try:
         if sys.platform == "darwin":
-            r = subprocess.run(["tmutil", "isexcluded", ruta], capture_output=True, text=True, timeout=10)
-            if "[Excluded]" in r.stdout:
-                return True
-            return subprocess.run(["tmutil", "addexclusion", ruta], capture_output=True, timeout=10).returncode == 0
+            import time
+            for intento in range(3):         # tmutil tarda un instante en reflejar el cambio: se verifica y se reintenta
+                r = subprocess.run(["tmutil", "isexcluded", ruta], capture_output=True, text=True, timeout=10)
+                if "[Excluded]" in r.stdout:
+                    return True
+                if subprocess.run(["tmutil", "addexclusion", ruta], capture_output=True, timeout=10).returncode != 0:
+                    return False
+                time.sleep(0.3)
+            return False
         if os.name == "nt":
             import ctypes
             FILE_ATTRIBUTE_NOT_CONTENT_INDEXED = 0x2000

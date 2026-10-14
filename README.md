@@ -92,7 +92,11 @@ lee ahí — Claude Code y Codex sí se detectan igual en los tres sistemas.
 | Arranque automático al iniciar sesión | ✅ (LaunchAgent) | — | — (usa el Programador de tareas si quieres algo similar) |
 | Lectura de logs de Claude Code / Codex | ✅ | ✅ | ✅ |
 | Lectura de consumo de OpenCode | ✅ | ✅ | ⚠️ ruta de datos distinta, no detectado todavía |
+| **Modo sin interfaz** `python3 costbar.py --demonio` (ingesta, copias cifradas, ciclo de servidores, presupuestos y panel local, sin icono ni Chrome) | ✅ | ✅ | ✅ (código portable; **pendiente de probar en un Windows real**: ponlo en una tarea programada «al iniciar sesión») |
+| Cerrojos, procesos hijos y exclusión de copias del sistema | ✅ Time Machine | ✅ | ✅ sin `fcntl`/`killpg`; los datos van a `%LOCALAPPDATA%\CostGuard` marcados como «no indexar» (el Historial de archivos y OneDrive no los cubren por defecto: la copia soportada es la cifrada de la aplicación) |
+| Secretos (claves de proveedores y paneles) | ✅ Llavero | ❌ | ❌ **pendiente**: Administrador de credenciales |
 
+Las IPs de intentos de acceso y de sesiones de la caché de servidores se borran a las 48 h y las imágenes del desplegable cada hora.
 Verificado ejecutando el medidor con `$HOME` vacío (instalación limpia, sin historial previo) además
 de con historial real.
 
