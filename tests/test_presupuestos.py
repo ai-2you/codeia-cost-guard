@@ -217,6 +217,12 @@ class TestPlataformaYAjustes(unittest.TestCase):
             ajustes.normalizar(self.base(avisos_presupuesto="si"), {})
         self.assertIs(ajustes.normalizar(self.base(avisos_presupuesto=False), {})["avisos_presupuesto"], False)
 
+    def test_alias_con_controles_o_invisibles_o_demasiado_largo_se_rechazan(self):
+        for malo in ("a\x00b", "a\u202eb", "a\u200bb", "a\nb", "x" * 121):
+            with self.assertRaises(ValueError, msg=repr(malo)):
+                ajustes.normalizar(self.base(proyectos={"u/x/a": {"alias": malo}}), {})
+        self.assertEqual(ajustes.normalizar(self.base(proyectos={"u/x/a": {"alias": " Cliente ñ "}}), {})["proyectos"]["u/x/a"]["alias"], "Cliente ñ")
+
     def test_el_campo_antiguo_de_proyecto_se_conserva_si_la_interfaz_ya_no_lo_manda(self):
         actual = {"proyectos": {"u/x/a": {"alias": "A", "presupuesto_mes_tokens": 500}}}
         out = ajustes.normalizar(self.base(proyectos={"u/x/a": {"alias": "A2", "oculto": False}}), actual)

@@ -99,8 +99,13 @@ def escribir_claro(r, ahora=None):
     """CSV sin cifrar en la carpeta privada de exportaciones. Devuelve (ruta, filas)."""
     datos = construir(r)
     ruta = os.path.join(carpeta(), nombre(r, ahora))
-    with _abre_exclusivo(ruta) as f:
-        f.write(datos)
+    f = _abre_exclusivo(ruta)              # si ya existe, falla aquí y no se toca (no es nuestro)
+    try:
+        with f:
+            f.write(datos)
+    except BaseException:
+        exportacion._borra(ruta)           # un CSV a medias parecería completo; este sí lo creamos nosotros
+        raise
     n = datos.count(b"\r\n") - 1
     auditar(r, n, False, "cli")
     return ruta, n

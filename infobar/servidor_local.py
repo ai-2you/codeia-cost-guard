@@ -234,7 +234,10 @@ def crear_servidor(puerto=PUERTO):
         def _historico(self, como_csv=False):
             """GET /historico?desde=&hasta=&paso=&agrupa= : solo esos cuatro parámetros, una vez cada uno, validados en `historico`.
             Con `como_csv` devuelve el CSV como descarga: se genera en memoria y el servidor no deja ningún fichero."""
-            q = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=8)
+            try:
+                q = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=8)
+            except ValueError:
+                return self._json(400, {"error": "parámetros no permitidos"})
             if set(q) - {"desde", "hasta", "paso", "agrupa"} or any(len(v) != 1 for v in q.values()):
                 return self._json(400, {"error": "parámetros no permitidos"})
             ok, motivo = historico.disponible()

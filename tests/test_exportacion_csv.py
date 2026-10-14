@@ -142,6 +142,26 @@ class TestFicheros(ConCarpeta):
                 ec.escribir_claro(resultado())
         self.assertEqual(open(victima).read(), "intacto")
 
+    def test_si_falla_la_escritura_no_queda_un_csv_a_medias(self):
+        original = ec._abre_exclusivo
+
+        class Roto:
+            def __init__(self, ruta):
+                self.f = original(ruta)
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                self.f.close()
+            def write(self, datos):
+                self.f.write(datos[:5])
+                raise OSError("disco lleno")
+
+        with mock.patch.object(ec, "_abre_exclusivo", Roto):
+            with self.assertRaises(OSError):
+                ec.escribir_claro(resultado())
+        self.assertEqual(os.listdir(ec.carpeta()), [])
+        self.assertFalse(os.path.exists(os.path.join(rutas.DATOS, "exportaciones.log")))
+
     def test_cifrado_ida_y_vuelta_y_tipo_propio(self):
         ruta, _ = ec.escribir_cifrado(resultado(), FRASE)
         self.assertTrue(ruta.endswith(".csv.cgx"))

@@ -42,13 +42,16 @@ def _fecha(texto, nombre):
         d = datetime.date.fromisoformat(texto)
     except ValueError:
         raise ErrorHistorico(f"'{nombre}' no es una fecha válida") from None
-    if d.year < 2000:
-        raise ErrorHistorico(f"'{nombre}' es anterior a 2000")
+    if not 2000 <= d.year <= 2100:
+        raise ErrorHistorico(f"'{nombre}' tiene que estar entre los años 2000 y 2100")
     return d
 
 
 def _medianoche(d):
-    return int(time.mktime((d.year, d.month, d.day, 0, 0, 0, 0, 0, -1)))
+    try:
+        return int(time.mktime((d.year, d.month, d.day, 0, 0, 0, 0, 0, -1)))
+    except (OverflowError, OSError, ValueError):
+        raise ErrorHistorico("esa fecha no se puede convertir a la hora local de este sistema") from None
 
 
 def _inicio(d, paso):
@@ -117,7 +120,7 @@ def _etiqueta(agrupa, agente, plan, proyecto, oculto):
     return {"plan": plan, "agente": NOMBRES.get(agente, agente)}.get(agrupa, "Total")
 
 
-def historico(desde, hasta, paso="dia", agrupa="ninguno", conf=None):
+def historico(desde, hasta, paso="dia", agrupa="ninguno", conf=None, hoy=None):
     """Consumo por cubo (día, semana de lunes o mes locales) entre dos fechas locales, agrupado. Devuelve números crudos:
     el nombre de cada serie lo pinta quien lo reciba, nunca como HTML. Los cubos anteriores al primer dato valen None."""
     if paso not in PASOS or agrupa not in AGRUPACIONES:
@@ -145,7 +148,7 @@ def historico(desde, hasta, paso="dia", agrupa="ninguno", conf=None):
         n_ant = len(cubos)
         ant_lo, ant_hi = _medianoche(_anterior(cubos[0], paso, n_ant)), lo
         anterior = sum(gi + go + cr + cw for _d, _a, _p, _n, _o, gi, go, cr, cw, _t in _filas(con, eid, ant_lo, ant_hi, conf))
-        hoy = datetime.date.today()
+        hoy = hoy or datetime.date.today()
         mes_ini = hoy.replace(day=1)
         acumulado = sum(gi + go + cr + cw for _d, _a, _p, _n, _o, gi, go, cr, cw, _t in
                         _filas(con, eid, _medianoche(mes_ini), _medianoche(_siguiente(mes_ini, "mes")), conf))

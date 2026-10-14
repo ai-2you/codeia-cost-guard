@@ -125,7 +125,7 @@
   }
   function seccionPresupuestos(c){
     const P = A.presupuestos || {disponible: false, motivo: "", estados: []};
-    c.presupuestos = c.presupuestos || [];
+    const lista = c.presupuestos || [];          // no se crea si no existe: guardar una lista vacía impediría la migración de los presupuestos antiguos
     const estado = f => (P.estados || []).find(e => e.clave === f.ambito + "|" + f.nombre + "|" + f.periodo);
     const nombres = [...new Set([...Object.keys(A.proyectos || {}).map(k => ((c.proyectos[k] || {}).alias || k)), ...c.proveedores.map(p => p.nombre)])].sort();
     return h("section", {}, h("h2", {}, "Presupuestos"),
@@ -133,9 +133,9 @@
         "Avisa al llegar al 80 % y al 100 %, una vez por periodo. El nombre es el que ves en el panel (el alias si lo has puesto)."),
       P.disponible ? null : h("p", {class: "ayuda", style: "color:#d68910"}, P.motivo || "Los presupuestos no están disponibles."),
       h("datalist", {id: "nombres-presupuesto"}, ...nombres.map(n => h("option", {value: n}))),
-      c.presupuestos.length ? h("table", {id: "pres-lista"}, h("tr", {}, h("th", {}, "Ámbito"), h("th", {style: "text-align:left"}, "Nombre"), h("th", {}, "Periodo"), h("th", {}, "Tokens"), h("th", {}, "Uso"), h("th", {})),
-        ...c.presupuestos.map(f => filaPresupuesto(f, estado(f)))) : h("p", {class: "vacio", id: "pres-vacio"}, "Aún no hay presupuestos."),
-      h("div", {class: "prov-cab", style: "margin-top:8px"}, h("button", {onclick: () => { leer(); c.presupuestos.push({ambito: "proyecto", nombre: "", periodo: "mes", tokens: 0}); $("vista-ajustes").replaceChildren(...pinta()); }}, "Añadir presupuesto"),
+      lista.length ? h("table", {id: "pres-lista"}, h("tr", {}, h("th", {}, "Ámbito"), h("th", {style: "text-align:left"}, "Nombre"), h("th", {}, "Periodo"), h("th", {}, "Tokens"), h("th", {}, "Uso"), h("th", {})),
+        ...lista.map(f => filaPresupuesto(f, estado(f)))) : h("p", {class: "vacio", id: "pres-vacio"}, "Aún no hay presupuestos."),
+      h("div", {class: "prov-cab", style: "margin-top:8px"}, h("button", {onclick: () => { leer(); (c.presupuestos = c.presupuestos || []).push({ambito: "proyecto", nombre: "", periodo: "mes", tokens: 0}); $("vista-ajustes").replaceChildren(...pinta()); }}, "Añadir presupuesto"),
         h("label", {style: "margin-left:14px"}, h("input", {type: "checkbox", id: "g-avisos", checked: c.avisos_presupuesto !== false}), " Avisar con una notificación del sistema")));
   }
 
@@ -208,13 +208,13 @@
     const py = Object.assign({}, c.proyectos); raiz.querySelectorAll("[data-proy]").forEach(i => { const e = py[i.dataset.proy] = py[i.dataset.proy] || {};
       e[i.dataset.c] = i.dataset.c === "oculto" ? i.checked : (i.dataset.c === "alias" ? i.value.trim() : entero(i.value)); });
     c.proyectos = py;
-    if ($("pres-lista") || $("pres-vacio")) {
+    if ($("pres-lista")) {        // se conservan también las filas a medio rellenar: "Quitar" borra por posición; se descartan al guardar
       c.presupuestos = [...raiz.querySelectorAll("[data-pres]")].map(tr => {
         const v = k => tr.querySelector('[data-pk="' + k + '"]').value;
         return {ambito: v("ambito"), nombre: v("nombre").trim(), periodo: v("periodo"), tokens: entero(v("tokens"))};
-      }).filter(f => f.nombre && f.tokens > 0);
-      if ($("g-avisos")) c.avisos_presupuesto = $("g-avisos").checked;
+      });
     }
+    if ($("g-avisos")) c.avisos_presupuesto = $("g-avisos").checked;
     if (c.servidores) {
       raiz.querySelectorAll("[data-servidor]").forEach(div => {
         const s = c.servidores[+div.dataset.servidor]; if (!s) return;
@@ -236,7 +236,9 @@
 
   function guardar(){
     const m = $("msg-guardar"); leer();
-    post("/guardar", A.config).then(j => { m.className = "msg " + (j.ok ? "ok" : "err"); m.textContent = j.ok ? "✓ Guardado. Se aplica en el próximo refresco (≤ 1 min)." : "Error: " + (j.error || "?"); })
+    const envio = Object.assign({}, A.config);
+    if (envio.presupuestos) envio.presupuestos = envio.presupuestos.filter(f => f.nombre && f.tokens > 0);
+    post("/guardar", envio).then(j => { m.className = "msg " + (j.ok ? "ok" : "err"); m.textContent = j.ok ? "✓ Guardado. Se aplica en el próximo refresco (≤ 1 min)." : "Error: " + (j.error || "?"); })
       .catch(e => { m.className = "msg err"; m.textContent = "Error al guardar: " + e; });
   }
 

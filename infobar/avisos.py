@@ -36,7 +36,8 @@ def _guardar(datos):
             f.flush()
             os.fsync(f.fileno())
         os.chmod(tmp, 0o600)
-        os.replace(tmp, ruta())
+        from .exportacion import reemplazar        # reintenta si un antivirus o el indexador tienen el fichero abierto (Windows)
+        reemplazar(tmp, ruta())
     except BaseException:
         try:
             os.unlink(tmp)

@@ -1,4 +1,4 @@
-/* Estado, agregacion y pintado. Los datos ya vienen resueltos en __DATOS__ (D);
+/* Estado, agregacion y pintado. Los datos ya vienen resueltos en D (incrustados abajo);
    aqui solo se filtra/suma en cliente — sin fetch salvo el configurador (/origenes, /guardar),
    que ya existia. Los graficos (barras, lineas, tarta...) los pone panel_assets/graficos.js. */
 /* Todo texto que viene de los logs (modelos, proyectos, planes) se escapa una vez aqui, antes de que ninguna plantilla lo

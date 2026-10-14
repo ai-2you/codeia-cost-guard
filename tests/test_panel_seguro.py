@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aislamiento  # noqa: E402
@@ -34,6 +35,38 @@ class TestDatosIncrustados(unittest.TestCase):
         html = panel.construye({"proveedores": {}, "x": HOSTIL})
         self.assertEqual(html.count("</script>"), 1)
         self.assertNotIn(HOSTIL, html)
+
+
+@unittest.skipUnless(shutil.which("node"), "hace falta node para ejecutar el script del panel")
+class TestNingunNombreSeEjecuta(unittest.TestCase):
+    """Se construye el panel con nombres hostiles y se ejecuta de verdad su script hasta declarar D: nada de los datos puede salir de su cadena."""
+    def ejecuta(self, d):
+        html = panel.construye(d)
+        cuerpo = html[html.index("<script>") + 8: html.rindex("</script>")]
+        corte = cuerpo.index("\nlet periodo")
+        js = "const vm=require('vm');const c={};vm.createContext(c);let e='';try{vm.runInContext(process.argv[1],c)}catch(x){e=String(x)}" \
+             "process.stdout.write(JSON.stringify({pwned:c.PWNED===undefined?null:c.PWNED,err:e}))"
+        r = subprocess.run(["node", "-e", js, cuerpo[:corte]], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_nombres_que_intentan_salirse_de_comentarios_cadenas_y_etiquetas(self):
+        for malo in ("*/globalThis.PWNED=1/*", "\"+globalThis.PWNED=1+\"", "'+globalThis.PWNED=1+'", "</script><script>globalThis.PWNED=1</script>",
+                     "\u2028globalThis.PWNED=1//", "`${globalThis.PWNED=1}`", "<!--", "-->globalThis.PWNED=1"):
+            for d in ({"modelo_prov": {malo: malo}}, {"proveedores": {malo: {}}, "proyectos": {malo: 1}}, {"x": [malo]}):
+                r = self.ejecuta(d)
+                self.assertIsNone(r["pwned"], repr(malo))
+                self.assertNotIn("SyntaxError", r["err"], repr(malo))
+
+    def test_el_marcador_de_datos_solo_puede_aparecer_una_vez(self):
+        self.assertEqual(asset("app.js").count("__DATOS__"), 1)
+        original = panel._leer
+        with mock.patch.object(panel, "_leer", lambda n: original(n) + ("\n/* __DATOS__ */" if n == "app.js" else "")):
+            with self.assertRaises(RuntimeError):
+                panel.construye({})
+
+    def test_el_json_incrustado_no_lleva_barras_sin_escapar(self):
+        self.assertIsNone(re.search(r"(?<!\\)/", panel.json_para_script({"a": "*/ x /* </ //"})))
 
 
 class TestHistoricoSinHtmlDeDatos(unittest.TestCase):

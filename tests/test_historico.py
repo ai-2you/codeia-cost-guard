@@ -156,7 +156,7 @@ class TestParametros(ConHusoMadrid):
     def test_rechaza_lo_que_no_es_una_fecha_estricta(self):
         self.mete([turno("claude:a", utc("2026-10-12T10:00"))])
         self.completa()
-        for malo in ("20261012", "2026-1-2", "2026-13-01", "2026-02-30", "1999-01-01", "", None, "2026-10-12 ", "２０２６-10-12"):
+        for malo in ("20261012", "2026-1-2", "2026-13-01", "2026-02-30", "1999-01-01", "2101-01-01", "9999-12-31", "", None, "2026-10-12 ", "２０２６-10-12"):
             with self.assertRaises(historico.ErrorHistorico, msg=str(malo)):
                 historico.historico(malo, "2026-10-13")
         with self.assertRaises(historico.ErrorHistorico):
@@ -184,6 +184,30 @@ class TestParametros(ConHusoMadrid):
 
 
 class TestAnteriorYProyeccion(ConHusoMadrid):
+    def test_la_proyeccion_es_el_acumulado_entre_los_dias_transcurridos_por_los_del_mes(self):
+        self.mete([turno("claude:a", utc("2026-10-02T10:00"), gi=100, go=0, cr=0, cw=0), turno("claude:b", utc("2026-10-09T10:00"), gi=40, go=0, cr=0, cw=0),
+                   turno("claude:c", utc("2026-09-20T10:00"), gi=5000, go=0, cr=0, cw=0)])
+        self.completa()
+        m = historico.historico("2026-10-01", "2026-10-14", hoy=datetime.date(2026, 10, 14))["mes_en_curso"]
+        self.assertEqual((m["acumulado"], m["dias_transcurridos"], m["dias_mes"], m["proyeccion"]), (140, 14, 31, round(140 / 14 * 31)))
+        antes = historico.historico("2026-10-01", "2026-10-14", hoy=datetime.date(2026, 10, 2))["mes_en_curso"]
+        self.assertIsNone(antes["proyeccion"])                                     # antes del día 3 no se estima
+
+    def test_retroceder_cubos_en_los_tres_pasos(self):
+        d = datetime.date
+        self.assertEqual(historico._anterior(d(2026, 10, 14), "dia", 3), d(2026, 10, 11))
+        self.assertEqual(historico._anterior(d(2026, 10, 12), "semana", 2), d(2026, 9, 28))
+        self.assertEqual(historico._anterior(d(2026, 3, 1), "mes", 3), d(2025, 12, 1))
+        self.assertEqual(historico._anterior(d(2026, 1, 1), "mes", 1), d(2025, 12, 1))
+        self.assertEqual(historico._siguiente(d(2026, 12, 1), "mes"), d(2027, 1, 1))
+
+    def test_periodo_anterior_en_paso_dia_y_mes(self):
+        self.mete([turno("claude:a", utc("2026-10-10T10:00"), gi=7, go=0, cr=0, cw=0), turno("claude:b", utc("2026-10-12T10:00"), gi=3, go=0, cr=0, cw=0),
+                   turno("claude:c", utc("2026-09-12T10:00"), gi=50, go=0, cr=0, cw=0)])
+        self.completa()
+        self.assertEqual(historico.historico("2026-10-11", "2026-10-12")["anterior"], 7)        # los dos días anteriores
+        self.assertEqual(historico.historico("2026-10-01", "2026-10-31", paso="mes")["anterior"], 50)
+
     def test_periodo_anterior_y_proyeccion_del_mes(self):
         self.mete([turno("claude:a", utc("2026-10-02T10:00"), gi=100, go=0, cr=0, cw=0), turno("claude:b", utc("2026-10-09T10:00"), gi=40, go=0, cr=0, cw=0)])
         self.completa()
@@ -226,6 +250,11 @@ class ServidorBase(ConHusoMadrid):
 
 
 class TestEndpoint(ServidorBase):
+
+    def test_anos_extremos_y_demasiados_parametros_son_400_no_500(self):
+        with self.activo():
+            self.assertEqual(self.pide("/historico?desde=2026-10-12&hasta=9999-12-31")[0], 400)
+            self.assertEqual(self.pide("/historico?" + "&".join(f"p{i}=1" for i in range(20)))[0], 400)
 
     def test_pide_sesion(self):
         self.assertEqual(self.pide("/historico?desde=2026-10-12&hasta=2026-10-12", sesion=False)[0], 401)

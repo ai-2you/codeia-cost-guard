@@ -2,6 +2,7 @@
 de proyectos. El guardado (fusion atomica con copia) y las claves (Llavero) viven en infobar/.
 
 Sin dependencias: solo libreria estandar."""
+import unicodedata
 import re
 
 # proveedores cuyo consumo se sabe leer por API (hoy solo NaN: GET /v1/usage)
@@ -114,7 +115,12 @@ def normalizar(nuevo, actual):
         for k, v in py.items():
             v = v or {}
             e = dict((actual.get("proyectos") or {}).get(k) or {})      # conserva campos puestos a mano
-            e.update({"alias": str(v.get("alias") or "").strip(), "oculto": bool(v.get("oculto"))})
+            alias = str(v.get("alias") or "").strip()
+            if any(unicodedata.category(c) in ("Cc", "Cf", "Cs", "Co", "Zl", "Zp") for c in alias):
+                raise ValueError(f"proyectos.{k}: el alias no puede llevar caracteres de control ni invisibles")
+            if len(alias) > 120:
+                raise ValueError(f"proyectos.{k}: el alias es demasiado largo (máximo 120)")
+            e.update({"alias": alias, "oculto": bool(v.get("oculto"))})
             if "presupuesto_mes_tokens" in v:          # el campo antiguo ya no se edita: solo se conserva lo que había
                 e["presupuesto_mes_tokens"] = _entero(v.get("presupuesto_mes_tokens"), f"proyectos.{k}")
             e.setdefault("presupuesto_mes_tokens", 0)
