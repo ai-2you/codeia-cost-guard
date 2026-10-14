@@ -77,7 +77,7 @@ def guardar_privada(ruta, privada, frase=None, carpeta_copias=None):
     texto = (cgx.codificar_clave("privada", privada) + "\n").encode()
     if frase:
         salida = io.BytesIO()
-        cgx.cifrar_con_frase(io.BytesIO(texto), len(texto), salida, frase)
+        cgx.cifrar_con_frase(io.BytesIO(texto), len(texto), salida, frase, tipo=cgx.TIPO_CLAVE)
         texto = salida.getvalue()
     try:
         _escribe_nuevo(destino, texto)
@@ -98,7 +98,7 @@ def cargar_privada(ruta, frase_fn=None):
         if frase_fn is None:
             raise cgx.ErrorCgx("la clave está protegida con frase")
         salida = io.BytesIO()
-        cgx.descifrar_con_frase(io.BytesIO(datos), salida, frase_fn())
+        cgx.descifrar_con_frase(io.BytesIO(datos), salida, frase_fn(), tipo=cgx.TIPO_CLAVE)
         datos = salida.getvalue()
     return cgx.decodificar_clave("privada", datos.decode("utf-8", "replace")), avisos
 

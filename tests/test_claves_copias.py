@@ -72,10 +72,12 @@ class TestGenerar(Base):
     def test_no_pisa_una_clave_existente(self):
         ruta = os.path.join(self.fuera, "clave.txt")
         claves_copias.generar(ruta, self.copias)
-        antes = open(ruta, "rb").read()
+        with open(ruta, "rb") as f:
+            antes = f.read()
         with self.assertRaisesRegex(cgx.ErrorCgx, "no se sobrescribe"):
             claves_copias.generar(ruta, self.copias)
-        self.assertEqual(open(ruta, "rb").read(), antes)
+        with open(ruta, "rb") as f:
+            self.assertEqual(f.read(), antes)
 
     def test_frase_debil_no_genera_nada(self):
         with self.assertRaises(cgx.ErrorCgx):
@@ -94,7 +96,8 @@ class TestCargar(Base):
     def test_errata_en_el_fichero(self):
         ruta = os.path.join(self.fuera, "clave.txt")
         claves_copias.generar(ruta, self.copias)
-        texto = open(ruta).read()
+        with open(ruta) as f:
+            texto = f.read()
         i = len("CGX-SECRET-KEY-1-") + 5
         with open(ruta, "w") as f:
             f.write(texto[:i] + ("a" if texto[i] != "a" else "b") + texto[i + 1:])

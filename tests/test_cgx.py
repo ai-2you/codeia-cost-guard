@@ -68,7 +68,6 @@ class TestIdaYVuelta(Base):
             datos = os.urandom(n)
             blob = cifra_frase(datos)
             self.assertEqual(abre_frase(blob), datos, n)
-            self.assertEqual(len(blob) % 1, 0)
 
     def test_destinatario(self):
         for n in self.TAMANOS:
@@ -92,7 +91,7 @@ class TestVectorConocido(Base):
         datos = b"hola cgx"
         blob = cifra_frase(datos, ahora=FIJA, aleatorio=aleatorio_fijo)
         sal, prefijo = aleatorio_fijo(16), aleatorio_fijo(8)
-        base = struct.pack(">4sBBQBBB16s32s32s8s", b"CGX1", 1, 1, FIJA, 14, 8, 1, sal, bytes(32), bytes(32), prefijo)
+        base = struct.pack(">4sBBBQBBB16s32s32s8s", b"CGX1", 1, 1, 1, FIJA, 14, 8, 1, sal, bytes(32), bytes(32), prefijo)
         clave = Scrypt(salt=sal, length=32, n=1 << 14, r=8, p=1).derive(FRASE.encode())
         comp = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"cgx1 compromiso").derive(clave)
         cab = base + comp
@@ -110,7 +109,7 @@ class TestVectorConocido(Base):
         self.assertEqual(hashlib.sha256(salida.getvalue()).hexdigest(), VECTOR_DESTINATARIO)
 
 
-VECTOR_DESTINATARIO = "3a4e3386aedb8df103e76522bc52989c6cb511e650ea3baf3be4b89aab6cfe2e"
+VECTOR_DESTINATARIO = "957500d39df75dd38cc77bd7759890350b3cb58a51a7ce64d0b0062186b731e0"
 
 
 class TestManipulacion(Base):
@@ -206,7 +205,7 @@ class TestClaves(Base):
         blob = bytearray(cifra_frase(b"x"))
         for kdf in ((13, 8, 1), (19, 8, 1), (17, 32, 1), (14, 0, 1), (14, 8, 3), (14, 8, 0), (24, 16, 2)):
             malo = bytearray(blob)
-            malo[14], malo[15], malo[16] = kdf
+            malo[cgx.OFF_KDF], malo[cgx.OFF_KDF + 1], malo[cgx.OFF_KDF + 2] = kdf
             with mock.patch("cryptography.hazmat.primitives.kdf.scrypt.Scrypt.derive", side_effect=AssertionError("no debe derivarse")):
                 self.rechaza(bytes(malo), abre_frase)
 
@@ -215,7 +214,7 @@ class TestClaves(Base):
         with self.assertRaises(cgx.ErrorCgx):
             cgx.cifrar_a_destinatario(io.BytesIO(b"x"), 1, salida, bytes(32), self.firma_priv)
         blob = bytearray(self.cifra_dest(b"x"))
-        blob[30:62] = bytes(32)                           # efímera a cero en la cabecera
+        blob[cgx.OFF_EFIMERA:cgx.OFF_EFIMERA + 32] = bytes(32)          # efímera a cero en la cabecera
         self.rechaza(bytes(blob), self.abre_dest)
 
     def test_texto_de_las_claves(self):
