@@ -17,13 +17,17 @@
   const post = (ruta, cuerpo) => fetch(ruta, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cuerpo)})
     .then(r => r.ok || r.status === 400 ? r.json() : r.text().then(t => ({ok: false, error: t || ("HTTP " + r.status)})));
 
+  let enHistorico = false;
   window.vista = function(v){
-    enAjustes = v === "ajustes";
-    $("vista-panel").hidden = enAjustes; $("vista-ajustes").hidden = !enAjustes;
-    $("nav-panel").classList.toggle("on", !enAjustes); $("nav-ajustes").classList.toggle("on", enAjustes);
-    history.replaceState(null, "", enAjustes ? "#ajustes" : location.pathname);
+    enAjustes = v === "ajustes"; enHistorico = v === "historico";
+    $("vista-panel").hidden = enAjustes || enHistorico; $("vista-ajustes").hidden = !enAjustes; $("vista-historico").hidden = !enHistorico;
+    $("nav-panel").classList.toggle("on", !enAjustes && !enHistorico); $("nav-ajustes").classList.toggle("on", enAjustes);
+    $("nav-historico").classList.toggle("on", enHistorico);
+    history.replaceState(null, "", enAjustes ? "#ajustes" : enHistorico ? "#historico" : location.pathname);
     if (enAjustes) cargar();
+    if (enHistorico && window.cargarHistorico) window.cargarHistorico();
   };
+  window.CG = {h, fmt, post};
 
   function cargar(){
     const dest = $("vista-ajustes");
@@ -236,8 +240,8 @@
       .catch(e => { m.className = "msg err"; m.textContent = "Error al guardar: " + e; });
   }
 
-  // el panel se recarga solo cada minuto, salvo que estés editando
-  setInterval(() => { if (!enAjustes) location.reload(); }, 60000);
-  if (location.protocol === "file:") $("nav-ajustes").hidden = true;
+  // el panel se recarga solo cada minuto, salvo que estés editando o mirando el histórico (la recarga volvería al panel)
+  setInterval(() => { if (!enAjustes && !enHistorico) location.reload(); }, 60000);
+  if (location.protocol === "file:") { $("nav-ajustes").hidden = true; $("nav-historico").hidden = true; }
   else if (location.hash === "#ajustes") vista("ajustes");
 })();

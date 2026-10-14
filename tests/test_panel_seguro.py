@@ -36,9 +36,27 @@ class TestDatosIncrustados(unittest.TestCase):
         self.assertNotIn(HOSTIL, html)
 
 
+class TestHistoricoSinHtmlDeDatos(unittest.TestCase):
+    def test_historico_no_interpreta_datos_como_html(self):
+        js = asset("historico.js")
+        self.assertNotIn("innerHTML", js)
+        self.assertNotIn("insertAdjacentHTML", js)
+        self.assertNotIn("document.write", js)
+
+    def test_el_panel_incluye_la_vista_y_la_pestana_y_suspende_la_recarga(self):
+        html = panel.construye({"proveedores": {}})
+        for marca in ('id="vista-historico"', 'id="nav-historico"', "window.cargarHistorico"):
+            self.assertIn(marca, html)
+        self.assertIn("!enAjustes && !enHistorico", asset("ajustes.js"))                # la recarga de cada minuto no echa del histórico
+
+    def test_la_apertura_por_hash_va_despues_de_definir_la_carga(self):
+        js = asset("historico.js")
+        self.assertLess(js.index("window.cargarHistorico = function"), js.index('location.hash === "#historico"'))
+
+
 class TestSinManejadoresEnLinea(unittest.TestCase):
     def test_ningun_asset_usa_atributos_on(self):
-        for nombre in ("app.js", "graficos.js", "plantilla.html"):
+        for nombre in ("app.js", "graficos.js", "plantilla.html", "ajustes.js", "historico.js"):
             self.assertIsNone(re.search(r"""\bon[a-z]+\s*=\s*["']""", asset(nombre)), nombre)
 
     def test_las_acciones_del_html_existen(self):

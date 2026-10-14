@@ -89,6 +89,7 @@ def construye(d):
 {graficos_js}
 {app_js}
 {_leer("ajustes.js")}
+{_leer("historico.js")}
 </script></body></html>"""
     return html
 
