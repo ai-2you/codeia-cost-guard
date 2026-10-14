@@ -192,7 +192,9 @@ class HostilTest(Base):
         self.assertEqual(r["nuevos"], 1)
         self.assertEqual(set(self.turnos()), {"claude:msg_01BUENO000000000"})
         tipos = {t for t, _ in self.anomalias()}
-        self.assertTrue({"lineas_no_json", "lineas_enormes", "ingesta", "fuera_de_rango"} <= tipos, tipos)
+        self.assertTrue({"lineas_no_json", "lineas_enormes", "ingesta"} <= tipos, tipos)
+        detalles = " | ".join(d for _, d in self.anomalias())
+        self.assertIn("turno descartado", detalles)
         self.assertEqual(self.pasada()["nuevos"], 0)                    # relectura estable
 
     def test_json_muy_anidado_no_revienta(self):
@@ -212,6 +214,105 @@ class HostilTest(Base):
         self.pasada()
         t = next(iter(self.turnos().values()))
         self.assertEqual((t["go"], t["hora_utc"]), (300, ingesta.a_epoch_utc("2026-09-27T20:45:08Z")))
+
+
+class RevisionTest(Base):
+    def test_una_linea_con_timestamp_gigante_no_bloquea_el_fichero(self):
+        gigante = json.loads(linea(mid="msg_01GIGANTE0000000"))
+        gigante["timestamp"] = int("9" * 400)
+        self.escribe([json.dumps(gigante).replace('"timestamp": ' + "9" * 400, '"timestamp": ' + "9" * 400), linea(mid="msg_01BUENO000000000")])
+        r = self.pasada()
+        self.assertEqual(r["nuevos"], 1)
+        self.assertEqual(self.pasada()["lineas"], 0)                    # la lectura avanzó: no se repite el fallo cada pasada
+
+    def test_tipos_distintos_en_lineas_del_mismo_mensaje_no_rompen_la_fusion(self):
+        raro = json.loads(linea(out=7))
+        raro["message"]["usage"]["output_tokens"] = "siete"
+        otro = json.loads(linea(out=9))
+        otro["message"]["usage"]["output_tokens"] = None
+        self.escribe([linea(out=5), json.dumps(raro), json.dumps(otro), linea(mid="msg_01BUENO000000000")])
+        r = self.pasada()
+        self.assertEqual(r["nuevos"], 2)
+        self.assertEqual(self.turnos()["claude:msg_01ABCDEFGHIJKLMN"]["go"], 5)
+
+    def test_un_contador_null_cuenta_como_cero_y_no_descarta_el_turno(self):
+        d = json.loads(linea(out=0))
+        d["message"]["usage"]["cache_read_input_tokens"] = None
+        self.escribe([json.dumps(d)])
+        self.assertEqual(self.pasada()["nuevos"], 1)
+        self.assertEqual(next(iter(self.turnos().values()))["cr"], 0)
+
+    def test_reescritura_en_el_mismo_inodo_conservando_el_principio(self):
+        original = "".join(linea(mid=f"msg_01{i:014d}") + "\n" for i in range(30)).encode()
+        self.assertGreater(len(original), 5000)
+        with open(self.ruta, "wb") as f:
+            f.write(original)
+        self.pasada()
+        inodo = os.stat(self.ruta).st_ino
+        nuevas = "".join(linea(mid=f"msg_01NUEVA{i:08d}") + "\n" for i in range(45)).encode()
+        with open(self.ruta, "r+b") as f:                              # mismo inodo, mismos primeros 4 KB, contenido distinto detrás
+            f.seek(0)
+            f.write(original[:4096])
+            f.write(b"\n" + nuevas)
+            f.truncate()
+        self.assertEqual(os.stat(self.ruta).st_ino, inodo)
+        self.pasada()
+        claves = set(self.turnos())
+        faltan = [i for i in range(45) if f"claude:msg_01NUEVA{i:08d}" not in claves]
+        self.assertEqual(faltan, [])
+
+    def test_linea_mayor_que_max_bytes_se_salta_entera_sin_basura(self):
+        self.escribe([linea(mid="msg_01AAAAAAAAAAAAAA"), linea(mid="msg_01ENORME000000000", modelo="m" * 3000), linea(mid="msg_01CCCCCCCCCCCCCC")])
+        for _ in range(60):
+            if self.pasada(max_bytes=700)["completo"]:
+                break
+        self.assertEqual(set(self.turnos()), {"claude:msg_01AAAAAAAAAAAAAA", "claude:msg_01CCCCCCCCCCCCCC"})
+        tipos = {t for t, _ in self.anomalias()}
+        self.assertIn("lineas_enormes", tipos)
+        self.assertNotIn("lineas_no_json", tipos)                       # el resto de la línea no se lee como JSON roto
+
+    def test_proveedor_por_modelo(self):
+        self.escribe([linea(mid="msg_01AAAAAAAAAAAAAA", modelo="claude-opus-5"), linea(mid="msg_01BBBBBBBBBBBBBB", modelo="glm-5.3"),
+                      linea(mid="msg_01CCCCCCCCCCCCCC", modelo="deepseek-v4-flash")])
+        self.pasada()
+        t = self.turnos()
+        self.assertEqual([t[f"claude:msg_01{c * 14}"]["proveedor"] for c in "ABC"], ["anthropic", "", ""])
+
+    def test_anomalias_iguales_de_ficheros_distintos_no_se_funden(self):
+        otro = os.path.join(self.carpeta, "otra.jsonl")
+        for ruta in (self.ruta, otro):
+            with open(ruta, "w") as f:
+                f.write("{roto\n")
+        self.pasada()
+        ingesta.ingerir_fichero(self.con, self.quien, self.esp, otro, "claude", ingesta_claude.extractor, self.home)
+        self.assertEqual(len([a for a in almacen.anomalias(self.con, 50) if a["tipo"] == "lineas_no_json"]), 2)
+
+    @unittest.skipIf(not hasattr(os, "mkfifo"), "sin FIFO")
+    def test_un_fifo_con_extension_jsonl_no_cuelga_la_ingesta(self):
+        fifo = os.path.join(self.carpeta, "tuberia.jsonl")
+        os.mkfifo(fifo)
+        r = ingesta.ingerir_fichero(self.con, self.quien, self.esp, fifo, "claude", ingesta_claude.extractor, self.home)
+        self.assertEqual((r["nuevos"], r["anomalias"]), (0, 1))
+
+    def test_proyecto_sin_usuario_para_nombres_con_guion_y_punto_y_windows(self):
+        f = ingesta_claude.proyecto_de_ruta
+        self.assertEqual(f("/h/.claude/projects/-Users-jean-luc-Proy-app/s.jsonl", usuario=["jean", "luc"]), "Proy/app")
+        self.assertEqual(f("/h/.claude/projects/-Users-ana-garcia-Proy-app/s.jsonl", usuario=["ana", "garcia"]), "Proy/app")
+        self.assertEqual(f("C:\\u\\.claude\\projects\\C--Users-yo-Proy-app\\s.jsonl", usuario=["yo"]), "Proy/app")
+        self.assertEqual(f("/h/.claude/projects/-Users-otro-Proy-app/s.jsonl", usuario=["yo"]), "Proy/app")
+        self.assertEqual(f("/h/.claude/projects/-Users-yo/s.jsonl", usuario=["yo"]), "otros")
+
+    def test_proyecto_largo_o_con_control_no_descarta_el_turno(self):
+        nombre = "-Users-yo-" + "x" * 400 + "%0A" + "-y"
+        carpeta = os.path.join(self.home, ".claude", "projects", nombre)
+        self.assertLessEqual(len(ingesta_claude.proyecto_de_ruta(os.path.join(carpeta, "s.jsonl"), usuario=["yo"])), 200)
+        self.assertNotRegex(ingesta_claude.proyecto_de_ruta(os.path.join(carpeta, "s.jsonl"), usuario=["yo"]), r"[\x00-\x1f]")
+
+    def test_zonas_absurdas_y_enteros_gigantes(self):
+        for v in ("2026-09-27T20:45:08+99:99", "2026-09-27T20:45:08+15:00", "2026-09-27T20:45:08+02:75", int("9" * 400), float("1e400")):
+            self.assertIsNone(ingesta.a_epoch_utc(v), repr(v)[:40])
+        self.assertIsNotNone(ingesta.a_epoch_utc("2026-09-27T20:45:08-12:00"))
+        self.assertIsNotNone(ingesta.a_epoch_utc("2026-09-27T20:45:08+14:00"))
 
 
 class EquivalenciaTest(Base):

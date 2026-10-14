@@ -78,6 +78,7 @@ CREATE TABLE lecturas(
     inodo INTEGER NOT NULL, tam INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
     desplazamiento INTEGER NOT NULL CHECK(desplazamiento >= 0),
     cab_len INTEGER NOT NULL CHECK(cab_len >= 0), hash_cab TEXT NOT NULL CHECK(length(hash_cab) <= 64),
+    cola_len INTEGER NOT NULL CHECK(cola_len >= 0), hash_cola TEXT NOT NULL CHECK(length(hash_cola) <= 64),
     leido_en INTEGER NOT NULL) STRICT;
 CREATE TABLE anomalias(
     id INTEGER PRIMARY KEY,
@@ -334,7 +335,7 @@ def _limpio(v, maximo):
     return _CONTROL.sub("?", v)[:maximo]
 
 
-def _problema(t):
+def problema(t):
     """Texto del problema de un turno entrante (o "" si es válido). No se confía en nada que venga de un log."""
     if not isinstance(t, dict):
         return "no es un objeto"
@@ -385,7 +386,7 @@ def ingerir_turnos(con, quien, espacio_id, fuente_id, turnos, ahora=None):
     try:
         omitidas = [0]
         for t in turnos:
-            motivo = _problema(t)
+            motivo = problema(t)
             if motivo:
                 res["anomalias"] += 1
                 _anomalia(con, ahora, "fuera_de_rango", t.get("clave") if isinstance(t, dict) else "", fuente_id, motivo, omitidas)
@@ -442,19 +443,21 @@ def ingerir_turnos(con, quien, espacio_id, fuente_id, turnos, ahora=None):
 # ---------------------------------------------------------------- lectura incremental de ficheros
 
 def estado_lectura(con, fuente_id):
-    f = con.execute("SELECT inodo, tam, mtime_ns, desplazamiento, cab_len, hash_cab FROM lecturas WHERE fuente_id=?", (fuente_id,)).fetchone()
+    f = con.execute("SELECT inodo, tam, mtime_ns, desplazamiento, cab_len, hash_cab, cola_len, hash_cola FROM lecturas WHERE fuente_id=?", (fuente_id,)).fetchone()
     return dict(f) if f else None
 
 
-def guardar_lectura(con, quien, fuente_id, inodo, tam, mtime_ns, desplazamiento, cab_len, hash_cab, ahora=None):
+def guardar_lectura(con, quien, fuente_id, inodo, tam, mtime_ns, desplazamiento, cab_len, hash_cab, cola_len=0, hash_cola="", ahora=None):
     """Dónde se quedó la lectura de un fichero. Si se pierde, se relee entero: el upsert monótono lo hace inocuo."""
     ahora = int(ahora if ahora is not None else time.time())
     _transaccion_de_escritor(con, quien, ahora)
     try:
-        con.execute("INSERT INTO lecturas(fuente_id, inodo, tam, mtime_ns, desplazamiento, cab_len, hash_cab, leido_en) VALUES(?,?,?,?,?,?,?,?) "
-                    "ON CONFLICT(fuente_id) DO UPDATE SET inodo=excluded.inodo, tam=excluded.tam, mtime_ns=excluded.mtime_ns, "
-                    "desplazamiento=excluded.desplazamiento, cab_len=excluded.cab_len, hash_cab=excluded.hash_cab, leido_en=excluded.leido_en",
-                    (fuente_id, int(inodo), int(tam), int(mtime_ns), int(desplazamiento), int(cab_len), str(hash_cab)[:64], ahora))
+        con.execute("INSERT INTO lecturas(fuente_id, inodo, tam, mtime_ns, desplazamiento, cab_len, hash_cab, cola_len, hash_cola, leido_en) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fuente_id) DO UPDATE SET inodo=excluded.inodo, tam=excluded.tam, "
+                    "mtime_ns=excluded.mtime_ns, desplazamiento=excluded.desplazamiento, cab_len=excluded.cab_len, hash_cab=excluded.hash_cab, "
+                    "cola_len=excluded.cola_len, hash_cola=excluded.hash_cola, leido_en=excluded.leido_en",
+                    (fuente_id, int(inodo), int(tam), int(mtime_ns), int(desplazamiento), int(cab_len), str(hash_cab)[:64],
+                     int(cola_len), str(hash_cola)[:64], ahora))
         con.execute("COMMIT")
     except Exception:
         _rollback(con)
