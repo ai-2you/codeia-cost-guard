@@ -123,6 +123,37 @@ class TestInforme(Base):
         self.assertEqual(r["cinco_h"]["tok"], 135)
 
 
+class TestConcurrencia(Base):
+    def test_cuatro_consultores_mientras_el_escritor_aplica_lotes(self):
+        import threading
+        ahora = time.time()
+        self.completa()
+        parar, tiempos, fallos = threading.Event(), [], []
+
+        def consulta_en_bucle():
+            while not parar.is_set():
+                t = time.monotonic()
+                try:
+                    consulta.consultar()
+                except Exception as e:                      # noqa: BLE001
+                    fallos.append(repr(e))
+                tiempos.append(time.monotonic() - t)
+
+        hilos = [threading.Thread(target=consulta_en_bucle) for _ in range(4)]
+        for h in hilos:
+            h.start()
+        fid = almacen.fuente(self.con, self.q, self.esp, "claude", "lote")
+        for lote in range(8):
+            almacen.ingerir_turnos(self.con, self.q, self.esp, fid,
+                                   [turno(f"claude:m{lote}-{i}", ahora - 10 * i) for i in range(500)])
+        parar.set()
+        for h in hilos:
+            h.join()
+        self.assertEqual(fallos, [])
+        self.assertGreater(len(tiempos), 4)
+        self.assertLess(max(tiempos), 1.0)
+
+
 class TestZonas(Base):
     def dias(self, zona, horas_utc):
         self.mete([turno(f"claude:m{i}", t) for i, t in enumerate(horas_utc)])
