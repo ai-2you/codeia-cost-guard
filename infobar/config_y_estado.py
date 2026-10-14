@@ -5,7 +5,12 @@ config.json lo escriben la barra, el configurador del panel y el CLI: toda escri
 guardar_config(), que bloquea, FUSIONA con lo que haya en disco y reemplaza el fichero de golpe.
 Asi dos escritores a la vez no se pisan y nadie borra claves que no conoce.
 """
-import contextlib, fcntl, glob, json, os, tempfile, time
+import contextlib, glob, json, os, sys, tempfile, time
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 from . import rutas
 
@@ -87,12 +92,25 @@ def _migra_servidores():
 def _bloqueo(ruta):
     """Bloqueo exclusivo entre procesos (barra, panel, CLI) sobre <ruta>.lock."""
     os.makedirs(os.path.dirname(ruta), exist_ok=True)
-    with open(f"{ruta}.lock", "a") as fl:
-        fcntl.flock(fl, fcntl.LOCK_EX)
+    with open(f"{ruta}.lock", "a+b") as fl:
+        if sys.platform == "win32":
+            # msvcrt.locking bloquea un rango de bytes, no el fichero entero: necesita al
+            # menos 1 byte de contenido y la posicion al principio de ese rango.
+            if fl.seek(0, os.SEEK_END) == 0:
+                fl.write(b"0")
+                fl.flush()
+            fl.seek(0)
+            msvcrt.locking(fl.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(fl, fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(fl, fcntl.LOCK_UN)
+            if sys.platform == "win32":
+                fl.seek(0)
+                msvcrt.locking(fl.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(fl, fcntl.LOCK_UN)
 
 
 def _escribe_json(ruta, datos):

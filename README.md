@@ -214,8 +214,15 @@ python3 -m unittest discover tests   # sin dependencias: unittest de la libreria
 
 Cubren `a_local()` (UTC con Z a hora local, verano/invierno, offsets, cadenas rotas), la
 conversion de horas/dias a local en `parsear()`, el doble registro de Codex (mismo segundo,
-un turno) y el lector de pi (reasoning, dedup, claves locales). Se fija `TZ=Europe/Madrid`
-para que los resultados sean deterministas en cualquier maquina.
+un turno) y el lector de pi (reasoning, dedup, claves locales). Se fija la zona a
+Europe/Madrid (via `zoneinfo`, inyectada en `infobar.lectores_logs`, no con `TZ`+`time.tzset()`:
+eso es POSIX y `time.tzset` ni existe en Windows) para que los resultados sean deterministas en
+cualquier maquina.
+
+En Windows, `zoneinfo` no trae la base de datos IANA (al reves que macOS/Linux, que la toman del
+sistema): instala `pip install tzdata` para que esos tests corran; sin el paquete se saltan solos
+con aviso, en vez de fallar. Los tests de permisos (`test_permisos.py`) y el del Llavero se saltan
+en Windows a proposito: NTFS no tiene bits `chmod` y no hay Llavero de macOS.
 
 ## Licencia
 

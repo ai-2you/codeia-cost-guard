@@ -11,6 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from infobar import rutas  # noqa: E402
 
+# en Windows, os.path.expanduser("~") ignora HOME y usa USERPROFILE: sin esto, lectores_logs
+# calcularia FUENTES sobre el ~/.claude y ~/.codex reales (miles de sesiones) al importarse.
+rutas.HOME = HOME_FALSO
 rutas.CONFIG = os.path.join(HOME_FALSO, "config.json")
 rutas.CONFIG_SERVIDORES = os.path.join(HOME_FALSO, "servidores.json")
 rutas.STATE = os.path.join(HOME_FALSO, "state.json")

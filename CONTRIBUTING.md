@@ -29,7 +29,14 @@ venv/bin/pip install pillow pyobjc-framework-Cocoa
 venv/bin/python barra.py --abre
 ```
 
-No hay suite de tests automatizada todavía. La verificación manual mínima antes de un PR:
+Hay suite de tests con `unittest` (sin dependencias, salvo `tzdata` en Windows para los tests de
+zona horaria; ver la sección Tests de `README.md`):
+
+```bash
+python3 -m unittest discover tests
+```
+
+Además, la verificación manual mínima antes de un PR:
 
 ```bash
 python3 analizar_gasto.py          # no debe lanzar excepciones

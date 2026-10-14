@@ -65,7 +65,10 @@ def _lee_con_tope(flujo, tope, destino, excedido):
 
 def _mata(p):
     try:
-        os.killpg(p.pid, signal.SIGKILL)       # el grupo entero: no quedan ssh huerfanos
+        if os.name == "nt":                    # sin grupos de proceso POSIX; ssh.exe no hace fork
+            p.kill()
+        else:
+            os.killpg(p.pid, signal.SIGKILL)   # el grupo entero: no quedan ssh huerfanos
     except OSError:
         pass
 

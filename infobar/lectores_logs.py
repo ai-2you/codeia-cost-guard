@@ -13,6 +13,17 @@ PI_DIR = f"{rutas.HOME}/.pi/agent/sessions"   # sesiones de pi (JSONL); ver pars
 # OpenCode no va aqui: guarda su consumo en SQLite (ver leer_bases()), no en .jsonl/.json;
 # barrer su carpeta solo encontraba auth.json (credenciales) y diffs internos, sin datos de uso.
 
+_ZONA_PRUEBA = None    # los tests la fijan (zoneinfo.ZoneInfo) para resultados deterministas;
+                       # None en produccion usa la zona del sistema, igual que antes.
+
+
+def _posix(ruta):
+    """Normaliza "\\" a "/" para los cortes y "in" de mas abajo. En Windows glob.glob() devuelve
+    rutas MEZCLADAS: el trozo literal del patron (p. ej. "C:/Users/x/.claude/projects") se queda
+    con "/", pero lo que recorre con os.listdir (el resto, tras el primer comodin) sale con "\\".
+    Sin esto, "/projects/" in ruta da False en Windows y el proyecto se pierde."""
+    return (ruta or "").replace("\\", "/")
+
 
 def _hallar_uso(o, p=0):
     """Busca el bloque de uso de un turno. Descarta los acumulados de Codex (llevan total_tokens)."""
@@ -56,7 +67,7 @@ def a_local(ts):
         zona = f"{zona[:3]}:{zona[3:5] or '00'}"
     try:
         dt = datetime.datetime.fromisoformat(base + frac + zona)
-        return dt.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+        return dt.astimezone(_ZONA_PRUEBA).strftime("%Y-%m-%dT%H:%M:%S")
     except (ValueError, OverflowError, OSError):
         return ts
 
@@ -78,8 +89,9 @@ def parsear(ruta):
     horas = collections.defaultdict(lambda: {"tok": 0, "usd": 0.0, "mod": collections.defaultdict(int)})
     vistos = set()
     proy = "codex/otros"
-    if "/projects/" in ruta:
-        trozos = [x for x in urllib.parse.unquote(ruta.split("/projects/")[-1].split("/")[0]).split("-") if x]
+    ruta_p = _posix(ruta)
+    if "/projects/" in ruta_p:
+        trozos = [x for x in urllib.parse.unquote(ruta_p.split("/projects/")[-1].split("/")[0]).split("-") if x]
         proy = "/".join(trozos[-3:]) if trozos else "otros"
     modelo = None
     pend = {}               # Claude Code: id de mensaje -> (ts, modelo, gi, go, cr, cw) de su ultima linea
@@ -150,11 +162,11 @@ def parsear(ruta):
         cuenta(ts, k, gi, go, cr, cw)
     fh.close()
     plan = None
-    if "/.claude/" in ruta:
+    if "/.claude/" in ruta_p:
         plan = "Claude (Max)"
-    elif "/.codex/" in ruta:
+    elif "/.codex/" in ruta_p:
         plan = "OpenAI (Codex)"
-    ccs = plan_ccs(fecha_ini) if "/.claude/" in ruta else None
+    ccs = plan_ccs(fecha_ini) if "/.claude/" in ruta_p else None
     return {"dia": {k: {m: v for m, v in d.items()} for k, d in dia.items()},
             "turnos": dict(turnos), "horas": dict(horas), "proyecto": proy, "plan": ccs or plan}
 
@@ -250,7 +262,7 @@ def parsear_pi(ruta):
         return None
     if not cwd:
         cwd = os.path.basename(os.path.dirname(ruta))     # la carpeta lleva el cwd slugificado
-    trozos = [x for x in (cwd or "").split("/") if x]
+    trozos = [x for x in _posix(cwd).split("/") if x]
     return {"proyecto": f"pi · {'/'.join(trozos[-2:]) or 'sin proyecto'}", "proveedores": provs}
 
 
@@ -327,7 +339,7 @@ def leer_bases():
         return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(v)) if v else ""
 
     def ultimos(partes, n=2):
-        trozos = [x for x in (partes or "").split("/") if x]
+        trozos = [x for x in _posix(partes).split("/") if x]
         return "/".join(trozos[-n:]) if trozos else ""
 
     def _prov_de_sesion(m):
@@ -389,7 +401,7 @@ def leer_bases():
     # Hermes: su cwd es el proyecto (Hermes no es un plan, es la app)
     for db in sorted(glob.glob(f"{rutas.HOME}/.hermes/profiles/*/state.db")):
         try:
-            perfil = db.split("/profiles/")[-1].split("/")[0]
+            perfil = _posix(db).split("/profiles/")[-1].split("/")[0]
             con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
             filas = list(con.execute("select model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, started_at, cwd, billing_provider, billing_base_url from sessions"))
             con.close()

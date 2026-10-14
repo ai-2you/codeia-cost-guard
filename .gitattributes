@@ -1,0 +1,17 @@
+# Repo escrito en macOS; sin esto, un colaborador en Windows con autocrlf distinto al de quien
+# commiteo origina diffs enormes por puro cambio de fin de linea (CRLF/LF), no de contenido.
+# Se normaliza a LF en el repo pase lo que pase en cada maquina/editor.
+* text=auto eol=lf
+
+# install.sh es un script de shell: con CRLF no arranca en macOS/Linux ("/bin/bash^M: no such file").
+install.sh text eol=lf
+
+# Binarios: nunca tocar bytes (ni EOL ni deteccion de "texto" por heuristica).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

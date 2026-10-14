@@ -253,8 +253,19 @@ def crear_servidor(puerto=PUERTO):
             else:
                 self._manda(404, b"no", "text/plain")
 
-        def _cuerpo_json(self):
-            """El JSON del POST, tras pasar la puerta (Host, Content-Type, Origin exacto, tamaño); None si ya respondio."""
+        def _lee_cuerpo(self):
+            """Lee (y asi descarta) el cuerpo declarado por Content-Length antes de poder rechazar la
+            peticion: en Windows, cerrar el socket con bytes sin leer manda RST en vez de FIN, y el
+            cliente ve un ConnectionResetError aunque la respuesta ya se hubiera enviado entera."""
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = 0
+            return self.rfile.read(min(n, MAX_CUERPO + 1)) if n > 0 else b""
+
+        def _cuerpo_json(self, crudo):
+            """El JSON de `crudo` (ya leido por _lee_cuerpo), tras pasar la puerta (Content-Type, Origin
+            exacto, tamaño); None si ya respondio."""
             tipo = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             origen = self.headers.get("Origin") or ""
             if tipo != "application/json" or origen not in {f"http://{h}" for h in self._hosts()}:
@@ -268,18 +279,19 @@ def crear_servidor(puerto=PUERTO):
                 self._json(413, {"ok": False, "error": "cuerpo vacio o demasiado grande"})
                 return None
             try:
-                return json.loads(self.rfile.read(n).decode("utf-8"))
+                return json.loads(crudo.decode("utf-8"))
             except ValueError:
                 self._json(400, {"ok": False, "error": "JSON no valido"})
                 return None
 
         def do_POST(self):
+            crudo = self._lee_cuerpo()
             if not self._host_ok() or not self._sesion_ok():
                 return
             ruta = self.path.split("?")[0]
             if ruta not in ("/guardar", "/clave"):
                 return self._manda(404, b"no", "text/plain")
-            nuevo = self._cuerpo_json()
+            nuevo = self._cuerpo_json(crudo)
             if nuevo is None:
                 return
             try:
