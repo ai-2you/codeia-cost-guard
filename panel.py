@@ -77,7 +77,7 @@ def construye(d):
     cuerpo = _leer("plantilla.html")
     estilos = _leer("estilos.css")
     app_js = _leer("app.js")
-    if False:           # el marcador solo puede estar donde se declara D: en un comentario ejecutaría los datos
+    if app_js.count("__DATOS__") != 1:           # el marcador solo puede estar donde se declara D: en un comentario ejecutaría los datos
         raise RuntimeError("app.js debe contener __DATOS__ exactamente una vez")
     app_js = app_js.replace("__DATOS__", json_para_script(d))
     graficos_js = _leer("graficos.js")

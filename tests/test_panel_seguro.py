@@ -69,6 +69,17 @@ class TestNingunNombreSeEjecuta(unittest.TestCase):
         self.assertIsNone(re.search(r"(?<!\\)/", panel.json_para_script({"a": "*/ x /* </ //"})))
 
 
+class TestSinRestosDeMutacion(unittest.TestCase):
+    def test_el_codigo_no_tiene_condiciones_fijas(self):
+        """Una mutación mal restaurada deja `if False:` o `if True:`: nunca debe llegar a un commit (una vez desactivó una defensa)."""
+        import glob
+        for f in glob.glob(os.path.join(RAIZ, "infobar", "*.py")) + [os.path.join(RAIZ, n) for n in ("panel.py", "costbar.py", "barra.py")]:
+            for i, linea in enumerate(open(f, encoding="utf-8"), 1):
+                self.assertIsNone(re.match(r"\s*(el)?if\s+(False|True)\s*:", linea), f"{f}:{i}: {linea.strip()}")
+                self.assertNotIn(" and False", linea, f"{f}:{i}")
+                self.assertNotIn("or True:", linea, f"{f}:{i}")
+
+
 class TestHistoricoSinHtmlDeDatos(unittest.TestCase):
     def test_historico_no_interpreta_datos_como_html(self):
         js = asset("historico.js")
