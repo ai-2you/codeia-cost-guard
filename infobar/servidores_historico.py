@@ -32,7 +32,7 @@ MOTIVOS_PROTOCOLO = frozenset({"histograma_parcial", "histograma_reloj", "histog
                                "intentos", "root"})
 METRICAS = ("carga_pct", "mem_pct", "disco_pct", "uptime_s", "intentos_24h", "intentos_1h", "baneadas", "sesiones", "sesiones_ajenas",
             "puertos_n", "puertos_expuestos", "servicios_n", "servicios_caidos", "webs_n", "webs_caidas", "web_ms_max",
-            "faltas_proteccion", "reinicio_pendiente", "cert_dias_min")
+            "faltas_proteccion", "reinicio_pendiente", "cert_dias_min", "webs_cert_mal")
 
 ESQUEMA_V1 = f"""
 CREATE TABLE meta(clave TEXT PRIMARY KEY, valor TEXT NOT NULL) STRICT;
@@ -102,6 +102,9 @@ CREATE INDEX eventos_por_clave ON eventos(servidor_id, clave, ts);
 """
 ESQUEMA_V4 = """
 ALTER TABLE muestras ADD COLUMN cert_dias_min INTEGER CHECK(cert_dias_min BETWEEN -36500 AND 36500);
+ALTER TABLE muestras ADD COLUMN webs_cert_mal INTEGER CHECK(webs_cert_mal BETWEEN 0 AND 1000000);
+ALTER TABLE horas_servidor ADD COLUMN cert_dias_min INTEGER CHECK(cert_dias_min BETWEEN -36500 AND 36500);
+ALTER TABLE horas_servidor ADD COLUMN webs_cert_mal_max INTEGER CHECK(webs_cert_mal_max BETWEEN 0 AND 1000000);
 """
 MIGRACIONES = {1: ESQUEMA_V1, 2: ESQUEMA_V2, 3: ESQUEMA_V3, 4: ESQUEMA_V4}       # versión -> script que lleva de la anterior a esa
 
@@ -113,7 +116,8 @@ CLASES_SERVIDORES = {
                    "altas_dia": _I, "altas_dia_num": _I},
     "muestras": {"servidor_id": _I, "ts": _I, "estado": _I, **{c: _I for c in METRICAS}},
     "horas_servidor": {c: _I for c in ("servidor_id", "hora", "n", "errores", "carga_max", "mem_max", "disco_max", "intentos_pico_24h",
-                                       "intentos_pico_1h", "baneadas_max", "sesiones_ajenas_max", "estado_peor", "intentos_exactos", "intentos_completa")},
+                                       "intentos_pico_1h", "baneadas_max", "sesiones_ajenas_max", "estado_peor", "intentos_exactos", "intentos_completa",
+                                       "cert_dias_min", "webs_cert_mal_max")},
     "ips_atacantes": {"servidor_id": _I, "ip": "personal", "primera": _I, "ultima": _I, "max_24h": _I, "horas_vista": _I, "ultima_hora": _I},
     # la etiqueta es el nombre del recurso (puede ser el de un cliente); la clave es un hash con sal y no dice nada sin ella
     "recursos": {**{c: _I for c in ("servidor_id", "tipo", "clave", "primera", "ultima", "activo", "estado", "salud", "reinicios", "inicio",
@@ -233,18 +237,20 @@ def _hora_de(ts):
 
 def _suma_hora(con, sid, ts, m, error):
     hora = _hora_de(ts)
-    v = [m.get(k) if m else None for k in ("carga_pct", "mem_pct", "disco_pct", "intentos_24h", "intentos_1h", "baneadas", "sesiones_ajenas")]
+    v = [m.get(k) if m else None for k in ("carga_pct", "mem_pct", "disco_pct", "intentos_24h", "intentos_1h", "baneadas", "sesiones_ajenas",
+                                          "cert_dias_min", "webs_cert_mal")]
     peor = m["estado"] if m else "error"
+    maximos = ("carga_max", "mem_max", "disco_max", "intentos_pico_24h", "intentos_pico_1h", "baneadas_max", "sesiones_ajenas_max", "webs_cert_mal_max")
     con.execute(
         "INSERT INTO horas_servidor(servidor_id, hora, n, errores, carga_max, mem_max, disco_max, intentos_pico_24h, intentos_pico_1h, "
-        "baneadas_max, sesiones_ajenas_max, estado_peor) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
+        "baneadas_max, sesiones_ajenas_max, cert_dias_min, webs_cert_mal_max, estado_peor) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(servidor_id, hora) DO UPDATE SET n = n + excluded.n, errores = errores + excluded.errores, "
-        + ", ".join(f"{c} = COALESCE(MAX({c}, excluded.{c}), {c}, excluded.{c})"
-                    for c in ("carga_max", "mem_max", "disco_max", "intentos_pico_24h", "intentos_pico_1h", "baneadas_max", "sesiones_ajenas_max"))
+        + ", ".join(f"{c} = COALESCE(MAX({c}, excluded.{c}), {c}, excluded.{c})" for c in maximos)
+        + ", cert_dias_min = COALESCE(MIN(cert_dias_min, excluded.cert_dias_min), cert_dias_min, excluded.cert_dias_min)"
         + ", estado_peor = CASE WHEN (CASE excluded.estado_peor WHEN 'verde' THEN 1 WHEN 'ambar' THEN 2 WHEN 'rojo' THEN 3 WHEN 'error' THEN 4 ELSE 0 END) > "
           "(CASE estado_peor WHEN 'verde' THEN 1 WHEN 'ambar' THEN 2 WHEN 'rojo' THEN 3 WHEN 'error' THEN 4 ELSE 0 END) THEN excluded.estado_peor "
           "ELSE estado_peor END",
-        (sid, hora, 0 if error else 1, 1 if error else 0, *v, peor))
+        (sid, hora, 0 if error else 1, 1 if error else 0, *v[:7], v[7], v[8], peor))
 
 
 def _anota_horas(con, sid, horas):

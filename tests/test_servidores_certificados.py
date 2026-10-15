@@ -2,6 +2,7 @@
 umbrales de la tarjeta y migración de la base."""
 import datetime
 import os
+import shutil
 import socket
 import sqlite3
 import ssl
@@ -58,6 +59,7 @@ class MedirWebConCertificadoRealTest(unittest.TestCase):
         except ImportError:
             self.skipTest("hace falta la librería 'cryptography'")
         self.dir = tempfile.mkdtemp(prefix="cg-cert-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
         ahora = datetime.datetime.now(datetime.timezone.utc)
 
         def clave():
@@ -150,19 +152,67 @@ class MuestraYTarjetaTest(unittest.TestCase):
         with self.assertRaises(sd.FueraDeRango):
             self.muestra([web("https://a", 10 ** 6)])
 
-    def tarjeta(self, dias, **kw):
+    def tarjetas(self, dias, **kw):
         w = web("https://a", dias, **kw)
-        return se.tarjetas({"cpu": {"pct": 1.0, "carga": 0.1, "nucleos": 1}}, [w], None)["webs"]
+        return se.tarjetas({"cpu": {"pct": 1.0, "carga": 0.1, "nucleos": 1}}, [w], None)
 
-    def test_umbrales(self):
-        self.assertEqual(self.tarjeta(60)["estado"], "verde")
-        self.assertEqual(self.tarjeta(14)["estado"], "verde")
-        self.assertEqual(self.tarjeta(13)["estado"], "ambar")
-        self.assertEqual(self.tarjeta(3)["estado"], "ambar")
-        self.assertEqual(self.tarjeta(2)["estado"], "rojo")
-        self.assertEqual(self.tarjeta(None)["estado"], "verde")
-        self.assertEqual(self.tarjeta(60, error="x")["estado"], "rojo")
-        self.assertEqual(self.tarjeta(13)["cert_dias"], 13)
+    def test_umbrales_en_su_propia_tarjeta(self):
+        for dias, esperado in ((60, "verde"), (14, "verde"), (13, "ambar"), (3, "ambar"), (2, "rojo"), (-1, "rojo")):
+            self.assertEqual(self.tarjetas(dias)["certificado"]["estado"], esperado, dias)
+        self.assertNotIn("certificado", self.tarjetas(None))
+        self.assertEqual(self.tarjetas(13)["certificado"]["cert_dias"], 13)
+        for raro in (True, "13", 13.0):                                                   # un booleano o un texto no son días
+            self.assertNotIn("certificado", self.tarjetas(raro), repr(raro))
+
+    def test_certificado_invalido_es_rojo_sin_fecha(self):
+        t = self.tarjetas(None, error="certificado: CERTIFICATE_VERIFY_FAILED", codigo=None, ms=None)
+        self.assertEqual((t["certificado"]["estado"], t["certificado"]["invalido"]), ("rojo", True))
+
+    def test_el_certificado_no_cuenta_para_la_salud_viva_ni_acelera_la_recogida(self):
+        from infobar import servidores_ciclo as ciclo
+        datos = {"cpu": {"pct": 1.0, "carga": 0.1, "nucleos": 1}, "memoria": {"total": 100, "usada": 10}, "disco": {"total": 100, "usado": 10},
+                 "sesiones": [], "puertos": [22], "intentos": {"total": 0, "hora": 0, "top": []}, "servicios": [], "fail2ban": {"instalado": True, "ahora": 0, "total": 0},
+                 "actualizaciones": {"pendientes": 0, "reinicio": False}, "con_root": False}
+        with mock.patch.object(ciclo, "leer", return_value=(datos, "", 0.1)), mock.patch.object(ciclo, "medir_web", return_value=web("https://a", 5)), \
+                mock.patch.object(ciclo, "host_de_ssh", return_value="h"), mock.patch.object(ciclo, "puertos_expuestos", return_value=[]):
+            r = ciclo.recoger_uno({"nombre": "x", "ssh": "u@h", "webs": ["https://a"]}, [])
+        self.assertEqual(r["tarjetas"]["certificado"]["estado"], "ambar")
+        self.assertEqual(r["estado_vivo"], "verde")                                          # el certificado no es salud viva...
+        self.assertIn(r["estado"], ("ambar", "rojo"))                                         # ...pero sí cuenta para el estado global
+        self.assertFalse(ciclo.en_incidencia("x", r, {}, T0))                                # y no mete al servidor en modo incidencia
+
+
+class MuestraDeWebsTest(unittest.TestCase):
+    def test_url_en_mayusculas_cuenta_como_https(self):
+        e = entrada(T0)
+        e["webs"] = [web("HTTPS://a", None, error="certificado: x", codigo=None, ms=None), web("https://b", 50)]
+        m = sd.muestra_de(e)[0]
+        self.assertIsNone(m["cert_dias_min"])
+        self.assertEqual(m["webs_cert_mal"], 1)
+
+    def test_webs_cert_mal_cuenta_solo_errores_de_certificado(self):
+        e = entrada(T0)
+        e["webs"] = [web("https://a", None, error="certificado: caducado"), web("https://b", None, error="timed out"), web("https://c", 9)]
+        self.assertEqual(sd.muestra_de(e)[0]["webs_cert_mal"], 1)
+        e["webs"] = []
+        self.assertIsNone(sd.muestra_de(e)[0]["webs_cert_mal"])
+
+
+class CapturaConSocketFalsoTest(unittest.TestCase):
+    """Sin dependencias: `connect()` guarda el certificado justo tras el handshake, aunque la respuesta cierre el socket."""
+
+    def test_connect_guarda_el_certificado(self):
+        falso = mock.Mock()
+        falso.getpeercert.return_value = {"notAfter": "Jun  1 12:00:00 2030 GMT"}
+        contexto = mock.Mock()
+        contexto.wrap_socket.return_value = falso
+        con = ex._HTTPSFijo.__new__(ex._HTTPSFijo)
+        con.host, con.port, con.timeout, con._ip, con._context = "x.test", 443, 1, "127.0.0.1", contexto
+        with mock.patch.object(ex.socket, "create_connection", return_value=mock.Mock()):
+            con.connect()
+        self.assertEqual(con.certificado, {"notAfter": "Jun  1 12:00:00 2030 GMT"})
+        contexto.wrap_socket.assert_called_once()
+        self.assertEqual(contexto.wrap_socket.call_args.kwargs["server_hostname"], "x.test")
 
 
 class AlmacenCertificadosTest(Base):
@@ -177,11 +227,33 @@ class AlmacenCertificadosTest(Base):
         with self.assertRaises(sqlite3.IntegrityError):
             self.con.execute("INSERT INTO muestras(servidor_id, ts, estado, cert_dias_min) VALUES(?, ?, 'verde', 99999)", ("a" * 12, T0))
 
+    def test_resumen_por_hora_guarda_el_certificado_que_antes_caduca_y_el_peor_recuento(self):
+        for k, (dias, mal) in enumerate(((40, 0), (9, 1), (30, 0))):
+            e = entrada(T0 + 600 * k)
+            e["webs"] = [web("https://a", dias if not mal else None, error="certificado: x" if mal else "")] + [web("https://b", dias + 1)]
+            self.reg(e)
+        self.assertEqual([tuple(r) for r in self.con.execute("SELECT cert_dias_min, webs_cert_mal_max FROM horas_servidor")], [(30, 1)])
+        # el segundo ciclo dejó cert_dias_min en None (una web sin fecha): no baja ni sube el mínimo de la hora
+
+    def test_el_historial_expone_el_certificado_por_hora_y_por_dia(self):
+        import datetime
+        from infobar import servidores_lectura as sl
+        for k, (dias, mal) in enumerate(((40, 0), (12, 0), (3, 1))):
+            e = entrada(T0 + 4000 * k)
+            e["webs"] = [web("https://a", dias if not mal else None, error="certificado: x" if mal else "")]
+            self.reg(e)
+        dia = datetime.date.fromtimestamp(T0)
+        for paso in ("hora", "dia"):
+            r = sl.historia(self.con, "a" * 12, (dia - datetime.timedelta(days=1)).isoformat(), (dia + datetime.timedelta(days=1)).isoformat(), paso)
+            self.assertEqual(min(p["cert_dias_min"] for p in r["puntos"] if p["cert_dias_min"] is not None), 12)
+            self.assertEqual(max(p["webs_cert_mal_max"] or 0 for p in r["puntos"]), 1)
+
     def test_migracion_de_v3_a_v4_conserva_las_muestras(self):
         self.reg(entrada(T0))
         self.con.close()
         c = sqlite3.connect(sh.ruta(), isolation_level=None)
-        c.execute("ALTER TABLE muestras DROP COLUMN cert_dias_min")
+        for tabla, col in (("muestras", "cert_dias_min"), ("muestras", "webs_cert_mal"), ("horas_servidor", "cert_dias_min"), ("horas_servidor", "webs_cert_mal_max")):
+            c.execute(f"ALTER TABLE {tabla} DROP COLUMN {col}")
         c.execute("PRAGMA user_version=3")
         c.close()
         self.con = sh.abrir()

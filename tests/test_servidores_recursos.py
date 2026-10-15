@@ -662,7 +662,8 @@ class AlmacenRecursosTest(BaseRecursos):
         c = sqlite3.connect(sh.ruta(), isolation_level=None)
         c.execute("DROP TABLE recursos")
         c.execute("DROP TABLE eventos")
-        c.execute("ALTER TABLE muestras DROP COLUMN cert_dias_min")
+        for tabla, col in (("muestras", "cert_dias_min"), ("muestras", "webs_cert_mal"), ("horas_servidor", "cert_dias_min"), ("horas_servidor", "webs_cert_mal_max")):
+            c.execute(f"ALTER TABLE {tabla} DROP COLUMN {col}")
         c.execute("PRAGMA user_version=2")
         c.close()
         self.con = sh.abrir()

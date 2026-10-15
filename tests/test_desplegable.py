@@ -55,6 +55,20 @@ class PaginasTest(unittest.TestCase):
         self.assertIn("&lt;img src=x", h)
         self.assertIn("default-src 'none'", h)          # CSP: ni scripts ni red
 
+    def test_la_tarjeta_de_webs_rotula_el_certificado(self):
+        def pagina(webs):
+            e = _entrada("servidor-dokploy-con-root.txt")
+            e["webs"] = webs
+            e["tarjetas"] = servidores_estado.tarjetas(e["datos"], webs, [22, 80, 443])
+            return desplegable_servidores.documento("tienda", {"servidores": {"tienda": e}}, self.CFG, False)
+        w = {"url": "https://tienda.example.com", "ms": 120, "codigo": 200, "error": "", "cert_dias": 25}
+        self.assertIn("certificado: 25 d", pagina([w]))
+        malo = dict(w, cert_dias=None, ms=None, codigo=None, error="certificado: CERTIFICATE_VERIFY_FAILED")
+        h = pagina([w, malo])
+        self.assertIn("certificado inválido", h)
+        self.assertNotIn("certificado: 25 d", h)                      # con una web inválida no se presume la fecha de otra
+        self.assertNotIn("certificado:", pagina([dict(w, cert_dias=None)]))
+
     def test_estados_de_la_pestana(self):
         vacio = desplegable_servidores.documento("", {}, [], False)
         self.assertIn("alta-servidor.sh", vacio)

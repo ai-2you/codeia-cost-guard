@@ -109,6 +109,14 @@ bases de datos (3.3b) · cambiar `sudoers` o permisos de los servidores más all
   (la hoja, no la cadena). Un certificado ya caducado no completa el handshake: `error` lo dice y `cert_dias` queda None; **`cert_min` en `muestras` se guarda solo si todas las webs dieron fecha** y el estado
   «certificado inválido» sigue en `webs_caidas`, de modo que un caducado no desaparece del mínimo. Columna nullable en `muestras` (migración con la 2).
 
+### Cambios tras la revisión de código de E3 (`../reports/revision-codigo-fase3-3a-e3-261015.md`)
+- El certificado tiene **su propia tarjeta** (`certificado`): ámbar con menos de 14 días, rojo con menos de 3 o con un certificado inválido. Cuenta para el estado global pero **no para la
+  salud viva**, de modo que un certificado a punto de caducar no mete al servidor en modo incidencia (sus días cambian una vez al día).
+- La causa no se pierde: `muestras.webs_cert_mal` cuenta las webs con error de certificado, y `horas_servidor` guarda `cert_dias_min` (el que antes caduca en la hora) y
+  `webs_cert_mal_max`; `historia()` los expone por hora y por día, de modo que el resumen permanente conserva más de los 14 días del crudo. Migración 4 ampliada (aún sin desplegar).
+- Límite conocido: si la lectura SSH falla no se anota la muestra de métricas (solo una fila de estado), así que ese ciclo no guarda caducidad aunque las webs se hayan medido.
+- El rótulo del desplegable dice «certificado inválido» si alguna web lo tiene, y no presume la fecha de otra.
+
 ## Despliegue y reversibilidad
 - Los dos scripts se reinstalan con `alta-servidor.sh` (idempotente). El Mac sigue aceptando v1 por sección; revertir = reinstalar los de la rama anterior. Nada exige reinstalar todos a la vez.
 - Antes de cada migración: copia previa sin IPs ni etiquetas. `VERSION_ESQUEMA` sube a 2 (E1) y a 3 (E2).

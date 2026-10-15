@@ -55,7 +55,7 @@ def en_incidencia(nombre, previo, ui, ahora):
         return False                    # rojo por clave rechazada: no es un ataque, no se insiste
     manual = (ui.get("incidencia") or {}).get(nombre) or 0
     # solo la salud VIVA (carga, webs, servicios, intentos, puertos) acelera la recogida: lo que
-    # falta de proteccion o un reinicio pendiente no cambia por mirarlo cada minuto
+    # falta de proteccion, un reinicio pendiente o un certificado a punto de caducar no cambia por mirarlo cada minuto
     return ahora < manual or (previo or {}).get("estado_vivo") in ("ambar", "rojo")
 
 
@@ -82,10 +82,10 @@ def recoger_uno(servidor, conocidas):
     t = tarjetas(datos, webs, expuestos, conocidas, permitidos)
     checks = bastionado(datos, expuestos, permitidos)
     res = resumen_bastionado(checks)
-    vivo = peor(*[x["estado"] for k, x in t.items() if k != "mantenimiento"])
+    vivo = peor(*[x["estado"] for k, x in t.items() if k not in ("mantenimiento", "certificado")])
     return {"error": "", "duracion": dur, "datos": datos, "webs": webs, "expuestos": expuestos, "host": host,
             "tarjetas": t, "bastionado": checks, "bastionado_resumen": res,
-            "estado_vivo": vivo, "estado": peor(vivo, _estado_t(t, "mantenimiento"), res["estado"])}
+            "estado_vivo": vivo, "estado": peor(vivo, _estado_t(t, "mantenimiento"), _estado_t(t, "certificado"), res["estado"])}
 
 
 def _estado_t(t, clave):

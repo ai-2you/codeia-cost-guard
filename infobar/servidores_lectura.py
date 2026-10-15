@@ -16,7 +16,8 @@ _RANGO = sh._RANGO
 def _fila(r):
     return {k: r[k] for k in CAMPOS} | {"estado": r["estado_peor"], "intentos_exactos": r["intentos_exactos"],
                                         "intentos_completa": None if r["intentos_exactos"] is None else bool(r["intentos_completa"]),
-                                        "horas_exactas": 0 if r["intentos_exactos"] is None else 1}
+                                        "horas_exactas": 0 if r["intentos_exactos"] is None else 1,
+                                        "cert_dias_min": r["cert_dias_min"], "webs_cert_mal_max": r["webs_cert_mal_max"]}
 
 
 def _junta(a, b):
@@ -32,6 +33,10 @@ def _junta(a, b):
     ca, cb = a["intentos_completa"], b["intentos_completa"]
     out["intentos_completa"] = cb if ca is None else (ca if cb is None else ca and cb)
     out["horas_exactas"] = a["horas_exactas"] + b["horas_exactas"]
+    c, d = a["cert_dias_min"], b["cert_dias_min"]
+    out["cert_dias_min"] = d if c is None else (c if d is None else min(c, d))        # el certificado que antes caduca en el periodo
+    c, d = a["webs_cert_mal_max"], b["webs_cert_mal_max"]
+    out["webs_cert_mal_max"] = d if c is None else (c if d is None else max(c, d))
     return out
 
 
