@@ -135,6 +135,10 @@ def normalizar(nuevo, actual, servidores_actuales=None):
         if not isinstance(nuevo["avisos_presupuesto"], bool):
             raise ValueError("avisos_presupuesto: tiene que ser verdadero o falso")
         out["avisos_presupuesto"] = nuevo["avisos_presupuesto"]
+    if "avisos_servidores" in nuevo:
+        if not isinstance(nuevo["avisos_servidores"], bool):
+            raise ValueError("avisos_servidores: tiene que ser verdadero o falso")
+        out["avisos_servidores"] = nuevo["avisos_servidores"]
     for k in PASAN:
         if k in nuevo:
             out[k] = nuevo[k]

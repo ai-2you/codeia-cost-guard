@@ -187,6 +187,7 @@
       h("div", {class: "campos"}, f("Nombre", "nombre", "produccion"), f("SSH (usuario@IP)", "ssh", "infobar@203.0.113.10"), f("SSH admin (botón Terminal)", "ssh_admin", "tuusuario@203.0.113.10"),
         f("Puerto SSH", "puerto", "22"), h("label", {}, "Panel", panel), f("URL del panel (https)", "panel_url", "https://dokploy.example.com"),
         h("label", {}, "Webs a medir (una por línea, máx. 100)", h("textarea", {rows: 3, "data-s": i, "data-k": "webs"}, (s.webs || []).join("\n")))),
+      h("label", {style: "display:block;margin-top:6px"}, h("input", {type: "checkbox", "data-s": i, "data-k": "avisos", checked: s.avisos !== false}), " Avisar con una notificación de este servidor (apágalo, por ejemplo, en los de clientes)"),
       detectorWebs(s),
       k ? k.fila : (s.panel ? h("p", {class: "ayuda"}, "Guarda los ajustes y aquí podrás poner la clave del panel.") : null));
   }
@@ -275,6 +276,7 @@
       seccionPresupuestos(c),
       h("section", {}, h("h2", {}, "Servidores (VPS)"),
         h("p", {class: "ayuda"}, "Monitor por SSH de solo lectura: CPU, memoria, disco, servicios, contenedores, intentos de acceso, fail2ban, puertos abiertos y protección. Para dar de alta uno nuevo usa el formulario de abajo (o, a mano, ", h("code", {}, "infobar/remoto/alta-servidor.sh usuario@IP"), "). Guía: docs/guia-servidores.md."),
+        h("label", {style: "display:block;margin:6px 0"}, h("input", {type: "checkbox", id: "g-avisos-srv", checked: c.avisos_servidores !== false}), " Avisar con una notificación cuando un servidor tenga un problema (web caída, sin conexión, disco casi lleno, certificado a punto de caducar, contenedor en bucle)"),
         ...(c.servidores || []).map(servidor),
         altaGuiada(),
         h("div", {class: "prov-cab", style: "margin-top:8px"}, h("button", {onclick: () => { leer(); (c.servidores = c.servidores || []).push({nombre: "", ssh: ""}); $("vista-ajustes").replaceChildren(...pinta()); }}, "Añadir servidor")),
@@ -319,12 +321,14 @@
       });
     }
     if ($("g-avisos")) c.avisos_presupuesto = $("g-avisos").checked;
+    if ($("g-avisos-srv")) c.avisos_servidores = $("g-avisos-srv").checked;
     if (c.servidores) {
       raiz.querySelectorAll("[data-servidor]").forEach(div => {
         const s = c.servidores[+div.dataset.servidor]; if (!s) return;
         div.querySelectorAll("[data-k]").forEach(i => {
           const k = i.dataset.k, v = i.value.trim();
-          if (k === "webs") { const w = v.split("\n").map(x => x.trim()).filter(Boolean); if (w.length) s.webs = w; else delete s.webs; }
+          if (k === "avisos") { if (i.checked) delete s.avisos; else s.avisos = false; }
+          else if (k === "webs") { const w = v.split("\n").map(x => x.trim()).filter(Boolean); if (w.length) s.webs = w; else delete s.webs; }
           else if (k === "puerto") { if (v) s.puerto = parseInt(v, 10) || v; else delete s.puerto; }
           else if (v || k === "nombre" || k === "ssh") s[k] = v; else delete s[k];
         });

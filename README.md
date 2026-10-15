@@ -323,6 +323,13 @@ Si un servidor no tiene registro de sshd en el journal, la tarjeta dice «sin da
   caída o a «mal», y con uno para volver a «ok»; la primera vez que se ve una web solo fija la línea base. Eventos `cayo`, `volvio` y `degradada` (hasta 20 por web y día).
   La disponibilidad observada se cuenta por hora (90 días) y por día (permanente) con los sondeos del Mac: los huecos con el Mac apagado son «sin dato», no caída.
   Dejar de vigilar una web, quitar el servidor o `--olvidar-recursos` borran su dominio, sus eventos y sus resúmenes al instante.
+- **Avisos de servidores** (notificación del sistema en macOS; en Windows quedan solo en pantalla): web que no responde correctamente desde hace más de 5 minutos, servidor
+  sin conexión (ventana de 15 minutos o 3 intervalos), acceso SSH rechazado (clave retirada o huella cambiada), contenedor en bucle de reinicios, disco al 90 % o más durante
+  10 minutos y certificado con 7 días o menos. Cada situación avisa **una vez**, se rearma cuando lleva un rato resuelta y tiene un enfriamiento mínimo; con varias a la
+  vez sale una sola notificación. El texto nunca lleva nombres, dominios ni IPs. Lo que ya ocurre al arrancar no avisa; un Mac que acaba de despertar o sin red no
+  inventa avisos. Se apagan todos con `avisos_servidores: false` y los de un servidor con `avisos: false` (casilla en Ajustes): lo que pase mientras están apagados no
+  cae al reactivarlos. Estado en `avisos_servidores.json`. Límites conocidos: no hay previsión de disco ni aviso de «copia sin hacer» (necesita la API del panel), el disco es
+  el que mide el script, y un servidor comprometido puede mentir a la baja.
 - Cada servidor tiene un `id` propio en `servidores.json`: renombrarlo no parte su historial; quitarlo y volver a añadirlo con el mismo nombre
   empieza uno nuevo.
 - Lectura: `GET /servidores/historia` (lista, o serie por día/hora con `servidor`, `desde`, `hasta`, `paso`) y `GET /servidores/ips?servidor=…&con_ips=1`

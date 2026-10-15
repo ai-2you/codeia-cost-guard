@@ -7,7 +7,7 @@ cambia imagenes. Una excepcion se registra y el bucle sigue: el hilo no muere.
 """
 import threading, time, traceback
 
-from . import cuota_nan, desplegable_png, permisos, presupuestos, servidores_ciclo, webs_sondeo
+from . import cuota_nan, desplegable_png, permisos, presupuestos, servidores_avisos, servidores_ciclo, webs_sondeo
 from . import servidores_registro, sombra
 from .agregacion import ULTIMOS, informe
 from .config_y_estado import cfg, log
@@ -28,6 +28,7 @@ class Trabajador(threading.Thread):
         self._pedidos = set()
         self.conjunto = None
         self.historial = servidores_registro.Historial()      # único escritor de servidores.sqlite
+        self.avisos_servidores = servidores_avisos.Vigilante()      # único escritor de avisos_servidores.json
         self._evento.set()                  # la primera vuelta, nada mas arrancar
         self._webs = threading.Thread(target=self._sondea_webs, name="infobar-webs", daemon=True)
 
@@ -51,7 +52,7 @@ class Trabajador(threading.Thread):
     def run(self):
         self._webs.start()
         r, ultimo_scan, ultimo_render, gen_srv = None, 0.0, 0.0, None
-        migrado, ultima_purga = False, 0.0
+        migrado, ultima_purga, ultimo_aviso = False, 0.0, 0.0
         while True:
             self._evento.wait(timeout=DESPIERTA)
             self._evento.clear()
@@ -100,6 +101,9 @@ class Trabajador(threading.Thread):
                             ultimo_render = ahora
             except Exception:
                 log("trabajador: " + traceback.format_exc()[-600:])
+            if time.time() - ultimo_aviso >= 60:        # aparte y tras pintar: un fallo al pintar no deja sin avisos ni la notificación (osascript, hasta 5 s) retrasa el repintado
+                ultimo_aviso = time.time()
+                self.avisos_servidores.vigilar()
             if "refrescar" in pedidos:
                 self.entregar("refresco_hecho", None)       # quita la ruedita del boton
 
