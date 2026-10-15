@@ -16,7 +16,7 @@ import hmac, json, os, secrets, subprocess, sys, threading, time
 
 from urllib.parse import parse_qs, urlsplit
 
-from . import ajustes, claves, exportacion, exportacion_csv, historico, presupuestos, rutas, servidores_alta, servidores_api, servidores_webs
+from . import ajustes, claves, exportacion, exportacion_csv, guia_web, historico, presupuestos, rutas, servidores_alta, servidores_api, servidores_webs
 from . import cuota_nan
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_con_revision, guardar_config, log, olvidar_cache
@@ -112,12 +112,15 @@ def _sesion_valida(srv, cabecera_cookie):
     return ok
 
 
-def url_panel():
-    """URL para abrir el panel en el navegador, con un ticket de un solo uso si el servidor esta en marcha."""
+DESTINOS = {"guia": "/guia"}          # a dónde puede mandar `entrar` tras canjear el ticket (lista cerrada)
+
+
+def url_panel(destino=None):
+    """URL para abrir el panel en el navegador, con un ticket de un solo uso si el servidor esta en marcha. `destino`: una clave de DESTINOS."""
     base = f"http://127.0.0.1:{PUERTO}/"
     if _SERVIDOR:
-        return f"{base}entrar?t={nuevo_ticket(_SERVIDOR[0])}"
-    return base
+        return f"{base}entrar?t={nuevo_ticket(_SERVIDOR[0])}" + (f"&ir={destino}" if destino in DESTINOS else "")
+    return base + (DESTINOS[destino].lstrip("/") if destino in DESTINOS else "")
 
 
 def es_secreto(nombre):
@@ -233,13 +236,15 @@ def crear_servidor(puerto=PUERTO):
 
         def _entrar(self):
             from urllib.parse import parse_qs, urlsplit
-            t = (parse_qs(urlsplit(self.path).query).get("t") or [""])[0]
+            q = parse_qs(urlsplit(self.path).query)
+            t = (q.get("t") or [""])[0]
+            destino = DESTINOS.get((q.get("ir") or [""])[0], "/")
             sid = _canjea(self.server, t)
             if not sid:
                 return self._manda(401, "Ticket no válido o caducado: abre el panel desde la barra de menús.".encode(),
                                    "text/plain; charset=utf-8")
             self._extra = [("Set-Cookie", f"{nombre_cookie(self.server)}={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESION_VIDA_S}"),
-                           ("Location", "/")]
+                           ("Location", destino)]
             self._manda(302, b"", "text/plain")
 
         def _historico(self, como_csv=False):
@@ -307,6 +312,13 @@ def crear_servidor(puerto=PUERTO):
                     self._manda(200, html, "text/html; charset=utf-8", csp=csp)
                 except Exception as e:
                     self._manda(500, str(e).encode(), "text/plain")
+            elif ruta == "/guia":
+                try:
+                    with open(f"{base}/GUIA.md", encoding="utf-8") as f:
+                        md = f.read(200_000)
+                except OSError:
+                    return self._manda(404, "No encuentro GUIA.md.".encode(), "text/plain; charset=utf-8")
+                self._manda(200, guia_web.documento(md).encode("utf-8"), "text/html; charset=utf-8", csp=guia_web.CSP)
             elif ruta == "/historico":
                 self._historico()
             elif ruta == "/historico.csv":

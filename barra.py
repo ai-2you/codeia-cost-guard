@@ -335,7 +335,7 @@ class Barra(NSObject):
         if texto == "Abrir panel":
             self.abre(costbar.url_panel())
         elif texto == "Guía":
-            subprocess.Popen(["open", os.path.join(AQUI, "GUIA.md")])
+            self.abre(costbar.url_panel("guia"))
         elif s and texto == "Panel" and s.get("panel_url"):
             self.abre(s["panel_url"], publica=True)
         elif s and texto == "Abrir" and s.get("webs"):
