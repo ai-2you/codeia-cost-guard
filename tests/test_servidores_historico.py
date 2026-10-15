@@ -48,6 +48,9 @@ class Base(unittest.TestCase):
     def uno(self, sql, *a):
         return self.con.execute(sql, a).fetchone()[0]
 
+    def descartes(self, motivo):
+        return int(self.uno("SELECT COALESCE(SUM(CAST(valor AS INTEGER)), 0) FROM meta WHERE clave LIKE ?", f"descartes:{motivo}:%"))
+
 
 class EsquemaTest(Base):
     def test_clases_cubren_todas_las_columnas(self):
@@ -177,7 +180,7 @@ class RegistroTest(Base):
         top = [("10.0.0.1", 9), ("::ffff:10.0.0.1", 9), ("fe80::1%x", 9), ("1.2.3", 9), (B, 4)]
         self.reg(entrada(T0, top), conocidas=[B])
         self.assertEqual(self.uno("SELECT COUNT(*) FROM ips_atacantes"), 0)
-        self.assertEqual(self.uno("SELECT valor FROM meta WHERE clave='descartes:ips_propias'"), "1")
+        self.assertEqual(self.descartes("ips_propias"), 1)
 
     def test_guardar_ips_falso_no_guarda(self):
         self.reg(entrada(T0, [(A, 5)]), guardar_ips=False)
@@ -192,12 +195,13 @@ class RegistroTest(Base):
         e["datos"]["intentos"]["hora"] = 1e308
         self.assertIsNone(self.reg(e))
         self.assertEqual(self.uno("SELECT COUNT(*) FROM muestras"), 0)
-        self.assertEqual(self.uno("SELECT valor FROM meta WHERE clave='descartes:fuera_de_rango'"), "2")
+        self.assertEqual(self.descartes("fuera_de_rango"), 2)
 
     def test_reloj_del_futuro_o_absurdo_se_descarta(self):
         self.assertIsNone(self.reg(entrada(T0 + 10 ** 7), ahora=T0))
         self.assertIsNone(self.reg(entrada(5), ahora=T0))
         self.assertEqual(self.uno("SELECT COUNT(*) FROM muestras"), 0)
+        self.assertEqual(self.descartes("reloj"), 2)
 
     def test_topes_altas_dia_y_expulsion(self):
         gen = (f"{a}.{b}.{c}.1" for a in range(11, 200) for b in range(0, 255) for c in range(0, 255))
@@ -207,7 +211,7 @@ class RegistroTest(Base):
                 self.reg(entrada(T0 + 300 * i, [(next(gen), 1) for _ in range(4)]))
         self.assertEqual(self.uno("SELECT COUNT(*) FROM ips_atacantes"), 6)       # tope diario
         self.assertTrue(self.uno("SELECT COUNT(*) FROM ips_atacantes WHERE ip=?", A))      # la persistente sigue
-        self.assertGreater(int(self.uno("SELECT valor FROM meta WHERE clave='descartes:ips_sobre_tope_diario'")), 0)
+        self.assertGreater(self.descartes("ips_sobre_tope_diario"), 0)
         with mock.patch.object(sh, "MAX_ALTAS_DIA", 10 ** 6), mock.patch.object(sh, "MAX_IPS", 3):
             self.reg(entrada(T0 + 86400 + 300, [(B, 5)]))
         self.assertLessEqual(self.uno("SELECT COUNT(*) FROM ips_atacantes"), 4)
@@ -305,6 +309,102 @@ class RetencionTest(Base):
                 self.assertNotIn(B.encode(), crudo, suf)
 
 
+class RelojTest(Base):
+    def test_reloj_que_estuvo_adelantado_no_bloquea_ni_alarga_la_retencion(self):
+        futuro = T0 + 365 * 86400
+        self.reg(entrada(futuro, [(A, 5)]), ahora=futuro)                 # el Mac creía estar un año por delante
+        # el reloj se corrige: lo nuevo se registra y lo marcado en el futuro se trae al presente
+        self.assertEqual(self.reg(entrada(T0 + 100, [(B, 5)]), ahora=T0 + 100), "buena")
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM muestras WHERE estado!='error'"), 2)
+        sh.mantener(self.con, {SID: {"guardar_ips": True, "retencion_dias": 7}}, T0 + 200)
+        self.assertEqual(self.uno("SELECT MAX(ultima) FROM ips_atacantes"), T0 + 200)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM horas_servidor WHERE hora > ?", T0 + 4000), 0)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM muestras WHERE ts > ?", T0 + 4000), 0)
+        sh.mantener(self.con, {SID: {"guardar_ips": True, "retencion_dias": 7}}, T0 + 8 * 86400)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM ips_atacantes"), 0)       # envejece y caduca como cualquier otra
+
+    def test_lectura_acota_ultima_al_presente_y_no_sirve_ips_fuera_de_politica(self):
+        futuro = T0 + 365 * 86400
+        self.reg(entrada(futuro, [(A, 5)]), ahora=futuro)
+        r = sl.ips(self.con, SID, T0, 7)
+        self.assertEqual(r[0]["ultima"], T0)
+        self.assertEqual(r[0]["caduca_en"], T0 + 7 * 86400)
+        self.assertEqual(sl.ips(self.con, SID, T0, 7, guardar_ips=False), [])
+        sh.mantener(self.con, {}, T0 + 10)                                      # servidor quitado de la config
+        self.assertEqual(sl.ips(self.con, SID, T0 + 10, 7), [])
+
+    def test_intento_fallido_en_el_futuro_no_se_anota_ni_bloquea_los_siguientes(self):
+        futuro = T0 + 10 ** 7
+        self.assertIsNone(self.reg(entrada(T0, error="x", estado="rojo", intento_en=futuro), ahora=T0))
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM muestras"), 0)
+        self.assertEqual(self.reg(entrada(T0, error="x", estado="rojo", intento_en=T0 + 600), ahora=T0 + 600), "estado")
+
+
+class MantenimientoTest(Base):
+    def test_retencion_propia_de_cada_servidor(self):
+        otro = {"id": "c" * 12, "nombre": "Otro"}
+        self.reg(entrada(T0, [(A, 5)]))
+        sh.registrar(self.con, otro, entrada(T0, [(B, 5)]), T0)
+        sh.mantener(self.con, {SID: {"guardar_ips": True, "retencion_dias": 7}, "c" * 12: {"guardar_ips": True, "retencion_dias": 60}}, T0 + 10 * 86400)
+        self.assertEqual([r[0] for r in self.con.execute("SELECT ip FROM ips_atacantes")], [B])
+
+    def test_borrar_servidor_consolida_el_wal_tambien_con_lector_abierto_despues(self):
+        self.reg(entrada(T0, [(A, 5)]))
+        self.assertEqual(sh.borrar_servidor(self.con, SID), 1)
+        with open(sh.ruta() + "-wal", "rb") as f:
+            self.assertNotIn(A.encode(), f.read())
+
+    def test_copia_previa_no_deja_ips_ni_temporales_y_caduca(self):
+        self.reg(entrada(T0, [(A, 5)]))
+        carpeta = os.path.join(self.dir, "copias")
+        destino = sh.copia_sin_ips(self.con, carpeta)
+        with open(destino, "rb") as f:
+            self.assertNotIn(A.encode(), f.read())
+        self.assertFalse([f for f in os.listdir(carpeta) if f.endswith(".tmp")])
+        if os.name != "nt":
+            self.assertEqual(os.stat(destino).st_mode & 0o777, 0o600)
+        huerfano = os.path.join(carpeta, "servidores.sqlite.premigracion.20200101-000000.tmp")
+        open(huerfano, "wb").close()
+        sh.caducar_copias(carpeta)
+        self.assertFalse(os.path.exists(huerfano))
+        self.assertTrue(os.path.exists(destino))
+        sh.caducar_copias(carpeta, ahora=time_now() + 31 * 86400)
+        self.assertFalse(os.path.exists(destino))                         # caduca sola, sin esperar a otra migración
+
+    def test_mantener_caduca_las_copias_previas(self):
+        carpeta = os.path.join(self.dir, "copias")
+        os.makedirs(carpeta)
+        vieja = os.path.join(carpeta, "servidores.sqlite.premigracion.20200101-000000")
+        open(vieja, "wb").close()
+        sh.mantener(self.con, {}, int(time_now()) + 40 * 86400)
+        self.assertFalse(os.path.exists(vieja))
+
+    def test_intento_fallido_repetido_no_se_anota_dos_veces(self):
+        e = entrada(T0, error="x", estado="rojo", intento_en=T0 + 600)
+        self.assertEqual(self.reg(e, ahora=T0 + 600), "estado")
+        self.assertIsNone(self.reg(e, ahora=T0 + 900))
+        self.assertEqual(self.uno("SELECT errores FROM horas_servidor"), 1)
+
+    def test_copia_fallida_no_deja_temporal(self):
+        carpeta = os.path.join(self.dir, "copias")
+        real = sqlite3.connect
+        with mock.patch.object(sh.sqlite3, "connect", side_effect=lambda *a, **k: (_ for _ in ()).throw(OSError("x")) if a and a[0] == ":memory:" else real(*a, **k)):
+            with self.assertRaises(OSError):
+                sh.copia_sin_ips(self.con, carpeta)
+        self.assertFalse([f for f in os.listdir(carpeta) if f.endswith(".tmp")])
+
+    def test_checkout_de_desarrollo_no_escribe_en_los_datos_reales(self):
+        from infobar import plataforma
+        with mock.patch.object(rutas, "DATOS", plataforma.dir_datos()), mock.patch.object(plataforma, "es_checkout_de_desarrollo", return_value=True):
+            with self.assertRaises(sh.ErrorAlmacen):
+                sh.abrir()
+
+
+def time_now():
+    import time
+    return time.time()
+
+
 class LecturaTest(Base):
     def test_historia_por_dia_y_hora_y_limites(self):
         for i in range(5):
@@ -327,6 +427,16 @@ class LecturaTest(Base):
             sl.historia(self.con, SID, d, d, "mes")
         with self.assertRaises(sh.SinDatos):
             sl.historia(self.con, "z" * 12, d, d, "dia")
+
+    def test_peor_estado_y_picos_al_agrupar_por_dia(self):
+        import time
+        self.reg(entrada(T0, estado="verde"))
+        e = entrada(T0 + 3600 * 2, estado="rojo")
+        e["datos"]["intentos"]["total"] = 777
+        self.reg(e)
+        d = time.strftime("%Y-%m-%d", time.localtime(T0))
+        pts = sl.historia(self.con, SID, d, d, "dia")["puntos"]
+        self.assertEqual((pts[0]["estado"], pts[0]["intentos_pico_24h"], pts[0]["n"]), ("rojo", 777, 2))
 
 
 if __name__ == "__main__":

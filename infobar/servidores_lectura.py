@@ -61,10 +61,15 @@ def historia(con, servidor_id, desde, hasta, paso="dia"):
             "puntos": [{"t": e, **p} for e, p in puntos.values()]}
 
 
-def ips(con, servidor_id, ahora, retencion_dias=None):
-    """IPs de intentos de acceso de un servidor dentro de plazo (la caducidad se calcula con la retención vigente)."""
-    ret = sh.retencion_dias(retencion_dias) * 86400
-    filas = con.execute("SELECT ip, primera, ultima, max_24h, horas_vista FROM ips_atacantes WHERE servidor_id=? AND ultima >= ? "
-                        "ORDER BY ultima DESC, ip LIMIT ?", (servidor_id, int(ahora) - ret, MAX_IPS_SALIDA)).fetchall()
+def ips(con, servidor_id, ahora, retencion_dias=None, guardar_ips=True):
+    """IPs de intentos de acceso de un servidor dentro de plazo (la caducidad se calcula con la retención vigente, no se almacena).
+    Con `guardar_ips` apagado, o para un servidor retirado de la config, no sale ninguna aunque sigan en la base hasta el próximo mantenimiento."""
+    if not guardar_ips:
+        return []
+    ret, ahora = sh.retencion_dias(retencion_dias) * 86400, int(ahora)
+    filas = con.execute(
+        "SELECT i.ip, MIN(i.primera, ?1) AS primera, MIN(i.ultima, ?1) AS ultima, i.max_24h, i.horas_vista FROM ips_atacantes i "
+        "JOIN servidores s ON s.id = i.servidor_id WHERE i.servidor_id=?2 AND s.retirado_en IS NULL AND MIN(i.ultima, ?1) >= ?1 - ?3 "
+        "ORDER BY 3 DESC, i.ip LIMIT ?4", (ahora, servidor_id, ret, MAX_IPS_SALIDA)).fetchall()
     return [{"ip": r["ip"], "primera": r["primera"], "ultima": r["ultima"], "max_24h": r["max_24h"], "horas_vista": r["horas_vista"],
              "caduca_en": r["ultima"] + ret} for r in filas]

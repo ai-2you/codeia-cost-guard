@@ -11,7 +11,7 @@ import os
 import sqlite3
 import time
 
-from . import rutas
+from . import plataforma, rutas
 from .servidores_datos import ESTADOS, FueraDeRango, conjunto_canonico, muestra_de
 from .sqlite_base import ErrorAlmacen, abrir_base, _rollback, _sentencias, _tablas, _version
 
@@ -118,37 +118,46 @@ def _migrar(con, ruta_base):
 
 
 def copia_sin_ips(con, directorio):
-    """Copia consistente previa a migrar, SIN las IPs (son datos personales y las copias no se purgan por retención): se hace con la
-    API de backup a un temporal 0600, se vacía `ips_atacantes` y se compacta con `secure_delete`. Caduca a los 30 días."""
+    """Copia consistente previa a migrar, SIN las IPs (son datos personales y las copias no se purgan por retención). La copia se hace en
+    MEMORIA, se vacía `ips_atacantes` y solo entonces se escribe a disco (`VACUUM INTO` sobre un fichero 0600 ya creado): ningún byte de IP
+    toca el disco ni siquiera en un temporal. Caduca a los 30 días (ver `caducar_copias`)."""
     os.makedirs(directorio, mode=0o700, exist_ok=True)
+    caducar_copias(directorio)
     base = f"servidores.sqlite.premigracion.{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}"
     destino, n = os.path.join(directorio, base), 0
     while os.path.exists(destino):
         n += 1
         destino = os.path.join(directorio, f"{base}-{n}")
     tmp = destino + ".tmp"
-    os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-    out = sqlite3.connect(tmp, isolation_level=None)
+    memoria = sqlite3.connect(":memory:", isolation_level=None)
     try:
-        con.backup(out)
-        out.execute("PRAGMA secure_delete=ON")
-        out.execute("PRAGMA temp_store=MEMORY")
-        if "ips_atacantes" in _tablas(out):
-            out.execute("DELETE FROM ips_atacantes")
-        out.execute("VACUUM")
-        out.execute("PRAGMA journal_mode=DELETE")
+        con.backup(memoria)
+        if "ips_atacantes" in _tablas(memoria):
+            memoria.execute("DELETE FROM ips_atacantes")
+        os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        memoria.execute("VACUUM INTO ?", (tmp,))
     except Exception:
-        out.close()
-        os.remove(tmp)
+        if os.path.exists(tmp):
+            os.remove(tmp)
         raise
-    out.close()
+    finally:
+        memoria.close()
     os.replace(tmp, destino)
-    limite = time.time() - COPIA_VIDA_S
+    return destino
+
+
+def caducar_copias(directorio, ahora=None):
+    """Borra las copias previas a migrar de más de 30 días y los temporales huérfanos de una copia interrumpida."""
+    if not os.path.isdir(directorio):
+        return
+    limite = (ahora or time.time()) - COPIA_VIDA_S
     for f in os.listdir(directorio):
         p = os.path.join(directorio, f)
-        if f.startswith("servidores.sqlite.premigracion.") and os.path.getmtime(p) < limite:
-            os.remove(p)
-    return destino
+        if f.startswith("servidores.sqlite.premigracion.") and (os.path.getmtime(p) < limite or f.endswith(".tmp")):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
 
 
 def abrir(solo_lectura=False, espera_ms=2000):
@@ -156,6 +165,9 @@ def abrir(solo_lectura=False, espera_ms=2000):
     p = ruta()
     if solo_lectura and not os.path.exists(p):
         raise SinDatos()
+    if (not solo_lectura and plataforma.es_checkout_de_desarrollo(rutas.RAIZ)
+            and os.path.abspath(rutas.DATOS) == os.path.abspath(plataforma.dir_datos())):
+        raise ErrorAlmacen("un checkout de desarrollo no escribe en los datos reales: define COSTGUARD_DATOS")
     return abrir_base(p, _migrar, solo_lectura, espera_ms)
 
 
@@ -169,9 +181,10 @@ def retencion_dias(valor=None):
         return defecto
 
 
-def _descartar(con, motivo):
+def _descartar(con, motivo, sid):
+    """Cuenta lo descartado por motivo y servidor (acotado: motivos fijos x servidores de la config)."""
     con.execute("INSERT INTO meta(clave, valor) VALUES(?, '1') ON CONFLICT(clave) DO UPDATE SET valor = CAST(valor AS INTEGER) + 1",
-                (f"descartes:{motivo}",))
+                (f"descartes:{motivo}:{sid}",))
 
 
 def _alta_servidor(con, sid, nombre, ahora):
@@ -212,13 +225,13 @@ def _anota_ips(con, sid, top, ts, ahora_dia):
                         "WHERE servidor_id=? AND ip=?", (ts, n, hora, hora, sid, ip))
             continue
         if altas >= MAX_ALTAS_DIA:
-            _descartar(con, "ips_sobre_tope_diario")
+            _descartar(con, "ips_sobre_tope_diario", sid)
             continue
         total = con.execute("SELECT COUNT(*) FROM ips_atacantes WHERE servidor_id=?", (sid,)).fetchone()[0]
         if total >= MAX_IPS:                              # expulsa las menos relevantes: vistas en menos horas y, a igualdad, las más antiguas
             con.execute("DELETE FROM ips_atacantes WHERE servidor_id=? AND ip IN (SELECT ip FROM ips_atacantes WHERE servidor_id=? "
                         "ORDER BY horas_vista, ultima LIMIT ?)", (sid, sid, total - MAX_IPS + 1))
-            _descartar(con, "ips_expulsadas")
+            _descartar(con, "ips_expulsadas", sid)
         con.execute("INSERT INTO ips_atacantes(servidor_id, ip, primera, ultima, max_24h, horas_vista, ultima_hora) VALUES(?,?,?,?,?,1,?)",
                     (sid, ip, ts, ts, n, hora))
         altas += 1
@@ -237,7 +250,8 @@ def registrar(con, servidor, entrada, ahora, conocidas=(), guardar_ips=True):
     try:
         _alta_servidor(con, sid, nombre, ahora)
         ok_en, intento_en = int(entrada.get("ok_en") or 0), int(entrada.get("intento_en") or 0)
-        previo = con.execute("SELECT ok_en, intento_en, muestra_en FROM servidores WHERE id=?", (sid,)).fetchone()
+        previo = [v if v <= ahora else 0 for v in con.execute("SELECT ok_en, intento_en, muestra_en FROM servidores WHERE id=?", (sid,)).fetchone()]
+        # (un reloj que estuvo adelantado dejó marcas en el futuro: no pueden bloquear el registro de lo que llega ahora)
         resultado = None
         if entrada.get("error") or not ok_en or ok_en <= previo[0]:
             # intento fallido (o lectura ya anotada): una fila de estado, sin métricas ni IPs
@@ -247,14 +261,14 @@ def registrar(con, servidor, entrada, ahora, conocidas=(), guardar_ips=True):
                     con.execute("UPDATE servidores SET muestra_en=? WHERE id=?", (intento_en, sid))
                 _suma_hora(con, sid, intento_en, None, True)
                 resultado = "estado"
-            con.execute("UPDATE servidores SET intento_en=MAX(intento_en, ?) WHERE id=?", (intento_en, sid))
+            con.execute("UPDATE servidores SET intento_en=? WHERE id=?", (max(intento_en, previo[1]), sid))
         elif not TS_MIN <= ok_en <= ahora + 60:
-            _descartar(con, "reloj")
+            _descartar(con, "reloj", sid)
         else:
             try:
                 m, top, propios = muestra_de(entrada, conocidas)
             except FueraDeRango:
-                _descartar(con, "fuera_de_rango")
+                _descartar(con, "fuera_de_rango", sid)
                 m = None
             if m is not None:
                 if ok_en - previo[2] >= FRANJA_S:
@@ -264,11 +278,11 @@ def registrar(con, servidor, entrada, ahora, conocidas=(), guardar_ips=True):
                     con.execute("UPDATE servidores SET muestra_en=? WHERE id=?", (ok_en, sid))
                 _suma_hora(con, sid, ok_en, m, False)
                 if propios:
-                    _descartar(con, "ips_propias")
+                    _descartar(con, "ips_propias", sid)
                 if guardar_ips and top:
                     _anota_ips(con, sid, top, ok_en, ok_en // 86400)
                 resultado = "buena"
-            con.execute("UPDATE servidores SET ok_en=MAX(ok_en, ?), intento_en=MAX(intento_en, ?) WHERE id=?", (ok_en, intento_en, sid))
+            con.execute("UPDATE servidores SET ok_en=?, intento_en=? WHERE id=?", (max(ok_en, previo[0]), max(intento_en, previo[1]), sid))
         con.execute("COMMIT")
         return resultado
     except Exception:
@@ -295,7 +309,14 @@ def mantener(con, politicas, ahora, vacuum=True):
             else:
                 limite = ahora - retencion_dias(p.get("retencion_dias")) * 86400
                 ips += con.execute("DELETE FROM ips_atacantes WHERE servidor_id=? AND ultima < ?", (sid, limite)).rowcount
+        # marcas de un reloj que estuvo adelantado: se traen al presente para que envejezcan y caduquen como cualquier otra
+        con.execute("UPDATE ips_atacantes SET ultima=?, ultima_hora=MIN(ultima_hora, ?), primera=MIN(primera, ?) WHERE ultima > ? ",
+                    (ahora, _hora_de(ahora), ahora, ahora + 3600))
+        con.execute("DELETE FROM muestras WHERE ts > ?", (ahora + 3600,))
+        con.execute("DELETE FROM horas_servidor WHERE hora > ?", (ahora + 3600,))
+        con.execute("UPDATE servidores SET ok_en=MIN(ok_en, ?), intento_en=MIN(intento_en, ?), muestra_en=MIN(muestra_en, ?)", (ahora, ahora, ahora))
         crudo = con.execute("DELETE FROM muestras WHERE ts < ?", (ahora - RETENCION_CRUDO_S,)).rowcount
+        caducar_copias(os.path.join(os.path.dirname(ruta()), "copias"), ahora)
         con.execute("INSERT INTO meta(clave, valor) VALUES('mantenido_en', ?) ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor", (str(ahora),))
         con.execute("COMMIT")
     except Exception:
@@ -337,5 +358,5 @@ def olvidar_ips(con, servidor_id=None, ahora=None):
 def borrar_servidor(con, servidor_id):
     """Quita un servidor y todo su historial (olvido total, a petición)."""
     n = con.execute("DELETE FROM servidores WHERE id=?", (servidor_id,)).rowcount
-    con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    _consolidar(con, int(time.time()), False)
     return n

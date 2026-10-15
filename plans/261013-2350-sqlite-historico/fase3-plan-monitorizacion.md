@@ -173,3 +173,10 @@ verificada (`tmutil` en macOS, «no indexar» en Windows), poda de IPs de la cac
 `Trabajador(pintar=False)` y `costbar.py --demonio`. **Almacén de secretos (2026-10-15):** `claves.py` con dos almacenes (Llavero de macOS y Administrador de credenciales de Windows por ctypes,
 persistencia solo de este equipo), validación común de la clave y 9 tests con un advapi32 simulado. **Pendiente de 3.0:** probar todo en un
 Windows real con `--autoprueba-copias` ampliada; el código de Windows está probado con simulaciones, no en el sistema.
+
+**Avance de 3.1 (2026-10-15):** hecho y probado en macOS: núcleo SQLite compartido (`sqlite_base.py`), `servidores.sqlite` con muestras, horas e IPs
+(`servidores_datos/historico/lectura/registro/api`), ids estables, políticas `guardar_ips`/`retencion_ips_dias` global y por servidor, registrador
+fuera del cerrojo con retroceso, `--olvidar-ips` y endpoints de lectura. Revisión de código independiente en `reports/revision-codigo-servidores-historico-261015.md`:
+tres altas y las medias M2–M5 corregidas con tests (marcas de un reloj adelantado, lectura con la política completa, copia previa en memoria sin IPs en
+disco). **No se hace en 3.1:** M1 (el recorte a 4 IPs ocurre en el script; se resuelve con `recoger.sh` v2 en la 3.3a), las tablas de recursos/eventos
+(migración numerada en la 3.3a) y la pantalla y los ajustes de UI para `guardar_ips` (3.6).

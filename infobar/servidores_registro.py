@@ -58,6 +58,7 @@ class Historial:
         self.reloj = reloj
         self.no_antes = 0
         self.ultimo_mantenimiento = 0
+        self.firma = None
 
     def preparar(self):
         """Da id a los servidores guardados que aún no lo tienen (instalaciones anteriores). Nunca lanza."""
@@ -75,6 +76,9 @@ class Historial:
         conf = cfg()
         pol = politicas(conf)
         conocidas = conf.get("ips_conocidas") or []
+        firma = repr(sorted(pol.items()))
+        if firma != self.firma:                 # quitar un servidor o apagar guardar_ips borra las IPs ya, no a la próxima hora
+            self.firma, self.ultimo_mantenimiento = firma, 0
         try:
             con = sh.abrir()
             try:

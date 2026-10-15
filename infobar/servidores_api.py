@@ -43,10 +43,10 @@ def atiende(ruta, q, ahora=None):
             if "servidor" not in g:
                 return 200, {"disponible": True, "servidores": sl.servidores(con)}
             return 200, {"disponible": True, **sl.historia(con, g["servidor"], g.get("desde"), g.get("hasta"), g.get("paso", "dia"))}
-        ret = (politicas().get(g["servidor"]) or {}).get("retencion_dias")
-        lista = sl.ips(con, g["servidor"], ahora, ret)
+        pol = politicas().get(g["servidor"])          # un servidor que ya no está en la config no devuelve IPs
+        lista = sl.ips(con, g["servidor"], ahora, (pol or {}).get("retencion_dias"), bool(pol and pol["guardar_ips"]))
         auditar_ips(g["servidor"], len(lista), "panel")
-        return 200, {"disponible": True, "ips": lista, "retencion_dias": sh.retencion_dias(ret)}
+        return 200, {"disponible": True, "ips": lista, "retencion_dias": sh.retencion_dias((pol or {}).get("retencion_dias"))}
     except historico.ErrorHistorico as e:
         return 400, {"error": str(e)}
     except sh.SinDatos:

@@ -277,6 +277,25 @@ avisa en vez de enseñar otras).
   una hoja de cálculo los tomaría por fórmula. Solo contiene periodo, grupo, tokens y turnos: nunca hosts, IPs ni rutas completas.
   Cada exportación deja una línea en `exportaciones.log` (cuándo, rango y número de filas; nunca contenido).
 
+### Historial de servidores
+
+La barra guarda en `servidores.sqlite` (misma carpeta de datos, permisos 0600, **no entra en las copias cifradas**) cómo ha ido cada servidor:
+una muestra por lectura buena (carga, memoria, disco, intentos de acceso, puertos, servicios, webs y protección; 14 días) y un resumen por hora
+que no caduca. Los intentos de acceso son **picos de la ventana de 24 h que mide el servidor**, no sumas, y las IPs son «según ese servidor»:
+un proceso local sin privilegios puede falsearlas mientras `recoger.sh` no filtre por campos de confianza.
+
+- **IPs de quien intenta entrar** (dato personal): solo las públicas; nunca las de `ips_conocidas`. Se olvidan a los **90 días** desde la última
+  vez que se vieron (`retencion_ips_dias`, de 7 a 90, global o por servidor), al quitar el servidor de la lista y al poner `guardar_ips: false`
+  (global o por servidor; recomendado en servidores de clientes). La caducidad no se almacena: se calcula con la retención vigente, de modo que
+  bajarla oculta al instante lo que ya sobraba.
+- `python3 costbar.py --olvidar-ips [--servidor NOMBRE]` las borra ya, compacta la base y deja una línea en `servidores_ips.log` con el número
+  de IPs borradas (nunca las IPs). Con `--servidor` sin nombre no hace nada.
+- Cada servidor tiene un `id` propio en `servidores.json`: renombrarlo no parte su historial; quitarlo y volver a añadirlo con el mismo nombre
+  empieza uno nuevo.
+- Lectura: `GET /servidores/historia` (lista, o serie por día/hora con `servidor`, `desde`, `hasta`, `paso`) y `GET /servidores/ips?servidor=…&con_ips=1`
+  (cada consulta deja su recuento en `servidores_ips.log`). La pantalla llega con la pestaña Servidores.
+- Si la base falla, el ciclo de servidores sigue como siempre y se reintenta una hora después. Un downgrade de versión congela la purga.
+
 ## Tests
 
 ```bash
