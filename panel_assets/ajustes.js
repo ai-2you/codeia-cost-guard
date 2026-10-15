@@ -178,7 +178,8 @@
 
   function servidor(s, i){
     const info = (A.paneles || {})[s.nombre];
-    const f = (et, k, ph) => h("label", {}, et, h("input", {class: "ancho", "data-s": i, "data-k": k, value: s[k] == null ? "" : s[k], placeholder: ph || ""}));
+    const f = (et, k, ph) => h("label", {}, et, h("input", {class: "ancho", "data-s": i, "data-k": k, value: s[k] == null ? "" : s[k], placeholder: ph || "",
+      oninput: k === "nombre" ? ev => { const t = ev.target.closest(".prov").querySelector(".prov-cab strong"); if (t) t.textContent = ev.target.value.trim() || "(sin nombre)"; } : null}));
     const panel = h("select", {"data-s": i, "data-k": "panel"}, ...[["", "ninguno"], ["dokploy", "Dokploy"], ["easypanel", "Easypanel"]].map(([v, t]) => h("option", {value: v, selected: (s.panel || "") === v}, t)));
     const k = info ? filaClave({cuenta: info.cuenta}, info, "API key del panel (solo lectura)") : null;
     return h("div", {class: "prov", "data-servidor": i},
@@ -345,6 +346,7 @@
   function guardar(){
     const m = $("msg-guardar"); leer();
     const envio = Object.assign({}, A.config);
+    if (envio.servidores) envio.servidores = envio.servidores.filter(s => s.id || s.nombre || s.ssh);       // una ficha nueva que se dejó en blanco no bloquea el guardado
     if (envio.presupuestos) envio.presupuestos = envio.presupuestos.filter(f => f.nombre && f.tokens > 0);
     post("/guardar", envio).then(j => {
       if (j.conflicto) {      // un alta (u otra pestaña) cambió la lista de servidores: se trae la actual y se conserva todo lo demás que se haya escrito
