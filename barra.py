@@ -236,6 +236,7 @@ class Barra(NSObject):
         vc.setView_(fondo)
         self.pop.setContentViewController_(vc)
         self.vista = vista
+        self.fondo = fondo
 
     @objc.python_method
     def pestana(self):
@@ -282,6 +283,9 @@ class Barra(NSObject):
         w, h = ancho * self.escala, alto * self.escala
         self.alto_mostrado = alto
         self.pop.setContentSize_(NSMakeSize(w, h))
+        # el fondo primero: si el popover lo redimensiona despues de fijar la vista, el autoajuste la estira
+        # (la primera vez, de 600 pt a la altura real, la imagen salia con las letras enormes)
+        self.fondo.setFrameSize_(NSMakeSize(w, h))
         self.vista.setFrameSize_(NSMakeSize(w, h))
         self.vista.setImage_(nsimagen(ruta, w, h))
         log(f"desplegable {self.pestana()} {tema}: {w:.0f}x{h:.0f} pt (escala {self.escala:.2f})")
