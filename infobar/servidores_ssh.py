@@ -122,7 +122,9 @@ def analizar(texto):
     `n <lineas>` y `fin <lineas> <0>` coherentes entre sí y con lo recibido; se devuelven sin el marco. `completa` = el script llegó a `### fin`."""
     out, vistas, invalidas = {}, set(), set()
     actual, fin_visto, cortada, tras_fin = None, False, False, False
-    for linea in (texto or "").splitlines():
+    # solo «\n» separa líneas: str.splitlines() corta también en U+0085, U+2028, \x1c-\x1e..., que {{json}} de Docker no escapa, y un nombre o una
+    # etiqueta hostil reabriría secciones en el Mac sin que el servidor emitiera ningún salto de línea
+    for linea in (texto or "").split("\n"):
         if linea.startswith("### "):
             nombre = linea[4:].strip()
             if nombre == "fin":
@@ -147,6 +149,9 @@ def analizar(texto):
                 actual = nombre
         elif actual:
             out[actual].append(linea.rstrip())
+    for cuerpo in out.values():                    # split("\n") deja una línea vacía final cuando el texto termina en salto de línea
+        while cuerpo and not cuerpo[-1]:
+            cuerpo.pop()
     if "version_root" in out:
         # recoger-root v2 declara en «fin_root» si se saltó o agotó el tiempo de algún comando; entonces sus secciones no valen
         # (vacías no son «0 bloqueadas»: son «sin dato») y la lectura sigue como si no hubiera root

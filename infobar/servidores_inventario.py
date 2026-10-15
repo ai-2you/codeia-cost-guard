@@ -8,11 +8,12 @@ import calendar
 import json
 import re
 
-NOMBRE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
+NOMBRE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")      # las tareas de Swarm (servicio.slot.tarea) y los proyectos de Compose pasan de 63
 ESTADOS_DOCKER = frozenset({"created", "running", "paused", "restarting", "removing", "exited", "dead"})
 SALUD = frozenset({"healthy", "unhealthy", "starting", "none"})
 POLITICAS = frozenset({"", "no", "always", "on-failure", "unless-stopped"})
 _ENTERO = re.compile(r"[0-9]{1,12}")
+_ENTERO_CON_SIGNO = re.compile(r"-?[0-9]{1,6}")
 _FECHA = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]{1,9})?Z")
 MAX_CONTENEDORES = 200
 CAMPOS = 12                 # «c» + 11 valores
@@ -63,7 +64,8 @@ def _contenedor(linea):
     nombre = _texto(p[1])
     nombre = nombre[1:] if isinstance(nombre, str) and nombre.startswith("/") else nombre       # docker inspect da «/nombre»
     estado, salud, politica = _texto(p[2]), _texto(p[3]), _texto(p[7])
-    reinicios, salida = _entero(p[4], 100_000_000), _entero(p[5], 65535)
+    reinicios = _entero(p[4], 100_000_000)
+    salida = int(p[5]) if _ENTERO_CON_SIGNO.fullmatch(p[5]) and -65535 <= int(p[5]) <= 65535 else None       # algunos fallos de arranque dan -1
     proyecto, servicio, swarm, tarea = _etiqueta(p[8]), _etiqueta(p[9]), _etiqueta(p[10]), _etiqueta(p[11])
     inicio = _texto(p[6])
     if (not isinstance(nombre, str) or not NOMBRE.fullmatch(nombre) or estado not in ESTADOS_DOCKER or salud not in SALUD
@@ -77,7 +79,9 @@ def _contenedor(linea):
 def interpretar(lineas, marcada):
     """dict del inventario, o None si la sección no vale (sin marco validado no hay inventario).
 
-    {"fuente", "total", "pedidos", "truncado", "contenedores": [...], "descartados", "completo"}; `completo` = todas las líneas pedidas llegaron y valen."""
+    {"fuente", "ahora_srv", "total", "pedidos", "truncado", "contenedores": [...], "descartados", "completo"}.
+    `completo` = llegaron todas las líneas que el servidor dijo enviar. Un contenedor cuya línea no vale se descarta SOLO él (y se cuenta): la lectura sigue
+    sirviendo para lo demás, pero con `descartados` > 0 no se concluye que nada haya desaparecido (el descartado podría ser cualquiera)."""
     if not marcada:
         return None
     kv, filas, repetido = {}, [], False
@@ -86,14 +90,15 @@ def interpretar(lineas, marcada):
             filas.append(l)
             continue
         p = l.split()
-        if len(p) == 2 and p[0] in ("fuente", "total", "pedidos", "truncado"):
+        if len(p) == 2 and p[0] in ("fuente", "total", "pedidos", "truncado", "ahora"):
             repetido = repetido or p[0] in kv
             kv[p[0]] = p[1]
         elif l:
             return None                                # una línea que no es del protocolo: el servidor no cumple
     if repetido or kv.get("fuente") not in ("docker", "ninguna", "error"):
         return None
-    inv = {"fuente": kv["fuente"], "total": 0, "pedidos": 0, "truncado": False, "contenedores": [], "descartados": 0, "completo": False}
+    inv = {"fuente": kv["fuente"], "ahora_srv": _entero(kv.get("ahora", ""), 4_102_444_800), "total": 0, "pedidos": 0, "truncado": False,
+           "contenedores": [], "descartados": 0, "completo": False}
     if kv["fuente"] != "docker":
         return inv
     total, pedidos = _entero(kv.get("total", ""), 10_000_000), _entero(kv.get("pedidos", ""), MAX_CONTENEDORES)
@@ -108,7 +113,7 @@ def interpretar(lineas, marcada):
         vistos.add(c["nombre"])
         inv["contenedores"].append(c)
     inv.update(total=total, pedidos=pedidos, truncado=kv["truncado"] == "si" or total > pedidos, descartados=descartados)
-    inv["completo"] = descartados == 0 and len(filas) == pedidos
+    inv["completo"] = len(filas) == pedidos
     return inv
 
 
@@ -148,3 +153,9 @@ def recursos(inv, swarm=None):
             r["salud"] = c["salud"]
     # servicios Swarm que están en `service ls` pero de los que no llegó ningún contenedor (réplicas a 0 o inventario recortado): no se inventan
     return out
+
+
+def reclama_swarm(inv):
+    """True si algún contenedor se declara tarea de Swarm (etiquetas de servicio y de tarea y nombre con su forma)."""
+    return any(c["swarm"] and c["tarea"] and c["nombre"].startswith(c["swarm"] + ".") and c["nombre"].endswith("." + c["tarea"])
+               for c in (inv or {}).get("contenedores") or [])

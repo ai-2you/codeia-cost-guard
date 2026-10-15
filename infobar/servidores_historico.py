@@ -81,7 +81,7 @@ CREATE TABLE recursos(
     servidor_id TEXT NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
     tipo TEXT NOT NULL CHECK(tipo IN ('contenedor','compose','servicio')),
     clave TEXT NOT NULL CHECK(length(clave) = 32),
-    etiqueta TEXT NOT NULL CHECK(length(etiqueta) BETWEEN 1 AND 130),
+    etiqueta TEXT NOT NULL CHECK(length(etiqueta) BETWEEN 1 AND 130 AND etiqueta NOT GLOB '*[^A-Za-z0-9_./-]*'),
     primera INTEGER NOT NULL, ultima INTEGER NOT NULL,
     activo INTEGER NOT NULL CHECK(activo IN (0, 1)),
     estado TEXT NOT NULL CHECK(estado IN ('ok','terminado','otro','reiniciando','mal','caido')),
@@ -336,7 +336,14 @@ def registrar(con, servidor, entrada, ahora, conocidas=(), guardar_ips=True):
                         _descartar(con, "histograma", sid)
                 inv = d.get("inventario")
                 if inv is not None:
-                    servidores_recursos.anota_inventario(con, sid, inv, d.get("swarm_servicios"), ok_en)
+                    con.execute("SAVEPOINT inventario")            # un fallo del inventario no deshace la muestra ya anotada
+                    try:
+                        servidores_recursos.anota_inventario(con, sid, inv, d.get("swarm_servicios"), ok_en)
+                        con.execute("RELEASE inventario")
+                    except Exception:
+                        con.execute("ROLLBACK TO inventario")
+                        con.execute("RELEASE inventario")
+                        _descartar(con, "inventario_error", sid)
                 if propios:
                     _descartar(con, "ips_propias", sid)
                 if guardar_ips and top:

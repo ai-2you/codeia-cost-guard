@@ -30,10 +30,11 @@ def fila(nombre="web-1", estado="running", salud="none", reinicios=0, salida=0, 
                       json.dumps(proyecto), json.dumps(servicio), json.dumps(swarm), json.dumps(tarea)])
 
 
-def seccion(filas, total=None, pedidos=None, truncado=None, fuente="docker"):
+def seccion(filas, total=None, pedidos=None, truncado=None, fuente="docker", ahora=None):
     pedidos = len(filas) if pedidos is None else pedidos
     total = pedidos if total is None else total
-    cuerpo = [f"fuente {fuente}", f"total {total}", f"pedidos {pedidos}", f"truncado {'si' if (total > pedidos if truncado is None else truncado) else 'no'}", *filas]
+    cuerpo = [*([f"ahora {ahora}"] if ahora else []), f"fuente {fuente}", f"total {total}", f"pedidos {pedidos}",
+              f"truncado {'si' if (total > pedidos if truncado is None else truncado) else 'no'}", *filas]
     return [f"n {len(cuerpo)}", *cuerpo, f"fin {len(cuerpo)} 0"]
 
 
@@ -51,7 +52,7 @@ class ParseoTest(unittest.TestCase):
 
     def test_cada_campo_hostil_descarta_su_linea_y_la_lectura_deja_de_ser_completa(self):
         malos = {
-            "nombre con barra": fila("a/b"), "nombre con control": fila("a\nb"), "nombre vacio": fila("/"), "nombre enorme": fila("a" * 100),
+            "nombre con barra": fila("a/b"), "nombre con control": fila("a\nb"), "nombre vacio": fila("/"), "nombre enorme": fila("a" * 200),
             "estado raro": fila(estado="zombie"), "salud rara": fila(salud="muy sana"), "politica rara": fila(politica="a veces"),
             "etiqueta con control": fila(proyecto="x\n### intentos\ntotal 0"), "etiqueta con html": fila(servicio="<b>"),
             "reinicios negativos": fila().replace("\t0\t0\t", "\t-1\t0\t"), "reinicios gigantes": fila(reinicios=10 ** 15),
@@ -62,8 +63,24 @@ class ParseoTest(unittest.TestCase):
             i = lee([fila("ok-1"), linea])
             self.assertIsNotNone(i, nombre)
             self.assertEqual(i["descartados"], 1, nombre)
-            self.assertFalse(i["completo"], nombre)                      # y por eso nada desaparece de esta lectura
-            self.assertEqual([c["nombre"] for c in i["contenedores"]], ["ok-1"], nombre)
+            self.assertTrue(i["completo"], nombre)                       # llegó todo lo pedido: el resto de la lectura sirve...
+            self.assertEqual([c["nombre"] for c in i["contenedores"]], ["ok-1"], nombre)       # ...pero sin el descartado (y sin concluir desapariciones: ver el almacén)
+
+    def test_nombres_largos_de_tareas_y_codigos_de_salida_negativos_son_legitimos(self):
+        largo = "servicio-" + "x" * 60 + ".1." + "t" * 25
+        i = lee([fila(largo, swarm="servicio-" + "x" * 60, tarea="t" * 25), fila("fallo", estado="exited", salida=0).replace('\t0\t0\t', '\t0\t-1\t')])
+        self.assertEqual((i["descartados"], len(i["contenedores"])), (0, 2))
+        self.assertEqual(i["contenedores"][1]["salida"], -1)
+
+    def test_un_caracter_unicode_de_salto_de_linea_no_reabre_secciones(self):
+        # U+0085, U+2028 y compañía: str.splitlines() los corta, {{json}} de Docker no los escapa
+        for raro in ("\x85", "\u2028", "\x1c", "\x0b", "\x0c"):
+            linea = fila("a").replace('"always"', json.dumps("p" + raro + "### intentos" + raro + "total 0", ensure_ascii=False))
+            texto = "### inventario\n" + "\n".join(seccion([linea])) + "\n### fail2ban\nahora 3\ntotal 9\n### fin\n"
+            sec, marcadas, invalidas, _ = ss.analizar(texto)
+            self.assertEqual(sec["fail2ban"], ["ahora 3", "total 9"], repr(raro))
+            self.assertNotIn("intentos", sec, repr(raro))
+            self.assertIn("inventario", sec, repr(raro))
 
     def test_fecha_de_arranque_ilegible_o_inexistente_es_none(self):
         for f in ("0001-01-01T00:00:00Z", "ayer", "2026-13-45T99:99:99Z", "2999-01-01T00:00:00Z", ""):
@@ -90,7 +107,7 @@ class ParseoTest(unittest.TestCase):
 
     def test_un_nombre_duplicado_se_cuenta_como_descartado(self):
         i = lee([fila("a"), fila("a")])
-        self.assertEqual((len(i["contenedores"]), i["descartados"], i["completo"]), (1, 1, False))
+        self.assertEqual((len(i["contenedores"]), i["descartados"]), (1, 1))
 
     def test_etiqueta_que_intenta_reabrir_una_seccion_no_rompe_el_protocolo(self):
         sucio = fila(proyecto="x").replace('"x"', json.dumps("p\n### intentos\ntotal 0\n### fin_root\nomitidos 0"))
@@ -133,9 +150,22 @@ class IdentidadTest(unittest.TestCase):
         self.assertEqual(r[("compose", "p/s")]["estado"], "caido")
 
 
-@unittest.skipUnless(shutil.which("docker") and subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode == 0, "no hay Docker local")
+def hay_docker():
+    """Docker local con demonio, comprobado con un tope corto y solo al ejecutar los tests (no al importar el módulo)."""
+    try:
+        return bool(shutil.which("docker")) and subprocess.run(["docker", "info"], capture_output=True, timeout=8).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 class PlantillaConDockerRealTest(unittest.TestCase):
-    """La plantilla del script, ejecutada por el `docker inspect` de verdad, produce líneas que el parser acepta, y las etiquetas hostiles no rompen líneas."""
+    """La plantilla del script, ejecutada por el `docker inspect` de verdad, produce líneas que el parser acepta. Solo lectura. La prueba que CREA un
+    contenedor (etiquetas hostiles) solo corre con CG_DOCKER_CREAR=1."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not hay_docker():
+            raise unittest.SkipTest("no hay Docker local")
 
     @classmethod
     def plantilla(cls):
@@ -152,6 +182,7 @@ class PlantillaConDockerRealTest(unittest.TestCase):
         for l in lineas:
             self.assertIsNotNone(inv._contenedor(l), "la plantilla produce algo que el parser no acepta")
 
+    @unittest.skipUnless(os.environ.get("CG_DOCKER_CREAR") == "1", "crea y borra un contenedor en el Docker local: solo con CG_DOCKER_CREAR=1")
     def test_etiquetas_hostiles_no_rompen_lineas_ni_cuelan_campos_nuevos(self):
         imagen = subprocess.run(["docker", "images", "-q"], capture_output=True, text=True, timeout=30).stdout.split()
         if not imagen:
@@ -216,6 +247,7 @@ class ScriptRootInventarioTest(unittest.TestCase):
 
     def ejecuta(self):
         r = subprocess.run(["bash", self.script], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+        self.crudo = r.stdout
         return ss.analizar("### version\n2\n" + r.stdout + "### fin\n")
 
     def test_pocos_contenedores_completo(self):
@@ -248,6 +280,35 @@ class ScriptRootInventarioTest(unittest.TestCase):
         i = inv.interpretar(sec["inventario"], True)
         self.assertEqual((i["fuente"], i["completo"]), ("ninguna", False))
 
+    def test_un_inspect_lento_pierde_el_inventario_pero_no_las_secciones_de_seguridad(self):
+        self.docker(3)
+        ruta = os.path.join(self.dir, "docker")
+        with open(ruta) as f:
+            cuerpo = f.read().replace("if a[:1] == ['inspect']:\n", "if a[:1] == ['inspect']:\n    import time; time.sleep(6)\n")
+        with open(ruta, "w") as f:
+            f.write(cuerpo)
+        sec, marcadas, invalidas, _ = self.ejecuta()
+        self.assertEqual(sec["fin_root"], ["omitidos 0"])                              # el inventario no cuenta en lo omitido por root
+        self.assertIn("bastionado_root", sec)
+        self.assertFalse(inv.interpretar(sec["inventario"], True)["completo"])          # faltan las tres lineas pedidas
+
+    def test_si_ya_se_gasto_el_tiempo_el_inventario_ni_arranca(self):
+        self.docker(3)
+        for n in ("sshd", "iptables"):
+            with open(os.path.join(self.dir, n), "w") as f:
+                f.write("#!/bin/bash\nexec sleep 30\n")
+            os.chmod(os.path.join(self.dir, n), 0o755)
+        sec, _, invalidas, _ = self.ejecuta()
+        cuerpo = self.crudo.split("### inventario\n", 1)[1].split("### fin_root", 1)[0].splitlines()
+        self.assertEqual(cuerpo[2], "fuente error")                                         # cuerpo = [n, ahora, fuente, ...]
+        self.assertIn("root", invalidas)                                                    # y como root sí se pasó de tiempo, el Mac descarta sus secciones
+
+    def test_el_inventario_lleva_el_reloj_del_servidor(self):
+        self.docker(1)
+        sec, _, _, _ = self.ejecuta()
+        i = inv.interpretar(sec["inventario"], True)
+        self.assertAlmostEqual(i["ahora_srv"], __import__("time").time(), delta=5)
+
     def test_si_root_omite_algo_el_inventario_se_descarta_con_el_resto(self):
         self.docker(2)
         sec, _, invalidas, _ = ss.analizar("### version_root\n2\n### inventario\nn 2\nfuente error\nfin 2 0\n### fin_root\nomitidos 3\n")
@@ -258,6 +319,7 @@ class ScriptRootInventarioTest(unittest.TestCase):
 class BaseRecursos(Base):
     def lectura(self, ts, filas=(), swarm=None, **kw):
         e = entrada(ts)
+        kw.setdefault("ahora", ts)                                                  # el reloj del servidor, igual que el del Mac salvo que se diga otra cosa
         i = lee(list(filas), **kw)
         e["datos"]["inventario"] = i
         e["datos"]["swarm_servicios"] = swarm or {}
@@ -350,6 +412,174 @@ class AlmacenRecursosTest(BaseRecursos):
         self.reg(self.lectura(T0 + 600, [fila("base"), fila("otro-nuevo")]))
         self.assertEqual(self.uno("SELECT COUNT(*) FROM recursos WHERE etiqueta='otro-nuevo'"), 0)
         self.assertEqual(self.descartes("recursos_sobre_tope"), 1)
+
+    def test_un_contenedor_descartado_no_oculta_los_demas_ni_concluye_desapariciones(self):
+        self.reg(self.lectura(T0, [fila("a"), fila("b")]))
+        malo = fila("c/d")                                                              # nombre imposible: se descarta solo ese
+        self.reg(self.lectura(T0 + 300, [fila("a"), malo], pedidos=2))
+        self.reg(self.lectura(T0 + 900, [fila("a"), malo], pedidos=2))
+        self.assertEqual(self.recursos()["b"][1], 1)                                    # b no se ve, pero tampoco se concluye que haya desaparecido
+        self.assertEqual(self.descartes("inventario_contenedores_descartados"), 2)
+        self.reg(self.lectura(T0 + 1200, [fila("a"), fila("nuevo")]))                  # y las lecturas normales siguen funcionando
+        self.assertIn("nuevo", self.recursos())
+
+    def test_nodo_swarm_sin_lista_de_servicios_no_cambia_identidades(self):
+        tarea = "t" * 25
+        f = [fila(f"api.1.{tarea}", swarm="api", tarea=tarea)]
+        self.reg(self.lectura(T0, f, swarm={"api": True}))
+        self.assertEqual(list(self.recursos()), ["api"])
+        self.reg(self.lectura(T0 + 300, f, swarm={}))                                   # sin `docker service ls`: la identidad sería otra
+        self.reg(self.lectura(T0 + 900, f, swarm={}))
+        self.assertEqual(list(self.recursos()), ["api"])
+        self.assertEqual((self.eventos(), self.descartes("inventario_sin_servicios_swarm")), ([], 2))
+
+    def test_un_recorte_no_fabrica_apariciones(self):
+        self.reg(self.lectura(T0, [fila("a")], total=300, pedidos=1))                  # base truncada
+        self.reg(self.lectura(T0 + 300, [fila("b")], total=300, pedidos=1))            # entra otro porque «a» ya no cabe
+        self.assertEqual((self.recursos()["b"][1], self.eventos()), (1, []))
+
+    def test_la_linea_base_se_hace_una_vez_aunque_la_primera_lectura_estuviera_vacia(self):
+        self.reg(self.lectura(T0, []))
+        self.reg(self.lectura(T0 + 300, [fila("a")]))
+        self.assertEqual(self.recursos()["a"][1], 0)                                    # no es línea base: queda pendiente de confirmar
+        (n, e), _ = sh.olvidar_recursos(self.con, SRV["id"])
+        self.reg(self.lectura(T0 + 600, [fila("a")]))
+        self.assertEqual(self.recursos()["a"][1], 1)                                    # tras olvidar, vuelve a haber línea base
+
+    def test_los_contenedores_sueltos_no_gastan_el_presupuesto_de_los_servicios(self):
+        self.reg(self.lectura(T0, [fila("prod", proyecto="p", servicio="web")] + [fila(f"ci{i}") for i in range(rec.EVENTOS_DIA_POR_TIPO + 10)]))
+        self.reg(self.lectura(T0 + 300, [fila("prod", proyecto="p", servicio="web")] + [fila(f"ci{i}") for i in range(rec.EVENTOS_DIA_POR_TIPO + 10)]))
+        self.reg(self.lectura(T0 + 900, []))
+        self.reg(self.lectura(T0 + 1500, []))
+        tipos = dict(self.con.execute("SELECT tipo, COUNT(*) FROM eventos WHERE evento='desaparecio' GROUP BY tipo").fetchall())
+        self.assertEqual(tipos["contenedor"], rec.EVENTOS_DIA_POR_TIPO)
+        self.assertEqual(tipos["compose"], 1)                                           # el de producción sí quedó anotado
+
+    def test_si_no_cabe_el_evento_el_recurso_sigue_activo_y_se_anota_cuando_hay_presupuesto(self):
+        base = [fila(f"ci{i}") for i in range(rec.EVENTOS_DIA_POR_TIPO + 5)]
+        self.reg(self.lectura(T0, base))
+        for k in (300, 900, 1500):
+            self.reg(self.lectura(T0 + k, []))
+        sin_anotar = self.uno("SELECT COUNT(*) FROM recursos WHERE activo=1")
+        self.assertEqual(sin_anotar, 5)                                                 # 100 anotados e inactivos; 5 siguen activos esperando presupuesto
+        self.reg(self.lectura(T0 + 86400 + 300, []))
+        self.reg(self.lectura(T0 + 86400 + 900, []))
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM recursos WHERE activo=1"), 0)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM eventos WHERE evento='desaparecio'"), rec.EVENTOS_DIA_POR_TIPO + 5)
+
+    def test_dos_lecturas_muy_juntas_no_confirman_una_desaparicion(self):
+        self.reg(self.lectura(T0, [fila("a"), fila("b")]))
+        self.reg(self.lectura(T0 + 300, [fila("a")]))
+        self.reg(self.lectura(T0 + 360, [fila("a")]))                                    # segunda lectura sin «b», pero solo 60 s después
+        self.assertEqual((self.recursos()["b"][1], self.eventos()), (1, []))
+        self.reg(self.lectura(T0 + 900, [fila("a")]))
+        self.assertEqual(self.eventos(), [("desaparecio", "contenedor")])
+
+    def test_si_no_cabe_la_aparicion_sigue_pendiente_y_se_anota_al_dia_siguiente(self):
+        self.reg(self.lectura(T0, [fila("base")]))
+        nuevos = [fila("base")] + [fila(f"n{i:03d}") for i in range(rec.EVENTOS_DIA_POR_TIPO + 5)]
+        for k in (300, 600, 1200):
+            self.reg(self.lectura(T0 + k, nuevos))
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM eventos WHERE evento='aparecio'"), rec.EVENTOS_DIA_POR_TIPO)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM recursos WHERE activo=0"), 5)       # sin evento no se da por confirmada
+        self.reg(self.lectura(T0 + 86400 + 300, nuevos))
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM recursos WHERE activo=0"), 0)
+
+    def test_la_expulsion_no_toca_un_recurso_pendiente_que_se_ve_en_esta_lectura(self):
+        self.reg(self.lectura(T0, [fila("base")]))
+        self.con.execute("BEGIN IMMEDIATE")
+        for i in range(rec.MAX_RECURSOS - 2):
+            self.con.execute("INSERT INTO recursos(servidor_id, tipo, clave, etiqueta, primera, ultima, activo, estado) VALUES(?, 'contenedor', ?, 'x', 1, ?, 0, 'ok')",
+                             (SRV["id"], f"{i:032x}", 1000 + i))
+        vivo = rec.clave_de(self.con, "contenedor", "vivo")
+        self.con.execute("INSERT INTO recursos(servidor_id, tipo, clave, etiqueta, primera, ultima, activo, estado, visto_n, visto_desde) VALUES(?, 'contenedor', ?, 'vivo', 1, 5, 0, 'ok', 1, ?)",
+                         (SRV["id"], vivo, T0))
+        self.con.execute("COMMIT")
+        self.reg(self.lectura(T0 + 300, [fila("base"), fila("nuevo"), fila("vivo")]))        # «nuevo» se procesa antes que «vivo» y necesita hueco
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM recursos WHERE clave=?", vivo), 1)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM recursos WHERE etiqueta='nuevo'"), 1)
+
+    def test_bucle_con_el_reloj_del_servidor_desfasado(self):
+        def arranque(ts_srv):
+            return __import__("time").strftime("%Y-%m-%dT%H:%M:%SZ", __import__("time").gmtime(ts_srv - 60))
+        self.reg(self.lectura(T0, [fila("a", reinicios=0)], ahora=T0 + 900))
+        for k in (1, 2):
+            ts = T0 + 300 * k
+            self.reg(self.lectura(ts, [fila("a", reinicios=k, inicio=arranque(ts + 900))], ahora=ts + 900))      # servidor 15 min por delante
+        self.assertIn(("reinicios_en_bucle", "contenedor"), self.eventos())
+        self.reg(self.lectura(T0 + 2000, [fila("b", reinicios=0)]))
+        for k in (1, 2):                                                                # sin reloj del servidor no hay forma de medir la edad: nada
+            ts = T0 + 2000 + 300 * k
+            e = self.lectura(ts, [fila("b", reinicios=k, inicio=arranque(ts))])
+            e["datos"]["inventario"]["ahora_srv"] = None
+            self.reg(e)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM eventos WHERE evento='reinicios_en_bucle'"), 1)
+
+    def test_la_expulsion_no_toca_lo_que_se_ve_ahora_ni_lo_que_tiene_eventos_recientes(self):
+        self.reg(self.lectura(T0, [fila("base")]))
+        self.con.execute("BEGIN IMMEDIATE")
+        for i in range(rec.MAX_RECURSOS - 1):
+            self.con.execute("INSERT INTO recursos(servidor_id, tipo, clave, etiqueta, primera, ultima, activo, estado) VALUES(?, 'contenedor', ?, 'x', 1, ?, 0, 'ok')",
+                             (SRV["id"], f"{i:032x}", 100 + i))
+        self.con.execute("COMMIT")
+        antiguo = self.con.execute("SELECT clave FROM recursos WHERE ultima=100").fetchone()[0]
+        self.con.execute("INSERT INTO eventos(servidor_id, ts, clave, tipo, evento, severidad) VALUES(?,?,?, 'contenedor', 'desaparecio', 'aviso')", (SRV["id"], T0, antiguo))
+        self.reg(self.lectura(T0 + 300, [fila("base"), fila("nuevo")]))
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM recursos WHERE clave=?", antiguo), 1)       # tiene un evento reciente: se protege
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM recursos WHERE etiqueta='nuevo'"), 1)       # entró expulsando al siguiente más antiguo
+
+    def test_un_fallo_del_inventario_no_deshace_la_muestra(self):
+        from unittest import mock
+        with mock.patch.object(rec, "anota_inventario", side_effect=RuntimeError("x")):
+            self.reg(self.lectura(T0, [fila("a")]))
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM muestras"), 1)
+        self.assertEqual(self.descartes("inventario_error"), 1)
+
+    def test_la_etiqueta_solo_admite_el_juego_de_caracteres_del_parseo(self):
+        sh._alta_servidor(self.con, SRV["id"], "x", T0)
+        for malo in ("a b", "a\nb", "<b>", "ñ", "a;b"):
+            with self.assertRaises(sqlite3.IntegrityError, msg=repr(malo)):
+                self.con.execute("INSERT INTO recursos(servidor_id, tipo, clave, etiqueta, primera, ultima, activo, estado) VALUES(?, 'contenedor', ?, ?, 1, 1, 1, 'ok')",
+                                 (SRV["id"], "0" * 32, malo))
+
+    def test_los_nombres_salen_tambien_de_la_cache_a_las_48_h_y_al_olvidar(self):
+        from infobar import rutas, servidores_ciclo as ciclo
+        from unittest import mock
+        e = {"ok_en": 1, "datos": {"servicios": [{"nombre": "cliente-x", "ok": False}], "swarm_servicios": {"cliente-x": True},
+                                   "inventario": {"contenedores": [{"nombre": "cliente-x"}]}}, "tarjetas": {"servicios": {"estado": "rojo", "caidos": ["cliente-x"]}}}
+        vieja = ciclo.podar_ips(json.loads(json.dumps(e)), 1 + ciclo.CACHE_IPS_VIDA_S + 10)
+        self.assertNotIn("cliente-x", json.dumps(vieja))
+        reciente = ciclo.podar_ips(json.loads(json.dumps(e)), 100)
+        self.assertIn("cliente-x", json.dumps(reciente))
+        cache = os.path.join(self.dir, "servidores.json")
+        with mock.patch.object(rutas, "SERVIDORES", cache):
+            with open(cache, "w") as f:
+                json.dump({"servidores": {NOMBRE_SRV: e, "otro": json.loads(json.dumps(e))}}, f)
+            self.reg(self.lectura(T0, [fila("a")]))
+            self.con.close()
+            self.assertEqual(api.olvidar(NOMBRE_SRV, "recursos")[0], 0)
+            self.con = sh.abrir()
+            with open(cache) as f:
+                d = json.load(f)
+        self.assertNotIn("cliente-x", json.dumps(d["servidores"][NOMBRE_SRV]))
+        self.assertIn("cliente-x", json.dumps(d["servidores"]["otro"]))                 # solo el servidor pedido
+
+    def test_una_app_anterior_no_toca_una_base_mas_nueva(self):
+        import hashlib
+        from unittest import mock
+        self.reg(self.lectura(T0, [fila("a")]))
+        self.con.close()
+        with open(sh.ruta(), "rb") as f:
+            antes = hashlib.sha256(f.read()).hexdigest()
+        viejas = {v: m for v, m in sh.MIGRACIONES.items() if v <= 2}
+        with mock.patch.object(sh, "MIGRACIONES", viejas):
+            with self.assertRaises(sh.ErrorAlmacen):
+                sh.abrir()
+        self.con = sh.abrir()
+        self.con.close()
+        with open(sh.ruta(), "rb") as f:
+            self.assertEqual(hashlib.sha256(f.read()).hexdigest(), antes)
+        self.con = sh.abrir()
 
     def test_el_nombre_solo_esta_en_la_etiqueta(self):
         self.reg(self.lectura(T0, [fila("cliente-secreto")]))

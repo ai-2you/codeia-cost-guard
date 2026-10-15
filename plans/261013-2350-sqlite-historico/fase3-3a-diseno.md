@@ -89,6 +89,21 @@ bases de datos (3.3b) · cambiar `sudoers` o permisos de los servidores más all
 - Migración 3 y bajada (M2): la app anterior no sabe leer `user_version 3`. Se documenta; el ensayo de subida/bajada con copia previa es **requisito antes de fusionar**; una base más nueva que la app deja un
   aviso visible (no un fallo mudo del historial).
 
+### Cambios tras la revisión de código de E2 (`../reports/revision-codigo-fase3-3a-e2-261015.md`)
+- El inventario tiene **presupuesto propio** (arranca solo si no se han gastado 5 s, `timeout 2` + `timeout 3`, sin `t`): si no llega, se pierde el inventario («fuente error»)
+  pero no las secciones de seguridad de root. Lleva el reloj del servidor (`ahora`), que es con el que se mide la edad de `StartedAt` en la regla de bucle.
+- Un contenedor cuya línea no vale se descarta **él solo** (nombres hasta 128, códigos de salida negativos válidos, líneas de hasta 1200 B); con descartados o recortada la lectura
+  actualiza lo que ve pero no concluye desapariciones, y un recorte no fabrica apariciones (los «nuevos» de una lectura recortada entran como línea base).
+- Presupuestos de eventos por servidor, día, evento **y tipo de recurso** (los contenedores sueltos no gastan el de los servicios); si un evento de aparición o desaparición no cabe,
+  el recurso no cambia de estado y se reintenta (se anota cuando hay presupuesto). La expulsión de inactivos respeta lo que se ve en la lectura y lo que tiene eventos de la última semana.
+- Un nodo Swarm sin `docker service ls` (worker) o con la lista recortada no sirve para el inventario (la identidad dependería de ella). `docker service ls` admite hasta 300 servicios.
+- `ssh.analizar` separa líneas solo por `\n` (U+0085, U+2028 y compañía no reabren secciones). Los nombres también salen de la caché a las 48 h y con `--olvidar-recursos`.
+- Hechos explícitos: la etiqueta tiene un `CHECK` de caracteres; el inventario va en un `SAVEPOINT` (un fallo suyo no deshace la muestra); la marca de línea base se guarda en `meta`.
+- **Límites conocidos, aceptados** (no verificables desde el servidor): un contenedor con etiquetas `com.docker.compose.*` de otro proyecto se suma a su identidad (el evento
+  `colision` del diseño se descarta); la sal de los hashes vive en la misma base, así que los eventos de 180 días son comprobables contra nombres candidatos por quien tenga la base
+  (que ya tiene las etiquetas de los recursos activos); con más de 200 contenedores se vigilan los 200 más antiguos.
+- Diferido a la 3.5 junto con las reglas: «un recurso inestable deja de contar para el modo incidencia».
+
 ## E3 — Certificados (H17, H18, M1)
 - `medir_web`: tras el handshake verificado (D-D), `ssl.cert_time_to_seconds(notAfter)` → `cert_dias` (entero acotado ±36500, calculado con el reloj del Mac). Rotulado «del certificado que sirve el servidor»
   (la hoja, no la cadena). Un certificado ya caducado no completa el handshake: `error` lo dice y `cert_dias` queda None; **`cert_min` en `muestras` se guarda solo si todas las webs dieron fecha** y el estado

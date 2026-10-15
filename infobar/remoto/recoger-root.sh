@@ -26,7 +26,7 @@ echo 2
 echo "### servicios"
 # Dokploy y Easypanel despliegan servicios de Swarm; si el nodo no es manager, contenedores sueltos
 if [ "$(t docker info --format '{{.Swarm.ControlAvailable}}')" = "true" ]; then
-  t docker service ls --format '{{.Name}}\t{{.Replicas}}' | head -n 60
+  t docker service ls --format '{{.Name}}\t{{.Replicas}}' | head -n 300
 fi
 
 echo "### contenedores"
@@ -61,17 +61,22 @@ echo "### inventario"
 # valor con saltos de linea, tabuladores o "### algo" no puede romper lineas ni abrir secciones. Los mas antiguos primero (produccion antes
 # que los efimeros) y como mucho 200: lo que sobra se declara en "truncado" y el Mac no concluye que lo que no ve haya desaparecido.
 # Marco "n <lineas>" ... "fin <lineas> <codigo>" como en intentos; "pedidos" = ids que se inspeccionan, el Mac exige tantas lineas "c".
+# PRESUPUESTO PROPIO: solo arranca si no se han gastado ya 5 s y no usa `t`, asi que si el inventario no llega a tiempo se pierde el inventario
+# («fuente error»), no las secciones de seguridad de root ni el cierre de fin_root.
 PLANTILLA='c{{"\t"}}{{json .Name}}{{"\t"}}{{json .State.Status}}{{"\t"}}{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}}{{"\t"}}{{.RestartCount}}{{"\t"}}{{.State.ExitCode}}{{"\t"}}{{json .State.StartedAt}}{{"\t"}}{{json .HostConfig.RestartPolicy.Name}}{{"\t"}}{{json (index .Config.Labels "com.docker.compose.project")}}{{"\t"}}{{json (index .Config.Labels "com.docker.compose.service")}}{{"\t"}}{{json (index .Config.Labels "com.docker.swarm.service.name")}}{{"\t"}}{{json (index .Config.Labels "com.docker.swarm.task.id")}}'
 cuerpo=$(
+  echo "ahora $(date +%s)"
   if ! command -v docker >/dev/null 2>&1; then
     echo "fuente ninguna"
-  elif ids=$(t docker ps -aq --no-trunc); then
+  elif [ $(( $(date +%s) - INICIO )) -ge 5 ]; then
+    echo "fuente error"
+  elif ids=$(timeout 2 docker ps -aq --no-trunc </dev/null 2>/dev/null); then
     total=$(printf '%s\n' "$ids" | grep -c .)
     pedidos=$(printf '%s\n' "$ids" | grep . | tac | head -n 200 | tr '\n' ' ')
     n=$(printf '%s\n' $pedidos | grep -c .)
     echo "fuente docker"; echo "total $total"; echo "pedidos $n"; echo "truncado $([ "$total" -gt "$n" ] && echo si || echo no)"
     # shellcheck disable=SC2086
-    [ "$n" -gt 0 ] && t docker inspect --format "$PLANTILLA" $pedidos | cut -b -600
+    [ "$n" -gt 0 ] && timeout 3 docker inspect --format "$PLANTILLA" $pedidos </dev/null 2>/dev/null | cut -b -1200
   else
     echo "fuente error"
   fi

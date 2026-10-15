@@ -58,6 +58,19 @@ def atiende(ruta, q, ahora=None):
         con.close()
 
 
+def _limpia_cache(nombre):
+    """Los nombres también viven (hasta 48 h) en la caché de servidores: se quitan de ahí al olvidar los recursos."""
+    from . import servidores_ciclo
+    from .config_y_estado import _bloqueo, _escribe_json, _lee_json
+    with _bloqueo(rutas.SERVIDORES):
+        d = _lee_json(rutas.SERVIDORES)
+        entradas = d.get("servidores") if isinstance(d.get("servidores"), dict) else {}
+        for n, e in entradas.items():
+            if (nombre is None or n == nombre) and isinstance(e, dict):
+                servidores_ciclo.podar_nombres(e)
+        _escribe_json(rutas.SERVIDORES, d)
+
+
 def olvidar(nombre=None, que="ips"):
     """Borra ya las IPs (`que="ips"`) o los recursos y eventos (`que="recursos"`, nombres incluidos) de un servidor (por nombre o id, también
     retirado) o de todos. Devuelve (código de salida, mensaje)."""
@@ -66,18 +79,19 @@ def olvidar(nombre=None, que="ips"):
     except sh.SinDatos:
         return 0, "No hay historial de servidores: nada que borrar."
     try:
-        sid = None
+        sid, nombre_real = None, None
         if nombre:
-            fila = con.execute("SELECT id FROM servidores WHERE nombre=? OR id=? ORDER BY retirado_en IS NOT NULL, creado_en DESC", (nombre, nombre)).fetchone()
+            fila = con.execute("SELECT id, nombre FROM servidores WHERE nombre=? OR id=? ORDER BY retirado_en IS NOT NULL, creado_en DESC", (nombre, nombre)).fetchone()
             if fila is None:
                 return 1, "No hay ningún servidor con ese nombre en el historial."
-            sid = fila[0]
+            sid, nombre_real = fila
     finally:
         con.close()
     con = sh.abrir()
     try:
         if que == "recursos":
             (n, eventos), consolidado = sh.olvidar_recursos(con, sid)
+            _limpia_cache(nombre_real if sid else None)
         else:
             n, consolidado = sh.olvidar_ips(con, sid)
     finally:
