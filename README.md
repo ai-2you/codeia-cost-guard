@@ -310,6 +310,11 @@ Si un servidor no tiene registro de sshd en el journal, la tarjeta dice «sin da
   por stdin en una sola conexión, prueba la lectura como `infobar` y solo entonces guarda el servidor. Si el servidor pide contraseña de sudo, te da la línea de `alta-servidor.sh` para pegar
   en el Terminal (ahí tecleas tu contraseña) y un botón «Comprobar conexión». Un alta a la vez, 60 s de enfriamiento tras un fallo, y nada crudo del servidor llega a la página.
   `infobar/remoto/desinstalar-del-servidor.sh` (como root en el servidor) lo deshace.
+- **Detección de webs.** Con el script de root v2, el servidor dice qué dominios sirve su proxy (Traefik de Dokploy, EasyPanel y Coolify: etiquetas de los servicios de Swarm y de los
+  contenedores y los ficheros dinámicos del proxy); solo salen los nombres dentro de `Host(...)`, nunca el resto de las etiquetas ni de los ficheros (pueden llevar hashes de
+  autenticación). En Ajustes, «Buscar webs de este servidor» propone primero los dominios que **resuelven a la IP del servidor**; los que apuntan a otro sitio (CDN, otro servidor)
+  van plegados y con aviso, y los que resuelven a una IP local o privada no se ofrecen. Tú marcas las que quieres vigilar: nada se sondea sin marcarlo (hasta 100 por servidor). Los
+  `xn--` se ven decodificados junto al original. `detectar_webs: false` en un servidor (por ejemplo, de un cliente) la desactiva; las candidatas viven solo 48 h en la caché.
 - **Webs de cada servidor** (`webs` en la configuración): se sondean en un hilo aparte, no dentro de la lectura SSH. Cada 5 minutos, y cada 60 s mientras una web falla
   (como mucho 20 a la vez). Un 4xx cuenta como «responde»; un 5xx, un fallo de conexión o un timeout, como fallo. Si el Mac no tiene red (fallan todas y también los
   tres canarios públicos) esa pasada se descarta entera y no anota ninguna caída. Una web caída pone el servidor en rojo pero no acelera la lectura SSH.

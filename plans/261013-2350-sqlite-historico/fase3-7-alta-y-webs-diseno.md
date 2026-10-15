@@ -85,6 +85,11 @@ es la que ssh aplica; el camino del Terminal sí lo usa); el diagnóstico exige 
 `known_hosts` no duplica líneas; y la orden remota se ejecuta de verdad en los tests (directorio de `mktemp` aleatorio, 0700 y borrado siempre). Decisión: el alta exige `usuario@host`
 (sin alias) y «Debian/Ubuntu» = `apt` + systemd + `visudo`.
 
+**3.7b hecha (2026-10-15)**: sección `webs` de `recoger-root.sh` (Host(`...`) de etiquetas y ficheros del proxy, filtro final de forma DNS, presupuesto propio, máx. 200, probada ejecutándola
+con docker y ficheros falsos), `servidores_webs.py` (parseo hostil, resolución con presupuesto, clasificación apuntan/otros/internos/sin resolver, NAT64 y 6to4 por su IPv4, aceptar/quitar por
+`id` solo lo detectado, tope de 100), rutas `/servidores/webs/detectadas` y `/servidores/webs`, componente en Ajustes (probado en un navegador real), 31 tests y 28 mutaciones. Pendiente:
+revisión de código independiente de la 3.7b.
+
 ## Orden de entrega (cada paso con revisión de código independiente y mutaciones)
 **F1+F2** (guardado seguro) → **F3+F4** (sondeador) → **3.7a** alta → **3.7b** detección → **3.7c** seguimiento.
 

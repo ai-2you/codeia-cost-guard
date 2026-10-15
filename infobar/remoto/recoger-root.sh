@@ -85,5 +85,40 @@ cuerpo=$(printf '%s\n' "$cuerpo" | head -n 230)
 nlin=$(printf '%s\n' "$cuerpo" | grep -c '')
 echo "n $nlin"; printf '%s\n' "$cuerpo"; echo "fin $nlin 0"
 
+echo "### webs"
+# Dominios que sirve el proxy (Traefik de Dokploy, EasyPanel y Coolify): SOLO los nombres dentro de Host(`...`) salen de aqui. Se leen las etiquetas de los servicios de
+# Swarm y de los contenedores y los ficheros dinamicos del proxy (pueden llevar hashes de autenticacion basica: jamas se copian). Todo pasa por dos `grep -o` (primero
+# Host(...), luego los literales entre comillas inversas) y un filtro final con la forma de un nombre DNS en minusculas: ningun otro byte llega a la salida.
+# Presupuesto propio como `inventario`: sin tiempo, «fuente error» (sin dato, nunca «cero webs»). Maximo 200.
+DIRS_PROXY="/etc/dokploy/traefik/dynamic /etc/easypanel/traefik/config /data/coolify/proxy/dynamic"
+cuerpo=$(
+  if [ $(( $(date +%s) - INICIO )) -ge 6 ]; then
+    echo "fuente error"
+  else
+    echo "fuente ok"
+    todos=$(
+      {
+        if command -v docker >/dev/null 2>&1; then
+          # shellcheck disable=SC2046
+          timeout 3 docker service inspect --format '{{json .Spec.Labels}}' $(timeout 2 docker service ls -q </dev/null 2>/dev/null) </dev/null 2>/dev/null
+          # shellcheck disable=SC2046
+          timeout 3 docker inspect --format '{{json .Config.Labels}}' $(timeout 2 docker ps -aq </dev/null 2>/dev/null) </dev/null 2>/dev/null
+        fi
+        for d in $DIRS_PROXY; do
+          [ -d "$d" ] && timeout 3 find "$d" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' -o -name '*.toml' \) -size -2M -exec sh -c 'for f; do head -c 1048576 "$f"; echo; done' sh {} + 2>/dev/null
+        done
+      } | head -c 4194304 | grep -ohE 'Host(SNI)?\([^)]*\)' | grep -oE '`[^`]{1,253}`' | tr -d '`' | tr 'A-Z' 'a-z' \
+        | grep -E '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' | sort -u
+    )
+    total=$(printf '%s\n' "$todos" | grep -c .)
+    echo "total $total"
+    echo "truncado $([ "$total" -gt 200 ] && echo si || echo no)"
+    printf '%s\n' "$todos" | grep . | head -n 200 | sed 's/^/web /'
+  fi
+)
+cuerpo=$(printf '%s\n' "$cuerpo" | head -n 210)
+nlin=$(printf '%s\n' "$cuerpo" | grep -c '')
+echo "n $nlin"; printf '%s\n' "$cuerpo"; echo "fin $nlin 0"
+
 echo "### fin_root"
 echo "omitidos $(grep -c . "$MARCAS")"

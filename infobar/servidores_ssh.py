@@ -6,16 +6,16 @@ heredar nada peligroso de ~/.ssh/config (ProxyCommand, LocalCommand, reenvios).
 """
 import math, os, re, subprocess, time
 
-from . import plataforma, servidores_intentos, servidores_inventario
+from . import plataforma, servidores_intentos, servidores_inventario, servidores_webs
 from .servidores import errores_servidores
 
 CLAVE = os.path.expanduser("~/.ssh/infobar_ed25519")
 TOPE_S = 20                 # segundos por servidor, conexion incluida
 TOPE_BYTES = 128 * 1024     # lo que se pasa de aqui se corta (las secciones de v1 van primero y caben): no se tira la lectura entera
 SECCIONES = {"version", "sistema", "memoria", "disco", "sesiones", "puertos", "intentos",
-             "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban", "version_root", "fin_root", "inventario"}
-SECCIONES_ROOT = ("servicios", "contenedores", "bastionado_root", "fail2ban", "inventario")     # las que escribe recoger-root
-MARCADAS = ("intentos", "inventario")    # secciones de v2 con marco: "n <lineas>" al principio y "fin <lineas> <codigo>" al final
+             "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban", "version_root", "fin_root", "inventario", "webs"}
+SECCIONES_ROOT = ("servicios", "contenedores", "bastionado_root", "fail2ban", "inventario", "webs")     # las que escribe recoger-root
+MARCADAS = ("intentos", "inventario", "webs")    # secciones de v2 con marco: "n <lineas>" al principio y "fin <lineas> <codigo>" al final
 _MARCO_N = re.compile(r"n ([0-9]{1,6})")
 _MARCO_FIN = re.compile(r"fin ([0-9]{1,6}) ([0-9]{1,3})")
 
@@ -259,6 +259,10 @@ def interpretar(sec, marcadas=frozenset(), ahora=None):
         inv = servidores_inventario.interpretar(sec["inventario"], "inventario" in marcadas)
         if inv is not None:
             d["inventario"] = inv
+    if "webs" in sec:
+        det = servidores_webs.interpretar(sec["webs"], "webs" in marcadas)
+        if det is not None:
+            d["webs_detectadas"] = det
     if "fail2ban" in sec:
         f = _clave_valor(sec["fail2ban"])
         d["fail2ban"] = ({"instalado": False} if "no-instalado" in sec["fail2ban"] else

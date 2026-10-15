@@ -127,6 +127,42 @@
       salida);
   }
 
+  /* Webs detectadas en un servidor (por su proxy): se proponen las que apuntan a ese servidor y TÚ marcas las que quieres vigilar. Nada se vigila sin marcarlo.
+     Los dominios vienen del servidor: van siempre por el DOM, y los xn-- se enseñan decodificados junto al original. */
+  function detectorWebs(s){
+    if (!s.id) return null;
+    const salida = h("div", {style: "margin-top:8px"});
+    const fila = (x, grupo, marcas) => h("label", {style: "display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:13px;color:var(--texto)"},
+      h("input", {type: "checkbox", onchange: ev => { ev.target.checked ? marcas.add(x.host) : marcas.delete(x.host); }}), h("code", {}, x.host), x.unicode ? h("span", {class: "ayuda", style: "margin:0"}, "(" + x.unicode + ")") : null);
+    function envia(cuerpo){
+      leer();
+      post("/servidores/webs", Object.assign({servidor: s.id}, cuerpo)).then(r => {
+        if (!r.ok) { salida.replaceChildren(h("p", {class: "msg err"}, r.mensaje || "No se pudo guardar.")); return; }
+        s.webs = r.webs.length ? r.webs : undefined; A.config.servidores_rev = r.servidores_rev;
+        $("vista-ajustes").replaceChildren(...pinta());
+      }).catch(e => salida.replaceChildren(h("p", {class: "msg err"}, "No se pudo hablar con la barra: " + e)));
+    }
+    function dibuja(r){
+      if (!r.ok) return salida.replaceChildren(h("p", {class: "msg err"}, r.mensaje || "No se pudo consultar."));
+      if (r.estado === "desactivada") return salida.replaceChildren(h("p", {class: "ayuda"}, "La detección está desactivada para este servidor."));
+      if (r.estado === "sin_dato") return salida.replaceChildren(h("p", {class: "ayuda"}, "El servidor aún no ha enviado la lista de dominios (hace falta la lectura nueva: «Actualizar con mi clave» en el alta, o espera un ciclo)."));
+      const marcar = new Set(), quitar = new Set(), piezas = [];
+      piezas.push(r.apuntan.length ? h("div", {}, h("strong", {}, "Apuntan a este servidor"), ...r.apuntan.map(x => fila(x, "a", marcar))) : h("p", {class: "ayuda"}, "Ningún dominio detectado apunta a este servidor (o ya los vigilas)."));
+      if (r.otros.length) piezas.push(h("details", {}, h("summary", {}, "Apuntan a otro sitio (" + r.otros.length + ")"),
+        h("p", {class: "ayuda"}, "Resuelven a una IP distinta (CDN u otro servidor). Un cliente del servidor podría haber puesto aquí el dominio de un tercero: vigílalos solo si son tuyos."),
+        ...r.otros.map(x => fila(x, "o", marcar))));
+      if (r.vigiladas.length) piezas.push(h("details", {}, h("summary", {}, "Ya vigiladas (" + r.vigiladas.length + ")"), ...r.vigiladas.map(x => fila(x, "v", quitar)),
+        h("div", {}, h("button", {onclick: () => envia({quitar: [...quitar]})}, "Dejar de vigilar las marcadas"))));
+      const nota = [r.internos.length ? r.internos.length + " apuntan a una IP local o privada (no se ofrecen)" : "", r.sin_resolver.length ? r.sin_resolver.length + " no resuelven" : "",
+        r.truncado ? "la lista del servidor estaba recortada (200)" : "", r.edad_s > 900 ? "dato de hace " + Math.round(r.edad_s / 60) + " min" : ""].filter(Boolean).join(" · ");
+      if (nota) piezas.push(h("p", {class: "ayuda"}, nota));
+      piezas.push(h("div", {}, h("button", {onclick: () => marcar.size ? envia({aceptar: [...marcar]}) : null}, "Vigilar las marcadas")));
+      salida.replaceChildren(...piezas);
+    }
+    return h("div", {}, h("button", {onclick: () => { salida.replaceChildren(h("p", {}, "Buscando…")); fetch("/servidores/webs/detectadas?servidor=" + encodeURIComponent(s.id)).then(r => r.json()).then(dibuja)
+      .catch(e => salida.replaceChildren(h("p", {class: "msg err"}, "No se pudo consultar: " + e))); }}, "Buscar webs de este servidor"), salida);
+  }
+
   function servidor(s, i){
     const info = (A.paneles || {})[s.nombre];
     const f = (et, k, ph) => h("label", {}, et, h("input", {class: "ancho", "data-s": i, "data-k": k, value: s[k] == null ? "" : s[k], placeholder: ph || ""}));
@@ -138,6 +174,7 @@
       h("div", {class: "campos"}, f("Nombre", "nombre", "produccion"), f("SSH (usuario@IP)", "ssh", "infobar@203.0.113.10"), f("SSH admin (botón Terminal)", "ssh_admin", "tuusuario@203.0.113.10"),
         f("Puerto SSH", "puerto", "22"), h("label", {}, "Panel", panel), f("URL del panel (https)", "panel_url", "https://dokploy.example.com"),
         h("label", {}, "Webs a medir (una por línea, máx. 100)", h("textarea", {rows: 3, "data-s": i, "data-k": "webs"}, (s.webs || []).join("\n")))),
+      detectorWebs(s),
       k ? k.fila : (s.panel ? h("p", {class: "ayuda"}, "Guarda los ajustes y aquí podrás poner la clave del panel.") : null));
   }
 

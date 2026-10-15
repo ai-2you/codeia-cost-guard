@@ -224,6 +224,7 @@ def podar_nombres(entrada):
         if isinstance(datos.get("inventario"), dict):
             datos["inventario"]["contenedores"] = []
         datos.pop("swarm_servicios", None)
+        datos.pop("webs_detectadas", None)                  # los dominios detectados (pueden ser de clientes) tampoco viven en la caché más de 48 h
     t = entrada.get("tarjetas")
     if isinstance(t, dict) and isinstance(t.get("servicios"), dict):
         t["servicios"]["caidos"] = []
