@@ -20,7 +20,7 @@ from . import ajustes, claves, exportacion, exportacion_csv, historico, presupue
 from . import cuota_nan
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_config, log, olvidar_cache
-from .servidores import _errores_ips_guardadas, errores_ips, errores_servidores
+from .servidores import _errores_ips_guardadas, errores_ips, errores_servidores, revision_servidores
 
 
 def _estado_copias():
@@ -50,7 +50,7 @@ def _estado_presupuestos():
 PUERTO = 47391              # panel/configurador local: un puerto alto que casi nada usa
 # campos que nunca salen por HTTP ni se aceptan desde el panel: nombres exactos y sufijos con '_'.
 # Los limite_*_tokens son cuotas (acaban en _tokens, no en _token): por eso no vale un patron *token*
-SECRETOS = {"api_key", "apikey", "token", "password", "secret", "clave", "authorization", "private_key"}
+SECRETOS = {"api_key", "apikey", "token", "password", "secret", "clave", "authorization", "private_key", "contrasena", "contraseña", "passwd", "pass"}
 SUFIJOS_SECRETOS = ("_key", "_token", "_secret", "_password")
 MAX_CUERPO = 1_000_000      # bytes: la config cabe de sobra
 COOKIE = "cg_sesion"          # el nombre real lleva el puerto: dos instancias en 127.0.0.1 no se pisan
@@ -123,6 +123,16 @@ def url_panel():
 def es_secreto(nombre):
     n = str(nombre).lower()
     return n in SECRETOS or n.endswith(SUFIJOS_SECRETOS)
+
+
+_CERROJO_GUARDADO = threading.Lock()       # comprobar la revisión de los servidores y escribir son un solo paso
+
+
+def con_revision(c):
+    """La configuración sin secretos más la huella de su lista de servidores (`servidores_rev`) que la página devuelve al guardar."""
+    c = dict(c)
+    c["servidores_rev"] = revision_servidores(c.get("servidores"))
+    return c
 
 
 def sin_secretos(o):
@@ -308,13 +318,13 @@ def crear_servidor(puerto=PUERTO):
                     r = informe()
                     self._json(200, {"origenes": r.get("origenes", {}), "perfiles_hermes": r.get("perfiles_hermes", {}), "copias": _estado_copias(),
                                      "planes": [p["nombre"] for p in (cfg().get("proveedores") or [])],
-                                     "config": sin_secretos(cfg())})
+                                     "config": con_revision(sin_secretos(cfg()))})
                 except Exception as e:
                     self._json(500, {"error": str(e)})
             elif ruta == "/ajustes":
                 try:
                     r = informe()
-                    c = sin_secretos(cfg())
+                    c = con_revision(sin_secretos(cfg()))
                     provs = [{"nombre": p["nombre"], "clave_guardada": bool(claves.leer_clave(ajustes.cuenta_de(p["nombre"]))),
                               "api_soportada": ajustes.api_soportada(p)} for p in (c.get("proveedores") or [])]
                     # claves de los paneles (Dokploy/Easypanel) de cada servidor, por host
@@ -373,18 +383,24 @@ def crear_servidor(puerto=PUERTO):
                 errores = errores_config(nuevo)
                 if errores:
                     return self._json(400, {"ok": False, "error": "; ".join(errores[:5])})
-                try:
-                    with open(rutas.CONFIG, encoding="utf-8") as f:
-                        en_disco = json.load(f)
-                except (OSError, ValueError):
-                    en_disco = {}
-                guardar_config(sin_secretos(ajustes.normalizar(nuevo, en_disco, cfg().get("servidores"))))
+                rev = nuevo.pop("servidores_rev", None)
+                with _CERROJO_GUARDADO:
+                    if "servidores" in nuevo and rev != revision_servidores(sin_secretos(cfg().get("servidores"))):
+                        # la lista cambió desde que la página la leyó (un alta, otra pestaña): guardar la copia vieja la pisaría
+                        return self._json(409, {"ok": False, "error": "la lista de servidores cambió: recarga la página antes de guardar"})
+                    try:
+                        with open(rutas.CONFIG, encoding="utf-8") as f:
+                            en_disco = json.load(f)
+                    except (OSError, ValueError):
+                        en_disco = {}
+                    guardar_config(sin_secretos(ajustes.normalizar(nuevo, en_disco, cfg().get("servidores"))))
+                    nueva_rev = revision_servidores(sin_secretos(cfg().get("servidores")))
                 try:
                     olvidar_cache()                    # el plan de cada fichero cacheado depende de la config
                 except OSError:
                     pass
                 log("configuracion guardada desde el panel")
-                self._json(200, {"ok": True})
+                self._json(200, {"ok": True, "servidores_rev": nueva_rev})
             except Exception as e:
                 self._json(400, {"ok": False, "error": str(e)[:200]})
 

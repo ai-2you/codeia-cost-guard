@@ -15,7 +15,7 @@
   const entero = v => Math.max(0, parseInt(String(v).replace(/[\s._]/g, ""), 10) || 0);
   const lista = t => t.split(",").map(x => x.trim()).filter(Boolean);
   const post = (ruta, cuerpo) => fetch(ruta, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cuerpo)})
-    .then(r => r.ok || r.status === 400 ? r.json() : r.text().then(t => ({ok: false, error: t || ("HTTP " + r.status)})));
+    .then(r => r.ok || r.status === 400 || r.status === 409 ? r.json() : r.text().then(t => ({ok: false, error: t || ("HTTP " + r.status)})));
 
   let enHistorico = false;
   window.vista = function(v){
@@ -238,7 +238,7 @@
     const m = $("msg-guardar"); leer();
     const envio = Object.assign({}, A.config);
     if (envio.presupuestos) envio.presupuestos = envio.presupuestos.filter(f => f.nombre && f.tokens > 0);
-    post("/guardar", envio).then(j => { m.className = "msg " + (j.ok ? "ok" : "err"); m.textContent = j.ok ? "✓ Guardado. Se aplica en el próximo refresco (≤ 1 min)." : "Error: " + (j.error || "?"); })
+    post("/guardar", envio).then(j => { m.className = "msg " + (j.ok ? "ok" : "err"); if (j.ok && j.servidores_rev) A.config.servidores_rev = j.servidores_rev; m.textContent = j.ok ? "✓ Guardado. Se aplica en el próximo refresco (≤ 1 min)." : "Error: " + (j.error || "?"); })
       .catch(e => { m.className = "msg err"; m.textContent = "Error al guardar: " + e; });
   }
 

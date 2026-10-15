@@ -6,6 +6,9 @@ que llega a `ssh` o a una peticion HTTP nunca se usa sin pasar por aqui.
 import ipaddress, re, urllib.parse
 
 PANELES = ("dokploy", "easypanel")
+# Campos que puede llevar un servidor en la configuración. Lista CERRADA: cualquier otro (p. ej. «contrasena») invalida la configuración y no se guarda,
+# así que un formulario nuevo nunca puede acabar escribiendo un secreto en servidores.json.
+CAMPOS_SERVIDOR = frozenset({"nombre", "ssh", "ssh_admin", "puerto", "id", "webs", "panel", "panel_url", "guardar_ips", "retencion_ips_dias", "detectar_webs"})
 _ID = re.compile(r"^[0-9a-f]{32}$")
 # usuario@host o alias de ~/.ssh/config; sin '-' inicial (seria una opcion de ssh: -oProxyCommand=...)
 _SSH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._-]*(@[A-Za-z0-9._][A-Za-z0-9._-]*)?$")
@@ -79,6 +82,11 @@ def errores_servidores(lista):
         if not isinstance(s, dict):
             errores.append(f"{donde}: no es un objeto")
             continue
+        extra = sorted(str(k)[:30] for k in set(s) - CAMPOS_SERVIDOR)
+        if extra:
+            errores.append(f"{donde}: campo no admitido ({', '.join(extra[:3])})")      # solo los nombres, nunca los valores
+        if "detectar_webs" in s and not isinstance(s["detectar_webs"], bool):
+            errores.append(f"{donde}: detectar_webs debe ser verdadero o falso")
         nombre = s.get("nombre")
         if not (isinstance(nombre, str) and _NOMBRE.fullmatch(nombre)):
             errores.append(f"{donde}: nombre vacio o con caracteres no admitidos")
@@ -138,3 +146,11 @@ def errores_ips(ips):
         except ValueError:
             malas.append(str(ip)[:45])
     return [f"ips_conocidas: no son IPs validas: {', '.join(malas)}"] if malas else []
+
+
+def revision_servidores(lista):
+    """Huella de la lista de servidores tal como la ve la página de Ajustes (sin secretos). Quien guarda la lista entera debe traer la que leyó:
+    si otra operación (un alta, otra pestaña) la cambió entre medias, se rechaza en vez de pisarla."""
+    import hashlib, json
+    canon = json.dumps(lista if lista is not None else [], sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+    return hashlib.sha256(canon.encode("ascii")).hexdigest()[:24]
