@@ -102,7 +102,7 @@ de con historial real.
 
 ## Contribuir
 
-Ver [CONTRIBUTING.md](CONTRIBUTING.md): cómo preparar el entorno, qué tipo de cambios encajan en el
+Los cambios de cada versión están en [CHANGELOG.md](CHANGELOG.md). Ver [CONTRIBUTING.md](CONTRIBUTING.md): cómo preparar el entorno, qué tipo de cambios encajan en el
 repo y el estilo de commits y de PRs que se usa aquí.
 
 ## Qué trae
