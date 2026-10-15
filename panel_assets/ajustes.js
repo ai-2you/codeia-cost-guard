@@ -83,7 +83,7 @@
     let id = null, reloj = null;
     const parar = () => { if (reloj) { clearTimeout(reloj); reloj = null; } };
     const boton = (texto, f, extra) => h("button", Object.assign({onclick: f}, extra || {}), texto);
-    const envia = (accion, cuerpo) => post("/servidores/alta/" + accion, cuerpo).then(r => { if (r.id) id = r.id; dibuja(r); if (r.estado === "en_curso") sondea(); }).catch(e => dibuja({ok: false, mensaje: "No se pudo hablar con la barra: " + e}));
+    const envia = (accion, cuerpo) => { parar(); return post("/servidores/alta/" + accion, cuerpo).then(r => { if (r.id) id = r.id; dibuja(r); if (r.estado === "en_curso") sondea(); }).catch(e => dibuja({ok: false, mensaje: "No se pudo hablar con la barra: " + e})); };
     function sondea(){
       parar();
       reloj = setTimeout(() => fetch("/servidores/alta/estado?id=" + encodeURIComponent(id)).then(r => r.json()).then(r => { dibuja(r); if (r.estado === "en_curso") sondea(); }).catch(() => {}), 1000);

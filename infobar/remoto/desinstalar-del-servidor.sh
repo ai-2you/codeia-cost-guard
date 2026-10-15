@@ -13,9 +13,13 @@ rm -f /usr/local/bin/infobar-recoger
 rm -rf /usr/local/lib/infobar
 if id infobar >/dev/null 2>&1; then
   casa="$(getent passwd infobar | cut -d: -f6)"
-  userdel infobar 2>/dev/null || true
+  userdel infobar 2>/dev/null || true   # si falla, se comprueba al final y se avisa
   # solo se borra la carpeta si es la que creo el alta (nunca una ruta distinta que alguien haya puesto al usuario)
   [ "$casa" = "/home/infobar" ] && rm -rf /home/infobar
+fi
+if id infobar >/dev/null 2>&1; then
+  echo "ATENCION: no se pudo borrar el usuario infobar (userdel fallo). Lo demas si se quito; borra el usuario a mano: sudo userdel infobar"
+  exit 1
 fi
 echo "Listo: el usuario infobar, su clave, sus scripts y su regla de sudo ya no estan en este servidor."
 echo "En tu Mac, quita el servidor de Ajustes y, si ya no lo usas, borra la clave con: rm ~/.ssh/infobar_ed25519*"

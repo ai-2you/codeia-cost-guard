@@ -44,7 +44,9 @@ MENSAJES = {
     "listo_actualiza": "El servidor ya tiene la lectura instalada: se actualizarán los scripts.",
     "terminal_sudo": "Tu usuario necesita contraseña para sudo. Haz el alta en el Terminal (la contraseña no pasa por esta página).",
     "terminal_auth": "No se pudo entrar con tu clave SSH. Haz el alta en el Terminal.",
-    "no_soportado": "De momento solo se admiten Debian y Ubuntu con systemd.",
+    "no_soportado": "De momento solo se admiten Debian y Ubuntu (y derivadas con apt) con systemd.",
+    "falta_sudo": "El servidor no tiene sudo instalado (la lectura de Docker y fail2ban lo necesita). Instálalo (apt install sudo) y repite.",
+    "demasiadas": "Hay demasiadas altas sin terminar: espera unos minutos o repite la última.",
     "allowusers": "El servidor limita quién puede entrar por SSH (AllowUsers/AllowGroups): añade «infobar» allí antes del alta.",
     "huella_cambio": "La huella de este servidor ha cambiado respecto a la guardada. No sigas: puede ser un cambio legítimo o un ataque. Revisa tu known_hosts.",
     "sin_red": "No se pudo conectar con el servidor (red, host o puerto).",
@@ -68,10 +70,12 @@ MENSAJES = {
 # Lo único que se ejecuta en el servidor para diagnosticar: texto fijo, sin nada del usuario. Cada línea es «clave valor» de un conjunto cerrado.
 DIAGNOSTICO = (
     'u=$(id -u); echo "uid $u"; '
-    'if [ "$u" = 0 ]; then echo "privilegio root"; elif sudo -n true 2>/dev/null; then echo "privilegio sudo"; else echo "privilegio ninguno"; fi; '
+    'if [ "$u" = 0 ]; then echo "privilegio root"; '
+    'elif id -nG | tr " " "\\n" | grep -qxE "sudo|wheel|admin" && sudo -n true 2>/dev/null; then echo "privilegio sudo"; else echo "privilegio ninguno"; fi; '
     '. /etc/os-release 2>/dev/null; echo "so ${ID:-x} ${VERSION_ID:-0}"; '
     '[ -d /run/systemd/system ] && echo "systemd si" || echo "systemd no"; '
     'command -v apt-get >/dev/null 2>&1 && echo "apt si" || echo "apt no"; '
+    'command -v visudo >/dev/null 2>&1 && echo "visudo si" || echo "visudo no"; '
     'id infobar >/dev/null 2>&1 && echo "infobar si" || echo "infobar no"; '
     '[ -x /usr/local/bin/infobar-recoger ] && echo "scripts si" || echo "scripts no"; '
     '( sshd -T 2>/dev/null || cat /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null ) | grep -qiE "^[[:space:]]*(allowusers|allowgroups)[[:space:]]" '
@@ -132,7 +136,9 @@ def _ejecuta(orden, entrada=None, tope=30):
 
 
 def _orden_ssh(job, comando, usuario=None, clave=None):
-    base = ["ssh", "-T", "-p", str(job.puerto), *servidores_ssh.OPCIONES_SEGURAS]
+    # -F /dev/null: se ignora el ~/.ssh/config del dueño (alias, ProxyJump, Match exec, otro known_hosts...). Así la huella que se enseña es EXACTAMENTE la que ssh aplica
+    # y nada de esa configuración puede cambiar a dónde se conecta; si el servidor necesita esa configuración, el camino del Terminal sigue usándola.
+    base = ["ssh", "-F", os.devnull, "-T", "-p", str(job.puerto), *servidores_ssh.OPCIONES_SEGURAS]
     if clave:
         base += ["-i", clave, "-o", "IdentitiesOnly=yes"]
     return base + ["--", f"{usuario or job.usuario}@{job.host}", comando]
@@ -169,6 +175,12 @@ def _anade_conocida(linea):
     if not _LINEA_HOST.fullmatch(linea):
         raise AltaError("fallo_huella")
     os.makedirs(os.path.dirname(CONOCIDAS), mode=0o700, exist_ok=True)
+    try:
+        with open(CONOCIDAS, encoding="ascii", errors="replace") as f:
+            if linea in (l.strip() for l in f):
+                return                                            # ya estaba: no se duplica
+    except OSError:
+        pass
     fd = os.open(CONOCIDAS, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "a", encoding="ascii") as f:
         f.write(linea + "\n")
@@ -186,7 +198,7 @@ def _parsea_diagnostico(texto):
             d["privilegio"] = p[1]
         elif l.startswith("so ") and _SO.fullmatch(l):
             d["so"] = _SO.fullmatch(l).group(1)
-        elif len(p) == 2 and p[0] in ("systemd", "apt", "infobar", "scripts", "allowusers") and p[1] in ("si", "no"):
+        elif len(p) == 2 and p[0] in ("systemd", "apt", "visudo", "infobar", "scripts", "allowusers") and p[1] in ("si", "no"):
             d[p[0]] = p[1] == "si"
     return d
 
@@ -197,6 +209,8 @@ def _clasifica(d):
         raise AltaError("sin_red")
     if not (d.get("systemd") and d.get("apt")):
         return "no_soportado", "no_soportado"
+    if not d.get("visudo"):
+        return "no_soportado", "falta_sudo"                       # sin sudo/visudo la instalación fallaría a medias (usuario y scripts sí, la regla de sudo no)
     if d["privilegio"] == "ninguno":
         return "terminal", "terminal_sudo"
     if d.get("allowusers"):
@@ -278,7 +292,7 @@ def _instalar(job, como_root):
     job.pon("en_curso", "instalando")
     codigo, _, err = _ejecuta(_orden_ssh(job, comando_instalacion(publica, como_root)), entrada=_paquete(), tope=90)
     if codigo != 0:
-        raise AltaError("fallo_instalacion" if codigo is not None else _error_ssh(err))
+        raise AltaError(_error_ssh(err) if codigo in (None, 255) else "fallo_instalacion")      # 255 = ssh no llegó a ejecutar nada (red, huella, autenticación)
     job.pon("en_curso", "probando")
     _probar_y_guardar(job)
 
@@ -344,7 +358,7 @@ def _busca(cuerpo, *estados):
 
 def _respuesta(a=None, error=None):
     if error:
-        return (429 if error in ("espera", "ocupado") else 400), {"ok": False, "codigo": error, "mensaje": MENSAJES[error]}
+        return (429 if error in ("espera", "ocupado", "demasiadas") else 400), {"ok": False, "codigo": error, "mensaje": MENSAJES[error]}
     return 200, {"ok": True, **a.publico()}
 
 
@@ -360,8 +374,8 @@ def atiende(accion, cuerpo, ahora=None):
                     raise AltaError("ocupado")
                 if ahora < _ENFRIA_HASTA[0]:
                     raise AltaError("espera")
-                if len(_ALTAS) >= MAX_ALTAS:
-                    raise AltaError("ocupado")
+                if sum(1 for x in _ALTAS.values() if x.estado in ("en_curso", "huella", "listo", "terminal")) >= MAX_ALTAS:
+                    raise AltaError("demasiadas")                # las terminadas (hecho, error, no soportado) no cuentan
                 a = Alta(nombre, usuario, host, puerto)
                 _ALTAS[a.id] = a
                 _corre(a, _diagnostico)

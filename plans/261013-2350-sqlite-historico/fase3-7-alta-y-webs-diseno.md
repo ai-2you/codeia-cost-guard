@@ -78,7 +78,12 @@ lo es) y fija los rangos que dependían de la versión de Python. Pendiente: 3.7
 
 **3.7a hecha (2026-10-15)**: `servidores_alta.py` (diagnóstico, huella, instalación por stdin con tar, prueba y guardado por `modificar_servidores`), rutas `/servidores/alta/*` con toda la puerta del
 panel, componente en Ajustes (probado en un navegador real con ssh falsos: huella → instalar → hecho → 409 al guardar con la lista vieja), `desinstalar-del-servidor.sh`, 32 tests y 24 mutaciones.
-Pendiente: revisión de código independiente de la 3.7a.
+Revisión independiente (`../reports/revision-codigo-fase3-7a-261015.md`) y correcciones: la comprobación de la revisión y la escritura de `/guardar` van bajo el mismo cerrojo de
+`servidores.json` que usa el alta (`guardar_con_revision`; un alta concurrente ya no se pierde); el alta ejecuta `ssh -F /dev/null` (ignora el `~/.ssh/config` del dueño: la huella que se enseña
+es la que ssh aplica; el camino del Terminal sí lo usa); el diagnóstico exige `visudo` (si no, «falta sudo» antes de tocar nada) y solo prueba `sudo -n` si el usuario está en un grupo de sudo
+(sin dejar un «incidente» en el log); un 255 de ssh no se muestra como fallo de instalación; el tope de 5 altas cuenta solo las abiertas; las altas en curso no se olvidan por viejas; el
+`known_hosts` no duplica líneas; y la orden remota se ejecuta de verdad en los tests (directorio de `mktemp` aleatorio, 0700 y borrado siempre). Decisión: el alta exige `usuario@host`
+(sin alias) y «Debian/Ubuntu» = `apt` + systemd + `visudo`.
 
 ## Orden de entrega (cada paso con revisión de código independiente y mutaciones)
 **F1+F2** (guardado seguro) → **F3+F4** (sondeador) → **3.7a** alta → **3.7b** detección → **3.7c** seguimiento.

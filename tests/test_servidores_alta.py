@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -48,11 +49,14 @@ if cfg.get("sin_auth"):
     sys.stderr.write("Permission denied (publickey).\n" + %(sec)r); sys.exit(255)
 if "instalar-en-servidor.sh" in cmd:
     open(os.environ["FAKE_TAR"], "wb").write(entrada)
+    if cfg.get("instalar_rc") == 255:
+        sys.stderr.write("Permission denied (publickey).\n" + %(sec)r); sys.exit(255)
     sys.stdout.write(%(sec)r); sys.exit(cfg.get("instalar_rc", 0))
 d = cfg.get("diag", "root")
 out = ["uid 0" if d == "root" else "uid 1000",
        "privilegio " + {"root": "root", "allowusers": "root", "sin_systemd": "root", "sudo": "sudo"}.get(d, "ninguno"),
        "so ubuntu 24.04", "systemd " + ("no" if d == "sin_systemd" else "si"), "apt si",
+       "visudo " + ("no" if cfg.get("sin_visudo") else "si"),
        "infobar " + ("si" if cfg.get("instalado") else "no"), "scripts " + ("si" if cfg.get("instalado") else "no"),
        "allowusers " + ("si" if d == "allowusers" else "no"), "texto libre que no debe pasar: " + %(sec)r, "fin"]
 sys.stdout.write("\n".join(out) + "\n")
@@ -234,6 +238,22 @@ class DiagnosticoTest(Base):
         self.assertNotIn("huella", r)
         self.assertNotIn("comprobar_en_servidor", r)
 
+    def test_se_ignora_el_ssh_config_del_dueño_y_se_usa_su_known_hosts(self):
+        self.listo()
+        ssh = [c for c in self.llamadas() if c["prog"] == "ssh"][0]["args"]
+        self.assertEqual(ssh[ssh.index("-F") + 1], os.devnull)                           # ni alias, ni ProxyJump, ni Match exec, ni otro known_hosts
+        f_ = [c for c in self.llamadas() if c["prog"] == "ssh-keygen" and "-F" in c["args"]][0]["args"]
+        self.assertEqual(f_[f_.index("-f") + 1], self.conocidas)                         # y se mira el MISMO known_hosts que usa el monitor
+
+    def test_sin_sudo_instalado_no_es_soportado_con_su_mensaje(self):
+        self.fake({"conocida": True, "sin_visudo": True})
+        r = self.espera(self.diagnostica())
+        self.assertEqual((r["estado"], r["codigo"]), ("no_soportado", "falta_sudo"))
+
+    def test_el_diagnostico_solo_prueba_sudo_si_el_usuario_esta_en_un_grupo_de_sudo(self):
+        # `sudo -n true` de un usuario que no está en sudoers deja un «incidente» en el log del servidor y a veces un correo a root
+        self.assertIn('grep -qxE "sudo|wheel|admin" && sudo -n true', alta.DIAGNOSTICO)
+
     def test_ya_instalado_se_avisa(self):
         self.fake({"conocida": True, "instalado": True})
         r = self.espera(self.diagnostica())
@@ -319,11 +339,23 @@ class EntradasHostilesTest(Base):
         alta.atiende("estado", {"id": id_}, ahora=time.time() + alta.VIDA_S + 5)
         self.assertEqual(alta.atiende("estado", {"id": id_})[1]["codigo"], "desconocida")
 
+    def test_una_alta_en_curso_no_se_olvida_por_vieja(self):
+        self.fake({"conocida": True, "espera": 1.5})
+        id_ = self.diagnostica()
+        alta.atiende("estado", {"id": id_}, ahora=time.time() + alta.VIDA_S + 5)
+        self.assertEqual(alta.atiende("estado", {"id": id_})[1]["estado"], "en_curso")
+        self.espera(id_)
+
     def test_tope_de_altas_guardadas(self):
         for i in range(alta.MAX_ALTAS):
             self.listo()
             alta._ENFRIA_HASTA[0] = 0.0
-        self.assertEqual(alta.atiende("diagnostico", {"nombre": "x", "ssh": "root@srv.example.com"})[1]["codigo"], "ocupado")
+        self.assertEqual(alta.atiende("diagnostico", {"nombre": "x", "ssh": "root@srv.example.com"})[1]["codigo"], "demasiadas")
+        # las terminadas no cuentan: con una en error (o hecha) vuelve a haber hueco
+        a = next(iter(alta._ALTAS.values()))
+        a.pon("error", "sin_red")
+        alta._ENFRIA_HASTA[0] = 0.0
+        self.assertEqual(alta.atiende("diagnostico", {"nombre": "x", "ssh": "root@srv.example.com"})[0], 200)
 
 
 class InstalacionTest(Base):
@@ -393,6 +425,11 @@ class InstalacionTest(Base):
         with self.assertRaises(alta.AltaError):
             alta.comando_instalacion("ssh-ed25519 x'; id #", True)
 
+    def test_un_255_de_ssh_no_es_un_fallo_de_instalacion(self):
+        id_, r = self.instala(instalar_rc=255)
+        self.assertEqual((r["estado"], r["codigo"]), ("error", "terminal_auth"))
+        self.assertFalse(any(s["nombre"] == "nuevo" for s in config_y_estado.cfg()["servidores"]))
+
     def test_si_la_instalacion_falla_no_se_guarda_nada(self):
         antes = json.dumps(config_y_estado.cfg()["servidores"], sort_keys=True)
         id_, r = self.instala(instalar_rc=1)
@@ -440,6 +477,59 @@ class InstalacionTest(Base):
         self.assertFalse(any(s["nombre"] == "nuevo" for s in config_y_estado.cfg()["servidores"]))
 
 
+class ComandoRemotoTest(Base):
+    """La orden remota EJECUTADA de verdad con `sh`, `mktemp` y `tar` locales y un `bash`/`sudo` de pega: directorio temporal propio y aleatorio, 0700, se borra siempre."""
+
+    def corre(self, como_root):
+        import re as _re
+        shims = os.path.join(self.dir, "shims")
+        os.makedirs(shims, exist_ok=True)
+        registro = os.path.join(self.dir, "registro.jsonl")
+        with open(os.path.join(shims, "bash"), "w") as f:                      # sustituye a `bash instalar-en-servidor.sh KEY`
+            f.write(f'#!{sys.executable}\nimport json, os, sys\nd = os.path.dirname(sys.argv[1])\n'
+                    'info = {"dir": d, "modo": oct(os.stat(d).st_mode & 0o777), "scripts": sorted(os.listdir(d)), '
+                    '"modos": sorted(oct(os.stat(os.path.join(d, n)).st_mode & 0o777) for n in os.listdir(d)), "clave": sys.argv[2], "argc": len(sys.argv)}\n'
+                    f'open({registro!r}, "a").write(json.dumps(info) + "\\n")\n')
+        with open(os.path.join(shims, "sudo"), "w") as f:
+            f.write('#!/bin/sh\n[ "$1" = "-n" ] && shift\necho sudo >> ' + os.path.join(self.dir, "sudo.log") + '\nexec "$@"\n')
+        for n in ("bash", "sudo"):
+            os.chmod(os.path.join(shims, n), 0o755)
+        cmd = alta.comando_instalacion(PUB, como_root)
+        r = subprocess.run(["sh", "-c", cmd], input=alta._paquete(), capture_output=True, timeout=30,
+                           env={"PATH": shims + os.pathsep + "/usr/bin:/bin:/usr/local/bin", "HOME": self.dir})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(registro) as f:
+            return [json.loads(l) for l in f], _re
+
+    def test_directorio_temporal_aleatorio_privado_y_borrado(self):
+        a, _re = self.corre(True)
+        b, _ = self.corre(True)
+        for visto in (a[-1], b[-1]):
+            self.assertRegex(visto["dir"], r"/infobar-alta\.[A-Za-z0-9]{6}$")
+            self.assertEqual(visto["modo"], "0o700")                                  # otro usuario del servidor no puede plantar nada ahí
+            self.assertEqual(visto["scripts"], sorted(alta.SCRIPTS))
+            self.assertEqual(set(visto["modos"]), {"0o755"})
+            self.assertEqual((visto["clave"], visto["argc"]), (PUB, 3))               # la clave llega como UN solo argumento
+            self.assertFalse(os.path.exists(visto["dir"]))                            # y el trap lo borra
+        self.assertNotEqual(a[-1]["dir"], b[-1]["dir"])                               # nunca una ruta fija
+
+    def test_sudo_solo_si_no_es_root_y_se_limpia_aunque_falle(self):
+        sudo_log = os.path.join(self.dir, "sudo.log")
+        self.corre(True)
+        self.assertFalse(os.path.exists(sudo_log))
+        self.corre(False)
+        self.assertTrue(os.path.exists(sudo_log))
+        # un instalador que falla: el directorio se borra igual
+        shims = os.path.join(self.dir, "shims")
+        with open(os.path.join(shims, "bash"), "w") as f:
+            f.write("#!/bin/sh\necho $(dirname $1) > " + os.path.join(self.dir, "ultimo.txt") + "\nexit 7\n")
+        r = subprocess.run(["sh", "-c", alta.comando_instalacion(PUB, True)], input=alta._paquete(), capture_output=True, timeout=30,
+                           env={"PATH": shims + os.pathsep + "/usr/bin:/bin", "HOME": self.dir})
+        self.assertEqual(r.returncode, 7)
+        with open(os.path.join(self.dir, "ultimo.txt")) as f:
+            self.assertFalse(os.path.exists(f.read().strip()))
+
+
 class KnownHostsTest(Base):
     def test_solo_se_añaden_lineas_con_la_forma_de_una_clave_de_host(self):
         for mala in ("host ssh-rsa AAAA", "host ssh-ed25519 corta", "dos\nlineas ssh-ed25519 " + CLAVE_B64, "host ssh-ed25519 " + CLAVE_B64 + " extra", "", "-oX ssh-ed25519 " + CLAVE_B64,
@@ -449,6 +539,7 @@ class KnownHostsTest(Base):
         self.assertFalse(os.path.exists(self.conocidas))
         alta._anade_conocida(f"[h.example.com]:22 ssh-ed25519 {CLAVE_B64}")
         alta._anade_conocida(f"h2.example.com ssh-ed25519 {CLAVE_B64}")
+        alta._anade_conocida(f"h2.example.com ssh-ed25519 {CLAVE_B64}")           # la misma línea otra vez: no se duplica
         with open(self.conocidas) as f:
             self.assertEqual(len(f.read().splitlines()), 2)
 

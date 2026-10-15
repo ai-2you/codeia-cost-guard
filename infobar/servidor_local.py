@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 from . import ajustes, claves, exportacion, exportacion_csv, historico, presupuestos, rutas, servidores_alta, servidores_api
 from . import cuota_nan
 from .agregacion import informe
-from .config_y_estado import cfg, guardar_config, log, olvidar_cache
+from .config_y_estado import cfg, guardar_con_revision, guardar_config, log, olvidar_cache
 from .servidores import _errores_ips_guardadas, errores_ips, errores_servidores, revision_servidores
 
 
@@ -126,7 +126,6 @@ def es_secreto(nombre):
 
 
 RUTAS_ALTA = {f"/servidores/alta/{a}": a for a in ("diagnostico", "huella", "instalar", "comprobar")}
-_CERROJO_GUARDADO = threading.Lock()       # comprobar la revisión de los servidores y escribir son un solo paso
 
 
 def con_revision(c):
@@ -396,17 +395,17 @@ def crear_servidor(puerto=PUERTO):
                 if errores:
                     return self._json(400, {"ok": False, "error": "; ".join(errores[:5])})
                 rev = nuevo.pop("servidores_rev", None)
-                with _CERROJO_GUARDADO:
-                    if "servidores" in nuevo and rev != revision_servidores(sin_secretos(cfg().get("servidores"))):
-                        # la lista cambió desde que la página la leyó (un alta, otra pestaña): guardar la copia vieja la pisaría
-                        return self._json(409, {"ok": False, "conflicto": True, "error": "la lista de servidores cambió: recarga la página antes de guardar"})
-                    try:
-                        with open(rutas.CONFIG, encoding="utf-8") as f:
-                            en_disco = json.load(f)
-                    except (OSError, ValueError):
-                        en_disco = {}
-                    guardar_config(sin_secretos(ajustes.normalizar(nuevo, en_disco, cfg().get("servidores"))))
-                    nueva_rev = revision_servidores(sin_secretos(cfg().get("servidores")))
+                try:
+                    with open(rutas.CONFIG, encoding="utf-8") as f:
+                        en_disco = json.load(f)
+                except (OSError, ValueError):
+                    en_disco = {}
+                parche = sin_secretos(ajustes.normalizar(nuevo, en_disco, cfg().get("servidores")))
+                # la revisión se comprueba y la lista se escribe bajo el cerrojo de servidores.json (el mismo que usa un alta): un alta a la vez no se pierde
+                if not guardar_con_revision(parche, lambda lista: "servidores" not in nuevo or rev == revision_servidores(sin_secretos(lista))):
+                    # la lista cambió desde que la página la leyó (un alta, otra pestaña): guardar la copia vieja la pisaría
+                    return self._json(409, {"ok": False, "conflicto": True, "error": "la lista de servidores cambió: recarga la página antes de guardar"})
+                nueva_rev = revision_servidores(sin_secretos(cfg().get("servidores")))
                 try:
                     olvidar_cache()                    # el plan de cada fichero cacheado depende de la config
                 except OSError:

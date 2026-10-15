@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -137,6 +138,27 @@ class ModificarServidoresTest(LimpiaConfig):
         [h.join() for h in hilos]
         nombres = {s["nombre"] for s in config_y_estado.cfg()["servidores"]}
         self.assertEqual(len(nombres), 1 + 50)                                  # el heredado de config.json y los 50 añadidos, ninguno pisado
+
+    def test_guardar_con_revision_no_pisa_un_alta_que_escribe_a_la_vez(self):
+        base = config_y_estado.cfg()["servidores"]
+        rev_vieja = revision_servidores(base)
+        resultado = []
+
+        def guarda_con_la_copia_vieja():
+            resultado.append(config_y_estado.guardar_con_revision(
+                {"servidores": base, "aliases": {"x": "y"}}, lambda actual: revision_servidores(actual) == rev_vieja))
+
+        def alta(lista):
+            hilo = threading.Thread(target=guarda_con_la_copia_vieja)
+            hilo.start()                                                      # la página intenta guardar mientras el alta tiene la lista en las manos
+            time.sleep(0.4)
+            self.hilo = hilo
+            return lista + [{"nombre": "recien-llegado", "ssh": "infobar@nuevo"}]
+        config_y_estado.modificar_servidores(alta)
+        self.hilo.join(10)
+        self.assertEqual(resultado, [False])                                  # esperó el cerrojo, vio la lista nueva y NO escribió nada
+        self.assertEqual([s["nombre"] for s in config_y_estado.cfg()["servidores"]], ["produccion", "recien-llegado"])
+        self.assertNotIn("x", _lee_config().get("aliases", {}))                # ni el resto de la configuración
 
     def test_trabaja_sobre_la_lista_actual_y_no_escribe_si_no_cambia(self):
         self.assertEqual(config_y_estado.modificar_servidores(lambda l: l), CONFIG_BASE["servidores"])      # parte de la lista heredada de config.json

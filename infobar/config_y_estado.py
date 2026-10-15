@@ -151,6 +151,34 @@ def modificar_servidores(fn):
         return nueva
 
 
+def servidores_actuales():
+    """La lista de servidores tal como está ahora en disco (servidores.json; o, si la instalación aún no se migró, la de config.json). Sin cerrojo."""
+    lista = _lee_json(rutas.CONFIG_SERVIDORES).get("servidores")
+    if not isinstance(lista, list):
+        heredada = _lee_json(rutas.CONFIG).get("servidores")
+        lista = heredada if isinstance(heredada, list) else []
+    return lista
+
+
+def guardar_con_revision(parche, lista_vigente):
+    """`guardar_config(parche)` pero, si el parche trae la lista de servidores, solo cuando `lista_vigente(lista_actual)` dice que quien guarda vio la lista
+    ACTUAL; la comprobación y la escritura van bajo el mismo cerrojo de servidores.json que usa un alta (`modificar_servidores`), así que un alta que escribe a
+    la vez no se pierde. Devuelve False (sin escribir NADA, tampoco el resto de la configuración) si la lista cambió."""
+    srv = {k: v for k, v in parche.items() if k in CLAVES_SERVIDORES}
+    resto = {k: v for k, v in parche.items() if k not in CLAVES_SERVIDORES}
+    if srv:
+        with _bloqueo(rutas.CONFIG_SERVIDORES):
+            if not lista_vigente(servidores_actuales()):
+                return False
+            actual = _lee_json(rutas.CONFIG_SERVIDORES)
+            nuevo = {**actual, **srv}
+            if nuevo != actual or not os.path.exists(rutas.CONFIG_SERVIDORES):
+                _escribe_json(rutas.CONFIG_SERVIDORES, nuevo)
+    if resto:
+        guardar_config(resto)
+    return True
+
+
 def guardar_config(parche):
     """Fusiona `parche` (claves de primer nivel) y lo guarda de forma atomica: lo de servidores en
     servidores.json y el resto en config.json. Las claves que no vienen se conservan. Antes de
