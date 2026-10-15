@@ -96,3 +96,37 @@ Pre-mortem y red team antes de codificar. Después: tests con servidor simulado 
 rango, miles de IPs distintas, tiempos del futuro), `secure_delete` y purga comprobadas leyendo los bytes del fichero tras borrar,
 caducidad con reloj inyectado, el ciclo que sigue funcionando con la base bloqueada o llena, mutaciones sobre el filtro de IPs globales y
 sobre la caducidad, y una revisión independiente del código con foco en privacidad.
+
+## Diseño v3 (2026-10-15): lo que se construye en la 3.1 tras el pre-mortem y el red team (`../reports/revision-diseno-fase3-261014.md`)
+
+Sustituye a lo anterior donde se contradicen. Se construye en tres piezas, cada una con tests, mutaciones y revisión de código.
+
+**Pieza A — núcleo SQLite compartido.** `infobar/sqlite_base.py` recibe de `almacen.py` la apertura (rutas no fiables, PRAGMA, WAL, permisos,
+reintentos, `mode=ro`) parametrizada por la función de migración. `almacen.abrir` pasa a ser una llamada al núcleo; el comportamiento no cambia.
+
+**Pieza B — `infobar/servidores_historico.py` y `DATOS/servidores.sqlite`** (`user_version` propio, copia previa a migrar **sin IPs**, caduca a 30 días):
+- `servidores(id TEXT PK, nombre, creado_en, retirado_en)`: identidad por `id` estable (uuid de `servidores.json`); renombrar cambia `nombre`; quitar un
+  servidor lo marca retirado y sus IPs se borran en la siguiente purga.
+- `muestras(servidor_id, ts, estado, <métricas NULL si ilegibles>)`: `ts` = `ok_en` (reloj del Mac). Una fila por lectura buena; una fila de estado
+  (`error`) **sin métricas** por intento fallido. Dedupe por `ok_en` guardado en `meta`. Un máximo de una muestra por franja de 5 min (en incidencia
+  se conserva la de mayor valor). Crudo 14 días.
+- `horas_servidor`: compactación permanente con `n`, picos y medias; las ventanas de 24 h se rotulan **picos**, nunca sumas.
+- `ips_atacantes(servidor_id, ip, primera, ultima, max_24h, horas_vista, ultima_hora)`: IP canónica (`ipv4_mapped` desenvuelta **antes** de
+  `is_global`, sin `%`, ≤45 caracteres, sin reservadas ni no especificadas), **excluidas** `ips_conocidas` (se cuentan aparte como `intentos_propios`).
+  Sin `caduca_en` almacenado: se calcula de `ultima` + retención vigente y **se filtra al leer**. Tope de 500 altas por servidor y día; expulsión por
+  `(horas_vista, ultima)` ascendente; tope de 5 000 por servidor.
+- Todo valor del servidor se parsea con función estricta; lo ilegible es `NULL`; fuera de rango descarta la muestra entera y se cuenta en `meta`.
+- `guardar_ips` y `retencion_ips_dias` globales con override por servidor (retención 7–90 días, 90 por defecto; 180 solo con justificación escrita).
+- Mantenimiento propio (purga al arrancar y cada hora, checkpoint reintentado hasta `busy = 0`, `VACUUM` mensual con `temp_store=MEMORY`), con
+  presupuesto de tiempo y retroceso (un intento por hora y un solo `log()` sin valores).
+- Orden `costbar.py --olvidar-ips [--servidor NOMBRE]` con auditoría de recuento (nunca las IPs).
+- Clasificación `CLASES_SERVIDORES` con test de cobertura: `ip` y `servidores.nombre` personales.
+
+**Pieza C — integración.** `servidores_ciclo.ciclo(..., historial=None)` llama al registrador **fuera** de `_bloqueo` y solo si el trabajador de la barra se
+lo pasa (el `__main__` y los tests no escriben la base). Un fallo de la base no propaga. `normalizar` genera el `id` de cada servidor. Endpoints de solo lectura
+`/servidores/historia` y `/servidores/ips` (esta última exige `servidor=` y `con_ips=1`, deja auditoría con el número de IPs servidas). La pantalla va en la 3.6.
+
+**Fuera de la 3.1 (decisiones):** las tablas genéricas de recursos y eventos se añaden con una migración numerada en la 3.3a, cuando existe el primer
+productor de esos datos (diseñarlas antes es adivinar su forma); `recoger.sh` v2 (histograma por hora y filtro por `_COMM`) va en la 3.3a. Las copias
+cifradas siguen sin incluir `servidores.sqlite`. Declarado: las IPs que cuenta un servidor son «según ese servidor» y pueden estar envenenadas hasta que
+`recoger.sh` v2 filtre por campos de confianza; la pantalla lo dirá.
