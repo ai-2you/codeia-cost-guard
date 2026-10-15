@@ -1,0 +1,70 @@
+"""Lectura del historial de servidores (conexión `mode=ro`): series por hora o día y tabla de IPs con caducidad.
+
+Las IPs solo salen de `ips()`, filtradas por la retención vigente aunque la purga no haya corrido, y nunca van en la serie. Las cifras de
+intentos de acceso son PICOS de la ventana de 24 h que mide el servidor: no se suman ni se presentan como intentos del día."""
+import datetime
+import time
+
+from . import historico, servidores_historico as sh
+
+MAX_HORAS = 14 * 24
+MAX_IPS_SALIDA = 500
+CAMPOS = ("n", "errores", "carga_max", "mem_max", "disco_max", "intentos_pico_24h", "intentos_pico_1h", "baneadas_max", "sesiones_ajenas_max")
+_RANGO = sh._RANGO
+
+
+def _fila(r):
+    return {k: r[k] for k in CAMPOS} | {"estado": r["estado_peor"]}
+
+
+def _junta(a, b):
+    """Funde dos puntos: picos con máximo, recuentos con suma y el peor estado."""
+    out = {"n": a["n"] + b["n"], "errores": a["errores"] + b["errores"]}
+    for k in CAMPOS[2:]:
+        x, y = a[k], b[k]
+        out[k] = y if x is None else (x if y is None else max(x, y))
+    out["estado"] = max(a["estado"], b["estado"], key=lambda e: _RANGO[e])
+    return out
+
+
+def servidores(con):
+    return [{"id": r["id"], "nombre": r["nombre"], "retirado": r["retirado_en"] is not None, "ok_en": r["ok_en"] or None}
+            for r in con.execute("SELECT id, nombre, retirado_en, ok_en FROM servidores ORDER BY nombre")]
+
+
+def historia(con, servidor_id, desde, hasta, paso="dia"):
+    """Serie de un servidor entre dos fechas locales (AAAA-MM-DD): por día (máx. 400) o por hora (máx. 14 días)."""
+    if paso not in ("hora", "dia"):
+        raise historico.ErrorHistorico("paso no permitido")
+    d0, d1 = historico._fecha(desde, "desde"), historico._fecha(hasta, "hasta")
+    if d0 > d1:
+        raise historico.ErrorHistorico("'desde' es posterior a 'hasta'")
+    dias = (d1 - d0).days + 1
+    if dias > (14 if paso == "hora" else historico.MAX_PUNTOS):
+        raise historico.ErrorHistorico("demasiados puntos para ese rango: usa un paso mayor o acorta el rango")
+    lo, hi = historico._medianoche(d0), historico._medianoche(d1 + datetime.timedelta(days=1))
+    srv = con.execute("SELECT nombre FROM servidores WHERE id=?", (servidor_id,)).fetchone()
+    if srv is None:
+        raise sh.SinDatos()
+    puntos = {}
+    for r in con.execute("SELECT * FROM horas_servidor WHERE servidor_id=? AND hora>=? AND hora<? ORDER BY hora", (servidor_id, lo, hi)):
+        if paso == "hora":
+            clave = r["hora"]
+            etiqueta = time.strftime("%Y-%m-%dT%H:00", time.localtime(r["hora"]))
+        else:
+            t = time.localtime(r["hora"])
+            clave = etiqueta = f"{t.tm_year:04d}-{t.tm_mon:02d}-{t.tm_mday:02d}"
+        f = _fila(r)
+        puntos[clave] = (etiqueta, _junta(puntos[clave][1], f) if clave in puntos else f)
+    return {"servidor": srv["nombre"], "paso": paso, "desde": d0.isoformat(), "hasta": d1.isoformat(),
+            "nota": "los intentos de acceso son picos de la ventana de 24 h del servidor, no sumas",
+            "puntos": [{"t": e, **p} for e, p in puntos.values()]}
+
+
+def ips(con, servidor_id, ahora, retencion_dias=None):
+    """IPs de intentos de acceso de un servidor dentro de plazo (la caducidad se calcula con la retención vigente)."""
+    ret = sh.retencion_dias(retencion_dias) * 86400
+    filas = con.execute("SELECT ip, primera, ultima, max_24h, horas_vista FROM ips_atacantes WHERE servidor_id=? AND ultima >= ? "
+                        "ORDER BY ultima DESC, ip LIMIT ?", (servidor_id, int(ahora) - ret, MAX_IPS_SALIDA)).fetchall()
+    return [{"ip": r["ip"], "primera": r["primera"], "ultima": r["ultima"], "max_24h": r["max_24h"], "horas_vista": r["horas_vista"],
+             "caduca_en": r["ultima"] + ret} for r in filas]
