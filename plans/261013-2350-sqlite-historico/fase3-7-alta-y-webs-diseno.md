@@ -89,6 +89,12 @@ es la que ssh aplica; el camino del Terminal sí lo usa); el diagnóstico exige 
 con docker y ficheros falsos), `servidores_webs.py` (parseo hostil, resolución con presupuesto, clasificación apuntan/otros/internos/sin resolver, NAT64 y 6to4 por su IPv4, aceptar/quitar por
 `id` solo lo detectado, tope de 100), rutas `/servidores/webs/detectadas` y `/servidores/webs`, componente en Ajustes (probado en un navegador real), 31 tests y 28 mutaciones. Pendiente:
 revisión de código independiente de la 3.7b.
+Revisión (`../reports/revision-codigo-fase3-7b-261015.md`) y correcciones: la extracción corre bajo UN `timeout` de 3 s y solo arranca si no se han gastado 6 s (no puede tumbar las demás
+secciones de root; un docker colgado es «fuente error», nunca «cero webs»); gramática completa de `Host(...)` (un paréntesis sin cerrar no arrastra otros valores); solo ficheros normales
+(`-type f`, sin enlaces, fifos ni subdirectorios) y el primer megabyte de cada uno; `POST /servidores/webs` exige y comprueba la revisión de la lista dentro de `modificar_servidores` (409 si
+cambió); los dominios «de otro sitio» se prueban con un saludo TLS a la IP del servidor (si el certificado es válido para ellos, el servidor los sirve aunque el DNS apunte a una CDN o el SSH
+vaya por una red privada); hilos de DNS/TLS daemon con tope y sin cachear lo incompleto; quitar una web (o guardar Ajustes con menos webs) borra su estado de `webs.json` al instante; quitar por
+URL exacta o por dominio; `.onion/.test/.invalid/.arpa` no son dominios públicos; el 500 queda en el log. Pendiente: nada de la 3.7b.
 
 ## Orden de entrega (cada paso con revisión de código independiente y mutaciones)
 **F1+F2** (guardado seguro) → **F3+F4** (sondeador) → **3.7a** alta → **3.7b** detección → **3.7c** seguimiento.

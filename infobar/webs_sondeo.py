@@ -182,6 +182,22 @@ def pasada(servidores, ahora=None, medir=medir_web, red=sin_red):
         _EN_MARCHA.release()
 
 
+def olvidar(urls=None, servidores=None):
+    """Borra YA el estado guardado de unas URLs (`urls`) o de todas las que ya no están en la configuración (`servidores`). Devuelve cuántas quitó.
+    Quitar una web del seguimiento no deja su estado esperando a la siguiente pasada."""
+    with _bloqueo(ruta()):
+        d = _lee_json(ruta())
+        webs = d.get("webs") if isinstance(d.get("webs"), dict) else {}
+        vigentes = {u for _, u in urls_de(servidores)} if servidores is not None else None
+        fuera = [u for u in list(webs) if (u in set(urls or ())) or (vigentes is not None and u not in vigentes)]
+        for u in fuera:
+            del webs[u]
+        if fuera:
+            d["webs"] = webs
+            _escribe_json(ruta(), d)
+    return len(fuera)
+
+
 def medidas(servidor, estado=None, ahora=None):
     """Lo último medido de las webs de un servidor, con la forma de siempre: [{url, ms, codigo, error, cert_dias}]. Una web sin medir aún, o cuya medida es
     demasiado vieja para decir cómo está ahora (pasadas descartadas por falta de red, sondeo atascado), no aparece: mejor «sin dato» que un verde falso."""

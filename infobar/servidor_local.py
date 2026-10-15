@@ -418,6 +418,11 @@ def crear_servidor(puerto=PUERTO):
                     return self._json(409, {"ok": False, "conflicto": True, "error": "la lista de servidores cambió: recarga la página antes de guardar"})
                 nueva_rev = revision_servidores(sin_secretos(cfg().get("servidores")))
                 try:
+                    from . import webs_sondeo
+                    webs_sondeo.olvidar(servidores=cfg().get("servidores") or [])     # las webs que ya no están en la lista pierden su estado ahora
+                except Exception as e:
+                    log(f"webs: no se pudo podar el estado ({type(e).__name__})")
+                try:
                     olvidar_cache()                    # el plan de cada fichero cacheado depende de la config
                 except OSError:
                     pass

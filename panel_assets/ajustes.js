@@ -132,13 +132,24 @@
   function detectorWebs(s){
     if (!s.id) return null;
     const salida = h("div", {style: "margin-top:8px"});
-    const fila = (x, grupo, marcas) => h("label", {style: "display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:13px;color:var(--texto)"},
-      h("input", {type: "checkbox", onchange: ev => { ev.target.checked ? marcas.add(x.host) : marcas.delete(x.host); }}), h("code", {}, x.host), x.unicode ? h("span", {class: "ayuda", style: "margin:0"}, "(" + x.unicode + ")") : null);
+    const fila = (x, marcas, valor, extra) => h("label", {style: "display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:13px;color:var(--texto)"},
+      h("input", {type: "checkbox", onchange: ev => { ev.target.checked ? marcas.add(valor) : marcas.delete(valor); }}), h("code", {}, x.host),
+      x.unicode ? h("span", {class: "ayuda", style: "margin:0"}, "(" + x.unicode + ")") : null, extra ? h("span", {class: "ayuda", style: "margin:0"}, extra) : null);
     function envia(cuerpo){
       leer();
-      post("/servidores/webs", Object.assign({servidor: s.id}, cuerpo)).then(r => {
+      post("/servidores/webs", Object.assign({servidor: s.id, servidores_rev: A.config.servidores_rev}, cuerpo)).then(r => {
+        if (r.conflicto) {      // un alta (u otra pestaña) cambió la lista: se trae la actual y se conserva lo demás
+          return fetch("/ajustes").then(x => x.json()).then(d => {
+            A.config.servidores = (d.config && d.config.servidores) || []; A.config.servidores_rev = d.config && d.config.servidores_rev;
+            $("vista-ajustes").replaceChildren(...pinta());
+          });
+        }
         if (!r.ok) { salida.replaceChildren(h("p", {class: "msg err"}, r.mensaje || "No se pudo guardar.")); return; }
-        s.webs = r.webs.length ? r.webs : undefined; A.config.servidores_rev = r.servidores_rev;
+        // lo que el dueño tenía escrito sin guardar se conserva: solo se aplican a la lista de la página los cambios que se acaban de hacer
+        const quita = new Set(cuerpo.quitar || []), anade = (cuerpo.aceptar || []).map(x => "https://" + x + "/");
+        const actual = (s.webs || []).filter(u => !quita.has(u) && ![...quita].some(q => !q.startsWith("http") && u.split("/")[2] === q));
+        for (const u of anade) if (!actual.includes(u)) actual.push(u);
+        s.webs = actual.length ? actual : undefined; A.config.servidores_rev = r.servidores_rev;
         $("vista-ajustes").replaceChildren(...pinta());
       }).catch(e => salida.replaceChildren(h("p", {class: "msg err"}, "No se pudo hablar con la barra: " + e)));
     }
@@ -146,17 +157,19 @@
       if (!r.ok) return salida.replaceChildren(h("p", {class: "msg err"}, r.mensaje || "No se pudo consultar."));
       if (r.estado === "desactivada") return salida.replaceChildren(h("p", {class: "ayuda"}, "La detección está desactivada para este servidor."));
       if (r.estado === "sin_dato") return salida.replaceChildren(h("p", {class: "ayuda"}, "El servidor aún no ha enviado la lista de dominios (hace falta la lectura nueva: «Actualizar con mi clave» en el alta, o espera un ciclo)."));
-      const marcar = new Set(), quitar = new Set(), piezas = [];
-      piezas.push(r.apuntan.length ? h("div", {}, h("strong", {}, "Apuntan a este servidor"), ...r.apuntan.map(x => fila(x, "a", marcar))) : h("p", {class: "ayuda"}, "Ningún dominio detectado apunta a este servidor (o ya los vigilas)."));
+      const marcar = new Set(), quitar = new Set(), piezas = [], porCert = new Set(r.por_certificado || []);
+      piezas.push(r.apuntan.length ? h("div", {}, h("strong", {}, "Son de este servidor"), ...r.apuntan.map(x => fila(x, marcar, x.host, porCert.has(x.host) ? "(su certificado es válido en este servidor)" : ""))) : h("p", {class: "ayuda"}, "Ningún dominio detectado es de este servidor (o ya los vigilas)."));
       if (r.otros.length) piezas.push(h("details", {}, h("summary", {}, "Apuntan a otro sitio (" + r.otros.length + ")"),
-        h("p", {class: "ayuda"}, "Resuelven a una IP distinta (CDN u otro servidor). Un cliente del servidor podría haber puesto aquí el dominio de un tercero: vigílalos solo si son tuyos."),
-        ...r.otros.map(x => fila(x, "o", marcar))));
-      if (r.vigiladas.length) piezas.push(h("details", {}, h("summary", {}, "Ya vigiladas (" + r.vigiladas.length + ")"), ...r.vigiladas.map(x => fila(x, "v", quitar)),
-        h("div", {}, h("button", {onclick: () => envia({quitar: [...quitar]})}, "Dejar de vigilar las marcadas"))));
+        h("p", {class: "ayuda"}, "Resuelven a una IP distinta y este servidor no presenta un certificado válido para ellos. Un cliente del servidor podría haber puesto aquí el dominio de un tercero: vigílalos solo si son tuyos."),
+        ...r.otros.map(x => fila(x, marcar, x.host))));
+      if (r.vigiladas.length) piezas.push(h("details", {}, h("summary", {}, "Ya vigiladas (" + r.vigiladas.length + ")"), ...r.vigiladas.map(x => fila(x, quitar, x.url, x.url)),
+        h("div", {}, h("button", {onclick: () => quitar.size && envia({quitar: [...quitar]})}, "Dejar de vigilar las marcadas"))));
       const nota = [r.internos.length ? r.internos.length + " apuntan a una IP local o privada (no se ofrecen)" : "", r.sin_resolver.length ? r.sin_resolver.length + " no resuelven" : "",
-        r.truncado ? "la lista del servidor estaba recortada (200)" : "", r.edad_s > 900 ? "dato de hace " + Math.round(r.edad_s / 60) + " min" : ""].filter(Boolean).join(" · ");
+        r.lentos.length ? r.lentos.length + " no dieron tiempo (vuelve a buscar)" : "", r.truncado ? "la lista del servidor estaba recortada (200)" : "",
+        r.edad_s > 900 ? "dato de hace " + Math.round(r.edad_s / 60) + " min" : "",
+        r.ip_servidor === "desconocida" ? "no se pudo resolver la dirección del servidor: se usa el certificado para decidir cuáles son suyos" : r.ip_servidor === "privada" ? "el servidor está en una red privada: se usa el certificado para decidir cuáles son suyos" : ""].filter(Boolean).join(" · ");
       if (nota) piezas.push(h("p", {class: "ayuda"}, nota));
-      piezas.push(h("div", {}, h("button", {onclick: () => marcar.size ? envia({aceptar: [...marcar]}) : null}, "Vigilar las marcadas")));
+      piezas.push(h("div", {}, h("button", {onclick: () => marcar.size && envia({aceptar: [...marcar]})}, "Vigilar las marcadas")));
       salida.replaceChildren(...piezas);
     }
     return h("div", {}, h("button", {onclick: () => { salida.replaceChildren(h("p", {}, "Buscando…")); fetch("/servidores/webs/detectadas?servidor=" + encodeURIComponent(s.id)).then(r => r.json()).then(dibuja)
