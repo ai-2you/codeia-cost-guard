@@ -126,6 +126,14 @@ input.num-in{width:9.5rem;text-align:right} input.ancho{width:100%}
 .campos{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
 .campos label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--suave);text-transform:uppercase;letter-spacing:.5px}
 .campos label input,.campos label textarea{text-transform:none;letter-spacing:0;color:var(--texto)}
+.webs-editor{grid-column:1/-1;display:flex;flex-direction:column;gap:6px}
+.etiqueta-campo{font-size:11.5px;color:var(--suave);text-transform:uppercase;letter-spacing:.5px}
+.pildoras{display:flex;flex-wrap:wrap;gap:6px}
+.pildora{display:inline-flex;align-items:center;gap:4px;background:var(--pista);border:1px solid var(--borde);border-radius:999px;padding:2px 3px 2px 10px;font-size:12.5px}
+.pildora code{background:none;padding:0}
+.pildora button{border:0;background:transparent;padding:0 7px;font-size:16px;line-height:1.3;border-radius:999px;color:var(--suave)}
+.pildora button:hover{color:var(--texto);background:var(--borde)}
+.rejilla-webs{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:4px 16px;margin:6px 0}
 .clave{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
 .clave input{width:min(340px,100%)}
 .chip{font-size:11px;border-radius:6px;padding:1px 7px;border:1px solid var(--borde);color:var(--suave)}

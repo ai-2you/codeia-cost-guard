@@ -158,11 +158,11 @@
       if (r.estado === "desactivada") return salida.replaceChildren(h("p", {class: "ayuda"}, "La detección está desactivada para este servidor."));
       if (r.estado === "sin_dato") return salida.replaceChildren(h("p", {class: "ayuda"}, "El servidor aún no ha enviado la lista de dominios (hace falta la lectura nueva: «Actualizar con mi clave» en el alta, o espera un ciclo)."));
       const marcar = new Set(), quitar = new Set(), piezas = [], porCert = new Set(r.por_certificado || []);
-      piezas.push(r.apuntan.length ? h("div", {}, h("strong", {}, "Son de este servidor"), ...r.apuntan.map(x => fila(x, marcar, x.host, porCert.has(x.host) ? "(su certificado es válido en este servidor)" : ""))) : h("p", {class: "ayuda"}, "Ningún dominio detectado es de este servidor (o ya los vigilas)."));
+      piezas.push(r.apuntan.length ? h("div", {}, h("strong", {}, "Son de este servidor"), h("div", {class: "rejilla-webs"}, ...r.apuntan.map(x => fila(x, marcar, x.host, porCert.has(x.host) ? "(certificado válido aquí)" : "")))) : h("p", {class: "ayuda"}, "Ningún dominio detectado es de este servidor (o ya los vigilas)."));
       if (r.otros.length) piezas.push(h("details", {}, h("summary", {}, "Apuntan a otro sitio (" + r.otros.length + ")"),
         h("p", {class: "ayuda"}, "Resuelven a una IP distinta y este servidor no presenta un certificado válido para ellos. Un cliente del servidor podría haber puesto aquí el dominio de un tercero: vigílalos solo si son tuyos."),
-        ...r.otros.map(x => fila(x, marcar, x.host))));
-      if (r.vigiladas.length) piezas.push(h("details", {}, h("summary", {}, "Ya vigiladas (" + r.vigiladas.length + ")"), ...r.vigiladas.map(x => fila(x, quitar, x.url, x.url)),
+        h("div", {class: "rejilla-webs"}, ...r.otros.map(x => fila(x, marcar, x.host)))));
+      if (r.vigiladas.length) piezas.push(h("details", {}, h("summary", {}, "Ya vigiladas (" + r.vigiladas.length + ")"), h("div", {class: "rejilla-webs"}, ...r.vigiladas.map(x => fila(x, quitar, x.url, ""))),
         h("div", {}, h("button", {onclick: () => quitar.size && envia({quitar: [...quitar]})}, "Dejar de vigilar las marcadas"))));
       const nota = [r.internos.length ? r.internos.length + " apuntan a una IP local o privada (no se ofrecen)" : "", r.sin_resolver.length ? r.sin_resolver.length + " no resuelven" : "",
         r.lentos.length ? r.lentos.length + " no dieron tiempo (vuelve a buscar)" : "", r.truncado ? "la lista del servidor estaba recortada (200)" : "",
@@ -176,6 +176,52 @@
       .catch(e => salida.replaceChildren(h("p", {class: "msg err"}, "No se pudo consultar: " + e))); }}, "Buscar webs de este servidor"), salida);
   }
 
+  /* Webs a medir de un servidor: píldoras con ✕ y un campo con autocompletado. Enter (o elegir una sugerencia) añade; las sugerencias son los dominios que el servidor
+     dice servir y que apuntan a él. Lo que cambia aquí vive en `s.webs` y se guarda con «Guardar». */
+  const MAX_WEBS = 100;
+  function editorWebs(s){
+    const lista = h("div", {class: "pildoras"});
+    const aviso = h("p", {class: "msg err", hidden: true});
+    const dl = h("datalist", {id: "webs-" + (s.id || "nuevo")});
+    const entrada = h("input", {class: "ancho", placeholder: "Escribe una web y pulsa Enter", list: dl.id, autocomplete: "off", "aria-label": "Añadir una web a vigilar"});
+    let sugerencias = new Set(), pedido = false;
+    const corto = u => u.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    function pinta(){
+      lista.replaceChildren(...(s.webs || []).map(u => h("span", {class: "pildora"}, h("code", {}, corto(u)),
+        h("button", {type: "button", title: "Quitar", "aria-label": "Quitar " + corto(u), onclick: () => { s.webs = (s.webs || []).filter(x => x !== u); if (!s.webs.length) delete s.webs; pinta(); sugiere(); }}, "×"))));
+    }
+    function sugiere(){
+      dl.replaceChildren(...[...sugerencias].filter(u => !(s.webs || []).includes(u)).map(u => h("option", {value: u})));
+    }
+    function normaliza(t){
+      t = t.trim();
+      if (!t || /\s/.test(t)) return null;
+      if (!/^https?:\/\//i.test(t)) t = "https://" + t;
+      try { const u = new URL(t); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) return null; t = u.href; } catch (e) { return null; }
+      return t.length <= 300 ? t : null;
+    }
+    function anade(t){
+      const u = normaliza(t);
+      if (!u) { aviso.hidden = false; aviso.textContent = "Eso no parece una web. Escribe un dominio (ejemplo.com) o una dirección completa (https://ejemplo.com/ruta)."; return; }
+      aviso.hidden = true;
+      const actual = s.webs || [];
+      if (actual.includes(u)) { entrada.value = ""; return; }
+      if (actual.length >= MAX_WEBS) { aviso.hidden = false; aviso.textContent = "Como máximo " + MAX_WEBS + " webs por servidor."; return; }
+      s.webs = [...actual, u]; entrada.value = ""; pinta(); sugiere();
+    }
+    entrada.addEventListener("keydown", ev => { if (ev.key === "Enter") { ev.preventDefault(); anade(entrada.value); } });
+    entrada.addEventListener("input", () => { if (sugerencias.has(entrada.value)) anade(entrada.value); });      // elegir una sugerencia de la lista la añade al momento
+    entrada.addEventListener("focus", () => {
+      if (pedido || !s.id) return;
+      pedido = true;
+      fetch("/servidores/webs/detectadas?servidor=" + encodeURIComponent(s.id)).then(r => r.json()).then(r => {
+        if (r && r.ok && Array.isArray(r.apuntan)) { sugerencias = new Set(r.apuntan.map(x => "https://" + x.host + "/")); sugiere(); }
+      }).catch(() => { pedido = false; });
+    });
+    pinta();
+    return h("div", {class: "webs-editor"}, h("div", {class: "etiqueta-campo"}, "Webs a medir (máx. " + MAX_WEBS + ")"), lista, entrada, dl, aviso);
+  }
+
   function servidor(s, i){
     const info = (A.paneles || {})[s.nombre];
     const f = (et, k, ph) => h("label", {}, et, h("input", {class: "ancho", "data-s": i, "data-k": k, value: s[k] == null ? "" : s[k], placeholder: ph || "",
@@ -187,7 +233,7 @@
         h("button", {onclick: () => { leer(); A.config.servidores.splice(i, 1); $("vista-ajustes").replaceChildren(...pinta()); }}, "Quitar servidor")),
       h("div", {class: "campos"}, f("Nombre", "nombre", "produccion"), f("SSH (usuario@IP)", "ssh", "infobar@203.0.113.10"), f("SSH admin (botón Terminal)", "ssh_admin", "tuusuario@203.0.113.10"),
         f("Puerto SSH", "puerto", "22"), h("label", {}, "Panel", panel), f("URL del panel (https)", "panel_url", "https://dokploy.example.com"),
-        h("label", {}, "Webs a medir (una por línea, máx. 100)", h("textarea", {rows: 3, "data-s": i, "data-k": "webs"}, (s.webs || []).join("\n")))),
+        editorWebs(s)),
       h("label", {style: "display:block;margin-top:6px"}, h("input", {type: "checkbox", "data-s": i, "data-k": "avisos", checked: s.avisos !== false}), " Avisar con una notificación de este servidor (apágalo, por ejemplo, en los de clientes)"),
       detectorWebs(s),
       k ? k.fila : (s.panel ? h("p", {class: "ayuda"}, "Guarda los ajustes y aquí podrás poner la clave del panel.") : null));
@@ -329,7 +375,6 @@
         div.querySelectorAll("[data-k]").forEach(i => {
           const k = i.dataset.k, v = i.value.trim();
           if (k === "avisos") { if (i.checked) delete s.avisos; else s.avisos = false; }
-          else if (k === "webs") { const w = v.split("\n").map(x => x.trim()).filter(Boolean); if (w.length) s.webs = w; else delete s.webs; }
           else if (k === "puerto") { if (v) s.puerto = parseInt(v, 10) || v; else delete s.puerto; }
           else if (v || k === "nombre" || k === "ssh") s[k] = v; else delete s[k];
         });
