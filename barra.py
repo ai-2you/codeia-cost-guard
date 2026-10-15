@@ -24,7 +24,7 @@ from AppKit import (
     NSAppearance, NSApplication, NSApplicationActivationPolicyAccessory, NSAttributedString, NSColor,
     NSEvent, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSImage, NSImageLeft,
     NSImageView, NSMakePoint, NSMakeRect, NSMakeSize, NSMenu, NSMenuItem, NSPopover, NSScreen,
-    NSPasteboard, NSPasteboardTypeString, NSProgressIndicator, NSStatusBar, NSVariableStatusItemLength,
+    NSPasteboard, NSPasteboardTypeString, NSProgressIndicator, NSScrollView, NSStatusBar, NSVariableStatusItemLength,
     NSViewController, NSVisualEffectView, NSWorkspace,
 )
 from Foundation import NSData, NSObject, NSTimer, NSURL
@@ -221,7 +221,7 @@ class Barra(NSObject):
         fondo.setMaterial_(MATERIAL_POPOVER)
         fondo.setBlendingMode_(0)          # detras de la ventana: se ve el escritorio desenfocado
         fondo.setState_(1)                 # siempre activo, aunque la app no tenga el foco
-        fondo.setAutoresizingMask_(18)
+        fondo.setAutoresizingMask_(2)
         vista = VistaDesplegable.alloc().initWithFrame_(NSMakeRect(0, 0, G.ANCHO, 600))
         vista.setImageScaling_(1)          # NSImageScaleAxesIndependently: el PNG llena la vista
         vista.setAutoresizingMask_(18)
@@ -233,10 +233,20 @@ class Barra(NSObject):
         self.rueda.setControlSize_(1)           # small
         self.rueda.setDisplayedWhenStopped_(False)
         fondo.addSubview_(self.rueda)
-        vc.setView_(fondo)
+        # si el desplegable es más alto que la pantalla, se desplaza (barra superpuesta que solo aparece al hacer scroll) en vez de encogerse
+        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, G.ANCHO, 600))
+        scroll.setHasVerticalScroller_(True)
+        scroll.setHasHorizontalScroller_(False)
+        scroll.setAutohidesScrollers_(True)
+        scroll.setScrollerStyle_(1)             # NSScrollerStyleOverlay
+        scroll.setDrawsBackground_(False)
+        scroll.setBorderType_(0)
+        scroll.setDocumentView_(fondo)
+        vc.setView_(scroll)
         self.pop.setContentViewController_(vc)
         self.vista = vista
         self.fondo = fondo
+        self.scroll = scroll
 
     @objc.python_method
     def pestana(self):
@@ -277,17 +287,20 @@ class Barra(NSObject):
             return
         ruta, ancho, alto, n_botones, con_selector = img
         self.forma = (n_botones, con_selector)
-        # si no cabe en la pantalla, se escala entero (las zonas de clic se escalan igual)
+        # si no cabe en la pantalla, el popover se queda de la altura de la pantalla y el contenido se desplaza (no se encoge: las letras seguirían legibles)
         pantalla = NSScreen.mainScreen().visibleFrame().size.height - 40
-        self.escala = min(1.0, pantalla / float(alto))
-        w, h = ancho * self.escala, alto * self.escala
+        self.escala = 1.0
+        w, h = float(ancho), float(alto)
+        visible = min(h, pantalla)
         self.alto_mostrado = alto
-        self.pop.setContentSize_(NSMakeSize(w, h))
+        self.pop.setContentSize_(NSMakeSize(w, visible))
+        self.scroll.setFrameSize_(NSMakeSize(w, visible))
         # el fondo primero: si el popover lo redimensiona despues de fijar la vista, el autoajuste la estira
         # (la primera vez, de 600 pt a la altura real, la imagen salia con las letras enormes)
         self.fondo.setFrameSize_(NSMakeSize(w, h))
         self.vista.setFrameSize_(NSMakeSize(w, h))
         self.vista.setImage_(nsimagen(ruta, w, h))
+        self.fondo.scrollPoint_(NSMakePoint(0, h))          # arriba del todo (las vistas de AppKit tienen el origen abajo)
         log(f"desplegable {self.pestana()} {tema}: {w:.0f}x{h:.0f} pt (escala {self.escala:.2f})")
 
     def pulsa_(self, sender):
