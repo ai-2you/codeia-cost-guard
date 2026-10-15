@@ -1,5 +1,6 @@
-# Solo para la barra de menús en macOS. El medidor y el panel funcionan sin nada de esto.
+# Para el icono de bandeja/barra de menus (macOS y Windows). El medidor y el panel funcionan sin nada de esto.
 pillow>=10.0
 pyobjc-framework-Cocoa>=9.2
+pystray==0.19.5 ; sys_platform == "win32"
 # opcionales: la barra antigua basada en el menú nativo
 # rumps>=0.4

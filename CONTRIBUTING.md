@@ -27,7 +27,17 @@ python3 panel.py
 python3 -m venv venv
 venv/bin/pip install pillow pyobjc-framework-Cocoa
 venv/bin/python barra.py --abre
+
+# Solo en Windows, si tocas la bandeja de sistema (bandeja_windows.py /
+# infobar/bandeja_windows_menu.py): necesita pystray==0.19.5 (ya en requirements.txt con el
+# marker sys_platform == "win32") ademas de pillow.
+python -m venv venv
+venv\Scripts\pip install pillow pystray==0.19.5
+venv\Scripts\python bandeja_windows.py
 ```
+
+Si en cambio tocas `infobar/credenciales_windows.py` (Credential Manager de Windows), no hace falta
+instalar nada extra: usa solo `ctypes`/`ctypes.wintypes` de la biblioteca estandar.
 
 Hay suite de tests con `unittest` (sin dependencias, salvo `tzdata` en Windows para los tests de
 zona horaria; ver la sección Tests de `README.md`):

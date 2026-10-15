@@ -54,3 +54,13 @@ def borrar_clave(cuenta):
     if hay_llavero() and cuenta_valida(cuenta):
         subprocess.run(["security", "delete-generic-password", "-s", SERVICIO, "-a", cuenta],
                        capture_output=True, timeout=5)
+
+
+import sys  # noqa: E402  (al final a proposito: dispatch de plataforma, no reordenar)
+if sys.platform == "win32":
+    from . import credenciales_windows as _win
+    hay_llavero = _win.hay_llavero
+    leer_clave = _win.leer_clave
+    guardar_clave = _win.guardar_clave
+    borrar_clave = _win.borrar_clave
+    # cuenta_valida NO se reasigna: es la misma regex en los dos SO
