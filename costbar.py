@@ -100,6 +100,16 @@ def main():
     from infobar import cli_copias
     if any(o in sys.argv for o in cli_copias.ORDENES):
         sys.exit(cli_copias.main(sys.argv[1:]))
+    if "--olvidar-ips" in sys.argv:
+        # python3 costbar.py --olvidar-ips [--servidor NOMBRE]  -> borra ya las IPs de intentos de acceso (de uno o de todos)
+        from infobar import servidores_api
+        i = sys.argv.index("--servidor") if "--servidor" in sys.argv else -1
+        if i >= 0 and (i == len(sys.argv) - 1 or sys.argv[i + 1].startswith("--")):
+            print("--servidor necesita un nombre (sin él se borrarían las IPs de todos los servidores).")
+            sys.exit(2)
+        codigo, mensaje = servidores_api.olvidar(sys.argv[i + 1] if i >= 0 else None)
+        print(mensaje)
+        sys.exit(codigo)
     if "--clave" in sys.argv:
         # python3 costbar.py --clave nan | dokploy:<host> | easypanel:<host>  -> la guarda en el Llavero
         i = sys.argv.index("--clave")

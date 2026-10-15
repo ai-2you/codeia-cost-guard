@@ -72,7 +72,9 @@ class Normalizar(unittest.TestCase):
     def test_servidores_e_ips_pasan_tal_cual(self):
         srv = [{"nombre": "p", "ssh": "infobar@1.2.3.4"}]
         out = ajustes.normalizar(self.nuevo(servidores=srv, ips_conocidas=["1.1.1.1"]), ACTUAL)
-        self.assertEqual((out["servidores"], out["ips_conocidas"]), (srv, ["1.1.1.1"]))
+        self.assertEqual(out["ips_conocidas"], ["1.1.1.1"])
+        self.assertEqual({k: v for k, v in out["servidores"][0].items() if k != "id"}, srv[0])
+        self.assertRegex(out["servidores"][0]["id"], r"^[0-9a-f]{32}$")             # cada servidor sale con su id estable
 
 
 class Auxiliares(unittest.TestCase):

@@ -101,8 +101,10 @@ def toca(nombre, previo, ui, ahora, forzar, normal, incidencia):
     return hace >= (incidencia if en_incidencia(nombre, previo, ui, ahora) else normal) - 5
 
 
-def ciclo(forzar=False):
-    """Recoge los servidores a los que les toca. Devuelve la cache (o None si ya habia un ciclo)."""
+def ciclo(forzar=False, historial=None):
+    """Recoge los servidores a los que les toca. Devuelve la cache (o None si ya habia un ciclo).
+    `historial(servidores, cache, nuevos, ahora)` anota lo recogido en la base de servidores: solo lo pasa el hilo trabajador de la barra
+    (el unico escritor), se llama fuera del cerrojo de la cache y un fallo suyo no afecta al ciclo."""
     if not _EN_MARCHA.acquire(blocking=False):
         return None
     try:
@@ -137,7 +139,13 @@ def ciclo(forzar=False):
             # lo que no arranco no arranca ya (si no, lanzaria ssh tras soltar el cerrojo del ciclo);
             # lo que esta en marcha tiene su propio tope de ssh
             pool.shutdown(wait=False, cancel_futures=True)
-        return _guardar(servidores, cache, nuevos, ahora)
+        datos = _guardar(servidores, cache, nuevos, ahora)
+        if historial and nuevos:
+            try:
+                historial(servidores, datos["servidores"], set(nuevos), ahora)
+            except Exception as e:
+                log(f"servidores: el historial falló ({type(e).__name__})")
+        return datos
     finally:
         _EN_MARCHA.release()
 

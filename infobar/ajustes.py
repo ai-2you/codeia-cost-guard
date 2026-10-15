@@ -48,10 +48,10 @@ def _lista_txt(v, campo):
 
 
 # campos de primer nivel que la UI manda tal cual: los valida errores_config (servidores, ips) o son numeros simples
-PASAN = ("servidores", "ips_conocidas", "intervalo_normal_s", "intervalo_incidencia_s")
+PASAN = ("servidores", "ips_conocidas", "intervalo_normal_s", "intervalo_incidencia_s", "guardar_ips", "retencion_ips_dias")
 
 
-def normalizar(nuevo, actual):
+def normalizar(nuevo, actual, servidores_actuales=None):
     """El parche (solo las claves de primer nivel que edita la UI, ya saneadas) para guardar_config.
 
     `actual` es config.json tal cual esta en disco (no cfg(): este mezcla valores por defecto que no
@@ -138,4 +138,7 @@ def normalizar(nuevo, actual):
     for k in PASAN:
         if k in nuevo:
             out[k] = nuevo[k]
+    if isinstance(out.get("servidores"), list):
+        from .servidores_registro import asegurar_ids       # cada servidor lleva un id estable: renombrarlo no parte su historial
+        out["servidores"], _ = asegurar_ids(out["servidores"], servidores_actuales)
     return out

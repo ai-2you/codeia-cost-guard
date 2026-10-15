@@ -6,6 +6,7 @@ que llega a `ssh` o a una peticion HTTP nunca se usa sin pasar por aqui.
 import ipaddress, re, urllib.parse
 
 PANELES = ("dokploy", "easypanel")
+_ID = re.compile(r"^[0-9a-f]{32}$")
 # usuario@host o alias de ~/.ssh/config; sin '-' inicial (seria una opcion de ssh: -oProxyCommand=...)
 _SSH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._-]*(@[A-Za-z0-9._][A-Za-z0-9._-]*)?$")
 _NOMBRE = re.compile(r"^[\w .-]{1,40}$")
@@ -85,6 +86,9 @@ def errores_servidores(lista):
             errores.append(f"{donde}: nombre repetido ({nombre})")
         else:
             nombres.add(nombre)
+        if "id" in s and not (isinstance(s["id"], str) and _ID.fullmatch(s["id"])):
+            errores.append(f"{donde}: id no valido")
+        errores += _errores_ips_guardadas(s, donde)
         if not (isinstance(s.get("ssh"), str) and _SSH.fullmatch(s["ssh"])):
             errores.append(f"{donde}: ssh debe ser usuario@host o un alias (sin '-' inicial ni espacios)")
         if "ssh_admin" in s and not (isinstance(s["ssh_admin"], str) and _SSH.fullmatch(s["ssh_admin"])):
@@ -108,6 +112,18 @@ def errores_servidores(lista):
                 if motivo:
                     errores.append(f"{donde}: web {str(w)[:60]!r} {motivo}")
     return errores
+
+
+def _errores_ips_guardadas(d, donde):
+    """`guardar_ips` (bool) y `retencion_ips_dias` (7-90) de la config global o de un servidor."""
+    e = []
+    if "guardar_ips" in d and not isinstance(d["guardar_ips"], bool):
+        e.append(f"{donde}: guardar_ips debe ser verdadero o falso")
+    if "retencion_ips_dias" in d:
+        v = d["retencion_ips_dias"]
+        if not (isinstance(v, int) and not isinstance(v, bool) and 7 <= v <= 90):
+            e.append(f"{donde}: retencion_ips_dias debe ser un entero entre 7 y 90")
+    return e
 
 
 def errores_ips(ips):

@@ -8,7 +8,7 @@ cambia imagenes. Una excepcion se registra y el bucle sigue: el hilo no muere.
 import threading, time, traceback
 
 from . import cuota_nan, desplegable_png, permisos, presupuestos, servidores_ciclo
-from . import sombra
+from . import servidores_registro, sombra
 from .agregacion import ULTIMOS, informe
 from .config_y_estado import cfg, log
 
@@ -27,6 +27,7 @@ class Trabajador(threading.Thread):
         self._cerrojo = threading.Lock()
         self._pedidos = set()
         self.conjunto = None
+        self.historial = servidores_registro.Historial()      # único escritor de servidores.sqlite
         self._evento.set()                  # la primera vuelta, nada mas arrancar
 
     def pide(self, *cosas):
@@ -74,7 +75,8 @@ class Trabajador(threading.Thread):
                     previa = servidores_ciclo.leer_cache()
                     self._pinta(r, previa)
                     gen_srv, ultimo_render = previa.get("generado_en"), ahora
-                cache = servidores_ciclo.ciclo(forzar=forzar) or servidores_ciclo.leer_cache()
+                self.historial.preparar()
+                cache = servidores_ciclo.ciclo(forzar=forzar, historial=self.historial) or servidores_ciclo.leer_cache()
                 self.entregar("punto", servidores_ciclo.peor_estado(cache) if cache.get("servidores") else None)
                 pintar_agentes = (self.conjunto is None or forzar or "render" in pedidos
                                   or ahora - ultimo_render >= CADA_RENDER_AGENTES)

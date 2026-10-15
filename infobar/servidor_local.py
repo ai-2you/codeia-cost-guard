@@ -16,11 +16,11 @@ import hmac, json, os, secrets, subprocess, sys, threading, time
 
 from urllib.parse import parse_qs, urlsplit
 
-from . import ajustes, claves, exportacion, exportacion_csv, historico, presupuestos, rutas
+from . import ajustes, claves, exportacion, exportacion_csv, historico, presupuestos, rutas, servidores_api
 from . import cuota_nan
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_config, log, olvidar_cache
-from .servidores import errores_ips, errores_servidores
+from .servidores import _errores_ips_guardadas, errores_ips, errores_servidores
 
 
 def _estado_copias():
@@ -157,6 +157,7 @@ def errores_config(nuevo):
         if k.startswith("limite_") and not (isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0):
             errores.append(f"{k}: debe ser un numero >= 0")
     errores += errores_servidores(nuevo.get("servidores"))
+    errores += _errores_ips_guardadas(nuevo, "config")
     errores += errores_ips(nuevo.get("ips_conocidas"))
     return errores
 
@@ -266,6 +267,19 @@ def crear_servidor(puerto=PUERTO):
             finally:
                 historiando.release()
 
+        def _servidores(self, ruta):
+            """GET /servidores/historia y /servidores/ips (solo lectura; las IPs solo con servidor= y con_ips=1)."""
+            try:
+                q = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=6)
+            except ValueError:
+                return self._json(400, {"error": "parámetros no permitidos"})
+            if not historiando.acquire(blocking=False):
+                return self._json(429, {"error": "hay otras consultas en curso; vuelve a intentarlo"})
+            try:
+                self._json(*servidores_api.atiende(ruta, q))
+            finally:
+                historiando.release()
+
         def do_GET(self):
             if not self._host_ok():
                 return
@@ -287,6 +301,8 @@ def crear_servidor(puerto=PUERTO):
                 self._historico()
             elif ruta == "/historico.csv":
                 self._historico(como_csv=True)
+            elif ruta in ("/servidores/historia", "/servidores/ips"):
+                self._servidores(ruta)
             elif ruta == "/origenes":
                 try:
                     r = informe()
@@ -362,7 +378,7 @@ def crear_servidor(puerto=PUERTO):
                         en_disco = json.load(f)
                 except (OSError, ValueError):
                     en_disco = {}
-                guardar_config(sin_secretos(ajustes.normalizar(nuevo, en_disco)))
+                guardar_config(sin_secretos(ajustes.normalizar(nuevo, en_disco, cfg().get("servidores"))))
                 try:
                     olvidar_cache()                    # el plan de cada fichero cacheado depende de la config
                 except OSError:

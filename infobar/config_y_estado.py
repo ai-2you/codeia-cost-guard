@@ -21,7 +21,7 @@ def log(msg):
 
 # Lo de los servidores vive en servidores.json (fuera de git): config.json esta versionado y no
 # debe llevar hosts ni usuarios. cfg() junta los dos y guardar_config() reparte; nadie mas lo nota.
-CLAVES_SERVIDORES = ("servidores", "ips_conocidas", "intervalo_normal_s", "intervalo_incidencia_s")
+CLAVES_SERVIDORES = ("servidores", "ips_conocidas", "intervalo_normal_s", "intervalo_incidencia_s", "guardar_ips", "retencion_ips_dias")
 _ULTIMO_SRV = {}
 _MIGRADO = []
 COPIAS_CONFIG = 5           # copias config.json.bak.<fecha> que se guardan al escribir
