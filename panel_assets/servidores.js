@@ -21,6 +21,10 @@
   const dia = ts => new Date(ts * 1000).toLocaleDateString("es-ES", {weekday: "long", day: "numeric", month: "long"});
   const clase = (mapa, clave) => Object.prototype.hasOwnProperty.call(mapa, clave) ? mapa[clave] : ["sv-neutro", "Desconocido"];
   const celda = (t, extra) => h("td", extra || {}, t);
+  // una web se abre en una pestaña nueva, solo si es una dirección http(s) de caracteres normales (nunca esquemas raros ni nada que venga extraño del servidor)
+  const URL_OK = /^https?:\/\/[A-Za-z0-9._~:\/?#@!$&*+,;=%-]{1,300}$/;
+  const corta = u => u.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const enlaceWeb = u => URL_OK.test(u) ? h("a", {href: u, target: "_blank", rel: "noopener noreferrer", class: "sv-nombre", title: "Abrir " + u + " en una pestaña nueva"}, corta(u)) : h("span", {class: "sv-nombre", title: u}, corta(u));
   const insignia = (cl, texto, titulo) => h("span", {class: "sv-ins " + cl, title: titulo || ""}, texto);
 
   function disponibilidad(w, k){
@@ -39,7 +43,7 @@
       else { const [cl, tx] = clase(ESTADO_WEB, w.estado); est = insignia(cl, tx); }
       const cert = w.cert_dias == null ? "—" : w.cert_dias + " d";
       const certCl = w.cert_dias == null ? "" : w.cert_dias <= 7 ? "sv-mal" : w.cert_dias <= 14 ? "sv-aviso" : "";
-      return h("tr", {}, celda(h("span", {title: w.url, class: "sv-nombre"}, w.url.replace(/^https?:\/\//, "").replace(/\/$/, ""))), celda(est),
+      return h("tr", {}, celda(enlaceWeb(w.url)), celda(est),
         celda(w.sondeada && w.codigo != null ? String(w.codigo) : "—"), celda(w.sondeada && w.ms != null ? w.ms + " ms" : "—"),
         celda(w.sondeada ? disponibilidad(w, "24h") : "—"), celda(w.sondeada ? disponibilidad(w, "7d") : "—"), celda(w.sondeada ? disponibilidad(w, "30d") : "—"),
         celda(h("span", {class: certCl}, cert)));
@@ -122,7 +126,7 @@
       piezas.push(h("div", {class: "sv-dia"}, k));
       for (const {e, veces} of m.values()) {
         const [cl, tx] = textoEvento(e);
-        piezas.push(h("div", {class: "sv-evento"}, h("span", {class: "sv-hora"}, hora(e.ts)), insignia(cl, tx), h("span", {class: "sv-nombre", title: e.nombre || ""}, e.nombre ? e.nombre.replace(/^https?:\/\//, "").replace(/\/$/, "") : "(ya olvidado)"),
+        piezas.push(h("div", {class: "sv-evento"}, h("span", {class: "sv-hora"}, hora(e.ts)), insignia(cl, tx), e.nombre ? (e.origen === "web" ? enlaceWeb(e.nombre) : h("span", {class: "sv-nombre", title: e.nombre}, e.nombre)) : h("span", {class: "sv-nombre"}, "(ya olvidado)"),
           veces > 1 ? h("span", {class: "sv-suave"}, "× " + veces) : null));
       }
     }

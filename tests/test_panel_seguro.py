@@ -100,6 +100,9 @@ class TestHistoricoSinHtmlDeDatos(unittest.TestCase):
         for malo in ("innerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"):
             self.assertNotIn(malo, js)
         self.assertLess(js.index("window.cargarServidores = function"), js.index('location.hash === "#servidores"'))
+        self.assertIn('target: "_blank", rel: "noopener noreferrer"', js)                # las webs se abren en pestaña nueva y sin dar acceso a esta
+        self.assertIn("URL_OK.test(u)", js)                                              # y solo si la dirección es http(s) de caracteres normales
+        self.assertNotIn("javascript:", js)
 
     def test_la_apertura_por_hash_va_despues_de_definir_la_carga(self):
         js = asset("historico.js")

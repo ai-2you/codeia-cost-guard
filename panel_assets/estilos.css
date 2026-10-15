@@ -143,7 +143,7 @@ button.primario{background:linear-gradient(90deg,var(--marca),var(--marca2));col
 .sv-barra{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
 .sv-estado{margin:4px 0 0;font-size:13.5px}.sv-suave{color:var(--suave);font-size:12.5px}
 .sv-tabla{overflow-x:auto}table.sv th{cursor:default}table.sv th:hover{color:var(--suave)}table.sv td{unicode-bidi:plaintext}
-.sv-nombre{overflow-wrap:break-word;unicode-bidi:plaintext}
+.sv-nombre{overflow-wrap:break-word;unicode-bidi:plaintext}a.sv-nombre{color:inherit;text-decoration:underline;text-decoration-color:var(--borde);text-underline-offset:3px}a.sv-nombre:hover{color:var(--marca);text-decoration-color:currentColor}
 #vista-servidores .ayuda{margin:10px 0 0}#vista-servidores table.sv td:first-child{min-width:12rem}
 table.sv-rec{table-layout:fixed}table.sv-rec td:nth-child(1){width:42%}table.sv-rec td:nth-child(2){width:28%}table.sv-rec td:nth-child(3){width:12%}table.sv-rec td:nth-child(4){width:18%}
 .sv-ins{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid transparent;white-space:nowrap}
