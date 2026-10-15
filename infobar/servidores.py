@@ -20,10 +20,17 @@ _DNS = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a
 _DNS_INTERNOS = (".local", ".localhost", ".internal", ".lan", ".home.arpa")
 
 
+# Redes IPv6 que `is_global` da por públicas pero no lo son o llevan una IPv4 incrustada que no se comprueba: NAT64 (64:ff9b::/96, un nombre podría empaquetar
+# 127.0.0.1 o 10.x), site-local obsoleta (fec0::/10) y SIDs de SRv6 (5f00::/16).
+_IPV6_NO_PUBLICAS = tuple(ipaddress.ip_network(r) for r in ("64:ff9b::/96", "fec0::/10", "5f00::/16"))
+
+
 def ip_no_publica(ip):
     ip = ipaddress.ip_address(ip)
     # is_global deja fuera tambien 100.64/10 (CGNAT, Tailscale), que is_private no cubre
-    return not ip.is_global or ip.is_multicast
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        return ip_no_publica(ip.ipv4_mapped)            # ::ffff:10.0.0.1 es 10.0.0.1 en cualquier versión de Python
+    return not ip.is_global or ip.is_multicast or (ip.version == 6 and any(ip in red for red in _IPV6_NO_PUBLICAS))
 
 
 def _host_local(host):

@@ -7,7 +7,7 @@ cambia imagenes. Una excepcion se registra y el bucle sigue: el hilo no muere.
 """
 import threading, time, traceback
 
-from . import cuota_nan, desplegable_png, permisos, presupuestos, servidores_ciclo
+from . import cuota_nan, desplegable_png, permisos, presupuestos, servidores_ciclo, webs_sondeo
 from . import servidores_registro, sombra
 from .agregacion import ULTIMOS, informe
 from .config_y_estado import cfg, log
@@ -29,6 +29,18 @@ class Trabajador(threading.Thread):
         self.conjunto = None
         self.historial = servidores_registro.Historial()      # único escritor de servidores.sqlite
         self._evento.set()                  # la primera vuelta, nada mas arrancar
+        self._webs = threading.Thread(target=self._sondea_webs, name="infobar-webs", daemon=True)
+
+    def _sondea_webs(self):
+        """Hilo propio: las webs se sondean con su calendario (5 min; 60 s mientras fallan), sin esperar al ciclo SSH ni frenarlo."""
+        while True:
+            try:
+                r = webs_sondeo.pasada(cfg().get("servidores") or [])
+                if r and r[0] and servidores_ciclo.reaplicar_webs(r[1]):
+                    self.pide("render")                      # el desplegable enseña las webs al momento, sin esperar al ciclo SSH
+            except Exception:
+                log("webs: " + traceback.format_exc()[-300:])
+            time.sleep(DESPIERTA)
 
     def pide(self, *cosas):
         """'refrescar' (todo ya, servidores incluidos) o 'render' (solo repintar)."""
@@ -37,6 +49,7 @@ class Trabajador(threading.Thread):
         self._evento.set()
 
     def run(self):
+        self._webs.start()
         r, ultimo_scan, ultimo_render, gen_srv = None, 0.0, 0.0, None
         migrado, ultima_purga = False, 0.0
         while True:

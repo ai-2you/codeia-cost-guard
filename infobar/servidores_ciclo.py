@@ -14,7 +14,8 @@ from . import rutas
 from .config_y_estado import _bloqueo, _escribe_json, _lee_json, cfg, leer_ui, log
 from .servidores import errores_ips, errores_servidores
 from .servidores_estado import bastionado, peor, resumen_bastionado, tarjetas
-from .servidores_externo import host_de_ssh, medir_web, puertos_expuestos
+from .servidores_externo import host_de_ssh, puertos_expuestos
+from . import webs_sondeo
 from .servidores_ssh import leer
 
 INTERVALO_NORMAL = 300
@@ -71,7 +72,7 @@ def activar_incidencia(nombre, ahora=None):
 def recoger_uno(servidor, conocidas):
     """Lee un servidor (SSH + webs + puertos desde fuera) y calcula su estado."""
     datos, error, dur = leer(servidor)
-    webs = [medir_web(u) for u in (servidor.get("webs") or [])[:4]]
+    webs = webs_sondeo.medidas(servidor)                  # las webs las sondea otro hilo (webs_sondeo): aquí solo se lee lo último que midió
     host = host_de_ssh(servidor["ssh"], servidor.get("puerto") or 22)      # IP o nombre real (se muestra)
     expuestos = None
     if datos and datos.get("puertos"):
@@ -82,10 +83,47 @@ def recoger_uno(servidor, conocidas):
     t = tarjetas(datos, webs, expuestos, conocidas, permitidos)
     checks = bastionado(datos, expuestos, permitidos)
     res = resumen_bastionado(checks)
-    vivo = peor(*[x["estado"] for k, x in t.items() if k not in ("mantenimiento", "certificado")])
+    vivo, estado = estados(t, res)
     return {"error": "", "duracion": dur, "datos": datos, "webs": webs, "expuestos": expuestos, "host": host,
-            "tarjetas": t, "bastionado": checks, "bastionado_resumen": res,
-            "estado_vivo": vivo, "estado": peor(vivo, _estado_t(t, "mantenimiento"), _estado_t(t, "certificado"), res["estado"])}
+            "tarjetas": t, "bastionado": checks, "bastionado_resumen": res, "estado_vivo": vivo, "estado": estado}
+
+
+# Lo que NO cuenta como salud viva (la que acelera la lectura SSH a una por minuto): lo que falta de protección, un reinicio pendiente, un certificado a punto
+# de caducar (sus días cambian una vez al día) y las webs (las sondea otro hilo, con su propio calendario: una web caída no es un motivo para leer por SSH más a menudo).
+NO_VIVAS = ("mantenimiento", "certificado", "webs")
+
+
+def estados(t, resumen_bastionado_):
+    """(estado vivo, estado global) a partir de las tarjetas y del resumen de bastionado."""
+    vivo = peor(*[x["estado"] for k, x in t.items() if k not in NO_VIVAS])
+    return vivo, peor(vivo, _estado_t(t, "mantenimiento"), _estado_t(t, "certificado"), _estado_t(t, "webs"), (resumen_bastionado_ or {}).get("estado"))
+
+
+def reaplicar_webs(estado_webs=None):
+    """Pone al día las webs de la caché con lo último del sondeador, sin tocar SSH: recalcula las tarjetas y los estados de los servidores que tienen una
+    lectura buena. Devuelve True si cambió algo."""
+    c = cfg()
+    servidores = c.get("servidores") or []
+    conocidas = [] if errores_ips(c.get("ips_conocidas")) else (c.get("ips_conocidas") or [])
+    estado_webs = estado_webs if estado_webs is not None else webs_sondeo.leer()
+    cambio = False
+    with _bloqueo(rutas.SERVIDORES):
+        cache = leer_cache()
+        entradas = cache.get("servidores") if isinstance(cache.get("servidores"), dict) else {}
+        for s in servidores:
+            e = entradas.get(s["nombre"])
+            if not isinstance(e, dict) or e.get("error") or not isinstance(e.get("datos"), dict):
+                continue
+            webs = webs_sondeo.medidas(s, estado_webs)
+            if webs == e.get("webs"):
+                continue
+            t = tarjetas(e["datos"], webs, e.get("expuestos"), conocidas, {int(s.get("puerto") or 22)})
+            e["webs"], e["tarjetas"] = webs, t
+            e["estado_vivo"], e["estado"] = estados(t, e.get("bastionado_resumen"))
+            cambio = True
+        if cambio:
+            _escribe_json(rutas.SERVIDORES, cache)
+    return cambio
 
 
 def _estado_t(t, clave):
@@ -185,9 +223,13 @@ def podar_nombres(entrada):
 def _guardar(servidores, cache, nuevos, ahora):
     with _bloqueo(rutas.SERVIDORES):
         salida = {}
+        # la caché se vuelve a leer DENTRO del cerrojo: mientras duraba la lectura SSH el sondeador de webs pudo ponerla al día (reaplicar_webs) y
+        # partir de la copia del principio devolvería sus webs a lo de hace unos minutos
+        fresca = leer_cache().get("servidores")
+        fresca = fresca if isinstance(fresca, dict) else {}
         for s in servidores:                   # solo los que siguen en config, en su orden
             n = s["nombre"]
-            previo = dict(cache.get(n) or {})
+            previo = dict(fresca.get(n) or cache.get(n) or {})
             r = nuevos.get(n)
             if r is not None:
                 previo["intento_en"] = ahora

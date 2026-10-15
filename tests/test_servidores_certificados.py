@@ -173,7 +173,7 @@ class MuestraYTarjetaTest(unittest.TestCase):
         datos = {"cpu": {"pct": 1.0, "carga": 0.1, "nucleos": 1}, "memoria": {"total": 100, "usada": 10}, "disco": {"total": 100, "usado": 10},
                  "sesiones": [], "puertos": [22], "intentos": {"total": 0, "hora": 0, "top": []}, "servicios": [], "fail2ban": {"instalado": True, "ahora": 0, "total": 0},
                  "actualizaciones": {"pendientes": 0, "reinicio": False}, "con_root": False}
-        with mock.patch.object(ciclo, "leer", return_value=(datos, "", 0.1)), mock.patch.object(ciclo, "medir_web", return_value=web("https://a", 5)), \
+        with mock.patch.object(ciclo, "leer", return_value=(datos, "", 0.1)), mock.patch.object(ciclo.webs_sondeo, "medidas", return_value=[web("https://a", 5)]), \
                 mock.patch.object(ciclo, "host_de_ssh", return_value="h"), mock.patch.object(ciclo, "puertos_expuestos", return_value=[]):
             r = ciclo.recoger_uno({"nombre": "x", "ssh": "u@h", "webs": ["https://a"]}, [])
         self.assertEqual(r["tarjetas"]["certificado"]["estado"], "ambar")

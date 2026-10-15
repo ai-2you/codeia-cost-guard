@@ -304,6 +304,9 @@ Si un servidor no tiene registro de sshd en el journal, la tarjeta dice «sin da
 - **Certificados de las webs**: se guarda cuántos días faltan para que caduque el certificado que sirve cada web https (el de la hoja, ya verificado: uno caducado
   o no válido no se conecta y aparece como error) y, por muestra, el mínimo de todas las webs; si a alguna no se le pudo leer, no se guarda mínimo para no esconderla.
   La tarjeta de webs pasa a ámbar con menos de 14 días y a rojo con menos de 3.
+- **Webs de cada servidor** (`webs` en la configuración): se sondean en un hilo aparte, no dentro de la lectura SSH. Cada 5 minutos, y cada 60 s mientras una web falla
+  (como mucho 20 a la vez). Un 4xx cuenta como «responde»; un 5xx, un fallo de conexión o un timeout, como fallo. Si el Mac no tiene red (fallan todas y también los
+  tres canarios públicos) esa pasada se descarta entera y no anota ninguna caída. Una web caída pone el servidor en rojo pero no acelera la lectura SSH.
 - Cada servidor tiene un `id` propio en `servidores.json`: renombrarlo no parte su historial; quitarlo y volver a añadirlo con el mismo nombre
   empieza uno nuevo.
 - Lectura: `GET /servidores/historia` (lista, o serie por día/hora con `servidor`, `desde`, `hasta`, `paso`) y `GET /servidores/ips?servidor=…&con_ips=1`
