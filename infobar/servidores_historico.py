@@ -13,6 +13,8 @@ import time
 
 from . import plataforma, rutas
 from .servidores_datos import ESTADOS, FueraDeRango, conjunto_canonico, horas_de, muestra_de
+from . import servidores_recursos
+from .servidores_recursos import descartar as _descartar
 from .sqlite_base import ErrorAlmacen, abrir_base, _rollback, _sentencias, _tablas, _version
 
 RETENCION_CRUDO_S = 14 * 86400
@@ -74,7 +76,31 @@ ESQUEMA_V2 = """
 ALTER TABLE horas_servidor ADD COLUMN intentos_exactos INTEGER CHECK(intentos_exactos BETWEEN 0 AND 1000000);
 ALTER TABLE horas_servidor ADD COLUMN intentos_completa INTEGER CHECK(intentos_completa IN (0, 1));
 """
-MIGRACIONES = {1: ESQUEMA_V1, 2: ESQUEMA_V2}       # versión -> script que lleva de la anterior a esa
+ESQUEMA_V3 = f"""
+CREATE TABLE recursos(
+    servidor_id TEXT NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
+    tipo TEXT NOT NULL CHECK(tipo IN ('contenedor','compose','servicio')),
+    clave TEXT NOT NULL CHECK(length(clave) = 32),
+    etiqueta TEXT NOT NULL CHECK(length(etiqueta) BETWEEN 1 AND 130),
+    primera INTEGER NOT NULL, ultima INTEGER NOT NULL,
+    activo INTEGER NOT NULL CHECK(activo IN (0, 1)),
+    estado TEXT NOT NULL CHECK(estado IN ('ok','terminado','otro','reiniciando','mal','caido')),
+    salud TEXT CHECK(salud IN ('healthy','unhealthy','starting','none')),
+    reinicios INTEGER CHECK(reinicios BETWEEN 0 AND 100000000), inicio INTEGER,
+    visto_n INTEGER NOT NULL DEFAULT 0, visto_desde INTEGER, ausente_n INTEGER NOT NULL DEFAULT 0, ausente_desde INTEGER,
+    bucle_n INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(servidor_id, tipo, clave)) STRICT, WITHOUT ROWID;
+CREATE TABLE eventos(
+    servidor_id TEXT NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
+    ts INTEGER NOT NULL CHECK(ts BETWEEN {TS_MIN} AND {TS_MAX}),
+    clave TEXT NOT NULL CHECK(length(clave) = 32),
+    tipo TEXT NOT NULL CHECK(tipo IN ('contenedor','compose','servicio')),
+    evento TEXT NOT NULL CHECK(evento IN ('aparecio','desaparecio','cambio_estado','inestable','reinicios_en_bucle')),
+    severidad TEXT NOT NULL CHECK(severidad IN ('info','aviso','critica')),
+    PRIMARY KEY(servidor_id, ts, clave, evento)) STRICT, WITHOUT ROWID;
+CREATE INDEX eventos_por_clave ON eventos(servidor_id, clave, ts);
+"""
+MIGRACIONES = {1: ESQUEMA_V1, 2: ESQUEMA_V2, 3: ESQUEMA_V3}       # versión -> script que lleva de la anterior a esa
 
 # Clase de cada columna (publico < interno < personal < secreto). Un test falla si aparece una columna sin clasificar.
 _I = "interno"
@@ -86,6 +112,10 @@ CLASES_SERVIDORES = {
     "horas_servidor": {c: _I for c in ("servidor_id", "hora", "n", "errores", "carga_max", "mem_max", "disco_max", "intentos_pico_24h",
                                        "intentos_pico_1h", "baneadas_max", "sesiones_ajenas_max", "estado_peor", "intentos_exactos", "intentos_completa")},
     "ips_atacantes": {"servidor_id": _I, "ip": "personal", "primera": _I, "ultima": _I, "max_24h": _I, "horas_vista": _I, "ultima_hora": _I},
+    # la etiqueta es el nombre del recurso (puede ser el de un cliente); la clave es un hash con sal y no dice nada sin ella
+    "recursos": {**{c: _I for c in ("servidor_id", "tipo", "clave", "primera", "ultima", "activo", "estado", "salud", "reinicios", "inicio",
+                                    "visto_n", "visto_desde", "ausente_n", "ausente_desde", "bucle_n")}, "etiqueta": "personal"},
+    "eventos": {c: _I for c in ("servidor_id", "ts", "clave", "tipo", "evento", "severidad")},
 }
 
 
@@ -139,8 +169,9 @@ def copia_sin_ips(con, directorio):
     memoria = sqlite3.connect(":memory:", isolation_level=None)
     try:
         con.backup(memoria)
-        if "ips_atacantes" in _tablas(memoria):
-            memoria.execute("DELETE FROM ips_atacantes")
+        for tabla in ("ips_atacantes", "recursos", "eventos"):          # datos personales: ni IPs ni nombres de recursos en una copia que no caduca por retención
+            if tabla in _tablas(memoria):
+                memoria.execute(f"DELETE FROM {tabla}")
         os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
         memoria.execute("VACUUM INTO ?", (tmp,))
     except Exception:
@@ -186,12 +217,6 @@ def retencion_dias(valor=None):
         return max(mn, min(mx, int(valor)))
     except (TypeError, ValueError):
         return defecto
-
-
-def _descartar(con, motivo, sid):
-    """Cuenta lo descartado por motivo y servidor (acotado: motivos fijos x servidores de la config)."""
-    con.execute("INSERT INTO meta(clave, valor) VALUES(?, '1') ON CONFLICT(clave) DO UPDATE SET valor = CAST(valor AS INTEGER) + 1",
-                (f"descartes:{motivo}:{sid}",))
 
 
 def _alta_servidor(con, sid, nombre, ahora):
@@ -309,6 +334,9 @@ def registrar(con, servidor, entrada, ahora, conocidas=(), guardar_ips=True):
                         _anota_horas(con, sid, horas_de(entrada, ok_en))
                     except FueraDeRango:
                         _descartar(con, "histograma", sid)
+                inv = d.get("inventario")
+                if inv is not None:
+                    servidores_recursos.anota_inventario(con, sid, inv, d.get("swarm_servicios"), ok_en)
                 if propios:
                     _descartar(con, "ips_propias", sid)
                 if guardar_ips and top:
@@ -348,13 +376,16 @@ def mantener(con, politicas, ahora, vacuum=True):
         con.execute("DELETE FROM horas_servidor WHERE hora > ?", (ahora + 3600,))
         con.execute("UPDATE servidores SET ok_en=MIN(ok_en, ?), intento_en=MIN(intento_en, ?), muestra_en=MIN(muestra_en, ?)", (ahora, ahora, ahora))
         crudo = con.execute("DELETE FROM muestras WHERE ts < ?", (ahora - RETENCION_CRUDO_S,)).rowcount
+        retirados = [r[0] for r in con.execute("SELECT id FROM servidores WHERE retirado_en IS NOT NULL")]
+        borrados = servidores_recursos.purgar(con, ahora, retirados)
         caducar_copias(os.path.join(os.path.dirname(ruta()), "copias"), ahora)
         con.execute("INSERT INTO meta(clave, valor) VALUES('mantenido_en', ?) ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor", (str(ahora),))
         con.execute("COMMIT")
     except Exception:
         _rollback(con)
         raise
-    return {"ips_borradas": ips, "crudo_borrado": crudo, "consolidado": _consolidar(con, ahora, ips > 0 and vacuum)}
+    return {"ips_borradas": ips, "crudo_borrado": crudo, "recursos_borrados": borrados,
+            "consolidado": _consolidar(con, ahora, (ips > 0 or borrados > 0) and vacuum)}
 
 
 def _consolidar(con, ahora, hubo_borrado):
@@ -380,6 +411,19 @@ def olvidar_ips(con, servidor_id=None, ahora=None):
             n = con.execute("DELETE FROM ips_atacantes").rowcount
         else:
             n = con.execute("DELETE FROM ips_atacantes WHERE servidor_id=?", (servidor_id,)).rowcount
+        con.execute("COMMIT")
+    except Exception:
+        _rollback(con)
+        raise
+    return n, _consolidar(con, ahora, False)
+
+
+def olvidar_recursos(con, servidor_id=None, ahora=None):
+    """Borra ya los recursos y eventos (nombres incluidos) de un servidor o de todos, consolida el WAL y devuelve ((recursos, eventos), consolidado)."""
+    ahora = int(ahora or time.time())
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        n = servidores_recursos.olvidar(con, servidor_id)
         con.execute("COMMIT")
     except Exception:
         _rollback(con)

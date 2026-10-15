@@ -163,6 +163,10 @@ def podar_ips(entrada, ahora, vida_s=CACHE_IPS_VIDA_S):
         for s in datos.get("sesiones") or []:
             if isinstance(s, dict):
                 s["desde"] = ""
+        inv = datos.get("inventario")
+        if isinstance(inv, dict):
+            inv["contenedores"] = []              # los nombres de contenedores (pueden ser de clientes) tampoco viven en la caché más de 48 h
+        datos.pop("swarm_servicios", None)
     return entrada
 
 

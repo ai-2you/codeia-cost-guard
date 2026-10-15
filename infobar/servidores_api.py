@@ -14,9 +14,9 @@ PARAMS = {"/servidores/historia": {"servidor", "desde", "hasta", "paso"}, "/serv
 NO_HAY = {"disponible": False, "motivo": "Aún no hay historial de servidores: se crea con la primera lectura buena."}
 
 
-def auditar_ips(servidor_id, n, origen):
-    """Una línea por consulta o borrado de IPs: cuándo, qué servidor (su id opaco) y cuántas. Nunca las IPs."""
-    linea = json.dumps({"ts": int(time.time()), "servidor": servidor_id, "ips": n, "origen": origen})
+def auditar_ips(servidor_id, n, origen, dato="ips"):
+    """Una línea por consulta o borrado de IPs (o de recursos): cuándo, qué servidor (su id opaco) y cuántos. Nunca las IPs ni los nombres."""
+    linea = json.dumps({"ts": int(time.time()), "servidor": servidor_id, dato: n, "origen": origen})
     os.makedirs(rutas.DATOS, mode=0o700, exist_ok=True)
     fd = os.open(os.path.join(rutas.DATOS, "servidores_ips.log"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(fd, "a", encoding="utf-8") as f:
@@ -58,8 +58,9 @@ def atiende(ruta, q, ahora=None):
         con.close()
 
 
-def olvidar(nombre=None):
-    """Borra ya las IPs de un servidor (por nombre o id, también retirado) o de todos. Devuelve (código de salida, mensaje)."""
+def olvidar(nombre=None, que="ips"):
+    """Borra ya las IPs (`que="ips"`) o los recursos y eventos (`que="recursos"`, nombres incluidos) de un servidor (por nombre o id, también
+    retirado) o de todos. Devuelve (código de salida, mensaje)."""
     try:
         con = sh.abrir(solo_lectura=True)
     except sh.SinDatos:
@@ -75,8 +76,15 @@ def olvidar(nombre=None):
         con.close()
     con = sh.abrir()
     try:
-        n, consolidado = sh.olvidar_ips(con, sid)
+        if que == "recursos":
+            (n, eventos), consolidado = sh.olvidar_recursos(con, sid)
+        else:
+            n, consolidado = sh.olvidar_ips(con, sid)
     finally:
         con.close()
+    pendiente = "" if consolidado else " El borrado se consolidará en cuanto no haya lectores abiertos (vuelve a ejecutarlo)."
+    if que == "recursos":
+        auditar_ips(sid or "todos", n, "orden", "recursos")
+        return 0, f"Recursos borrados: {n}; eventos: {eventos}." + pendiente
     auditar_ips(sid or "todos", n, "orden")
-    return 0, f"IPs borradas: {n}." + ("" if consolidado else " El borrado se consolidará en cuanto no haya lectores abiertos (vuelve a ejecutarlo).")
+    return 0, f"IPs borradas: {n}." + pendiente

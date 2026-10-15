@@ -6,16 +6,16 @@ heredar nada peligroso de ~/.ssh/config (ProxyCommand, LocalCommand, reenvios).
 """
 import math, os, re, subprocess, time
 
-from . import plataforma, servidores_intentos
+from . import plataforma, servidores_intentos, servidores_inventario
 from .servidores import errores_servidores
 
 CLAVE = os.path.expanduser("~/.ssh/infobar_ed25519")
 TOPE_S = 20                 # segundos por servidor, conexion incluida
 TOPE_BYTES = 128 * 1024     # lo que se pasa de aqui se corta (las secciones de v1 van primero y caben): no se tira la lectura entera
 SECCIONES = {"version", "sistema", "memoria", "disco", "sesiones", "puertos", "intentos",
-             "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban", "version_root", "fin_root"}
-SECCIONES_ROOT = ("servicios", "contenedores", "bastionado_root", "fail2ban")     # las que escribe recoger-root
-MARCADAS = ("intentos",)    # secciones de v2 con marco: "n <lineas>" al principio y "fin <lineas> <codigo>" al final
+             "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban", "version_root", "fin_root", "inventario"}
+SECCIONES_ROOT = ("servicios", "contenedores", "bastionado_root", "fail2ban", "inventario")     # las que escribe recoger-root
+MARCADAS = ("intentos", "inventario")    # secciones de v2 con marco: "n <lineas>" al principio y "fin <lineas> <codigo>" al final
 _MARCO_N = re.compile(r"n ([0-9]{1,6})")
 _MARCO_FIN = re.compile(r"fin ([0-9]{1,6}) ([0-9]{1,3})")
 
@@ -247,6 +247,13 @@ def interpretar(sec, marcadas=frozenset(), ahora=None):
         d["actualizaciones"] = {"pendientes": int(_num(a[0])), "reinicio": len(a) > 1 and a[1] == "reinicio"}
     if "servicios" in sec or "contenedores" in sec:
         d["servicios"] = _servicios(sec.get("servicios") or [], sec.get("contenedores") or [])
+    if "servicios" in sec:
+        # nombres de los servicios de Swarm (con su estado): la identidad de un servicio solo vale si aparece aquí
+        d["swarm_servicios"] = {n: ok for n, ok in ((s_["nombre"], s_["ok"]) for s_ in _servicios(sec["servicios"], [])) if servidores_inventario.NOMBRE.fullmatch(n)}
+    if "inventario" in sec:
+        inv = servidores_inventario.interpretar(sec["inventario"], "inventario" in marcadas)
+        if inv is not None:
+            d["inventario"] = inv
     if "fail2ban" in sec:
         f = _clave_valor(sec["fail2ban"])
         d["fail2ban"] = ({"instalado": False} if "no-instalado" in sec["fail2ban"] else

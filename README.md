@@ -294,6 +294,13 @@ Si un servidor no tiene registro de sshd en el journal, la tarjeta dice «sin da
   bajarla oculta al instante lo que ya sobraba.
 - `python3 costbar.py --olvidar-ips [--servidor NOMBRE]` las borra ya, compacta la base y deja una línea en `servidores_ips.log` con el número
   de IPs borradas (nunca las IPs). Con `--servidor` sin nombre no hace nada.
+- **Contenedores y servicios** (script v2 de `recoger-root`): inventario de lo que corre en el servidor, con estado, salud y reinicios, sin tocar
+  variables de entorno ni montajes (plantilla fija de `docker inspect`). Un servicio de Swarm solo se reconoce si aparece en `docker service ls`.
+  Se guarda cuándo **apareció**, **desapareció**, **cambió de estado** o **se reinicia en bucle**: nunca por un solo fallo de lectura, un contenedor
+  efímero o una lectura recortada (se exigen dos lecturas completas separadas en el tiempo). Los **nombres son datos personales** (pueden ser de
+  clientes): solo viven en la etiqueta del recurso, los inactivos se olvidan a los 30 días, los eventos a los 180, y se borran al quitar el servidor.
+  `python3 costbar.py --olvidar-recursos [--servidor NOMBRE]` los borra ya. Si el script de root tuvo que saltarse algo por falta de tiempo, esa
+  lectura no cuenta («sin dato»).
 - Cada servidor tiene un `id` propio en `servidores.json`: renombrarlo no parte su historial; quitarlo y volver a añadirlo con el mismo nombre
   empieza uno nuevo.
 - Lectura: `GET /servidores/historia` (lista, o serie por día/hora con `servidor`, `desde`, `hasta`, `paso`) y `GET /servidores/ips?servidor=…&con_ips=1`

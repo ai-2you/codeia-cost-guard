@@ -55,5 +55,30 @@ else
   echo "no-instalado"
 fi
 
+echo "### inventario"
+# Contenedores con estado, salud y reinicios. UNA llamada a `docker inspect` con una plantilla FIJA que solo nombra los campos de abajo (nunca
+# Config.Env, Cmd, Mounts, Image ni `.State.Health` entero: su .Log lleva la salida del healthcheck). Cada texto sale con {{json}}, asi un
+# valor con saltos de linea, tabuladores o "### algo" no puede romper lineas ni abrir secciones. Los mas antiguos primero (produccion antes
+# que los efimeros) y como mucho 200: lo que sobra se declara en "truncado" y el Mac no concluye que lo que no ve haya desaparecido.
+# Marco "n <lineas>" ... "fin <lineas> <codigo>" como en intentos; "pedidos" = ids que se inspeccionan, el Mac exige tantas lineas "c".
+PLANTILLA='c{{"\t"}}{{json .Name}}{{"\t"}}{{json .State.Status}}{{"\t"}}{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}}{{"\t"}}{{.RestartCount}}{{"\t"}}{{.State.ExitCode}}{{"\t"}}{{json .State.StartedAt}}{{"\t"}}{{json .HostConfig.RestartPolicy.Name}}{{"\t"}}{{json (index .Config.Labels "com.docker.compose.project")}}{{"\t"}}{{json (index .Config.Labels "com.docker.compose.service")}}{{"\t"}}{{json (index .Config.Labels "com.docker.swarm.service.name")}}{{"\t"}}{{json (index .Config.Labels "com.docker.swarm.task.id")}}'
+cuerpo=$(
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "fuente ninguna"
+  elif ids=$(t docker ps -aq --no-trunc); then
+    total=$(printf '%s\n' "$ids" | grep -c .)
+    pedidos=$(printf '%s\n' "$ids" | grep . | tac | head -n 200 | tr '\n' ' ')
+    n=$(printf '%s\n' $pedidos | grep -c .)
+    echo "fuente docker"; echo "total $total"; echo "pedidos $n"; echo "truncado $([ "$total" -gt "$n" ] && echo si || echo no)"
+    # shellcheck disable=SC2086
+    [ "$n" -gt 0 ] && t docker inspect --format "$PLANTILLA" $pedidos | cut -b -600
+  else
+    echo "fuente error"
+  fi
+)
+cuerpo=$(printf '%s\n' "$cuerpo" | head -n 230)
+nlin=$(printf '%s\n' "$cuerpo" | grep -c '')
+echo "n $nlin"; printf '%s\n' "$cuerpo"; echo "fin $nlin 0"
+
 echo "### fin_root"
 echo "omitidos $(grep -c . "$MARCAS")"

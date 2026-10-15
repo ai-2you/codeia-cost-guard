@@ -691,7 +691,7 @@ class HistogramaEnLaBaseTest(Base):
         c.execute("PRAGMA user_version=1")
         c.close()
         self.con = sh.abrir()
-        self.assertEqual(self.uno("PRAGMA user_version"), 2)
+        self.assertEqual(self.uno("PRAGMA user_version"), max(sh.MIGRACIONES))
         self.assertEqual(self.uno("SELECT n FROM horas_servidor"), 3)
         self.assertIsNone(self.uno("SELECT intentos_exactos FROM horas_servidor"))
         copias = os.listdir(os.path.join(self.dir, "copias"))
