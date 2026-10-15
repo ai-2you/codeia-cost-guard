@@ -88,39 +88,41 @@ class ProtocoloTest(unittest.TestCase):
         self.assertEqual(ss.secciones("### disco\n10 5\n### raro\nx\n"), {"disco": ["10 5"]})
 
     def test_ssh_con_salida_enorme_deja_pasar_lo_que_cabe(self):
-        cuerpo = "### version\n2\n### sistema\n0.1 0.1 0.1 1/1 1\n4\n100\n" + "x" * (2 * ss.TOPE_BYTES)
+        cuerpo = "### version\n2\n### sistema\n0.1 0.1 0.1 1/1 1\n4\n100\n### disco\n" + "x" * (2 * ss.TOPE_BYTES)
         orden = ["python3", "-c", f"import sys; sys.stdout.write({cuerpo!r})"]
         with mock.patch.object(ss, "orden_ssh", return_value=orden):
             salida, error = ss.ejecutar({"nombre": "a", "ssh": "h"})
         self.assertEqual(error, "")
         sec, _, _, completa = ss.analizar(salida)
         self.assertIn("sistema", sec)
+        self.assertNotIn("disco", sec)                  # la sección que estaba abierta al cortar acaba en una línea partida: no vale
         self.assertFalse(completa)
 
 
 class PresupuestoDeTiempoTest(unittest.TestCase):
-    """Peor caso de los scripts: root < sudo < vigilante < tope del Mac menos la conexion (5 s)."""
+    """Peor caso de los scripts, medido: el último escritor del canal termina antes del tope del Mac menos la conexión (5 s)."""
 
     def leer(self, nombre):
-        import re
         with open(os.path.join(RAIZ, "infobar", "remoto", nombre)) as f:
-            return f.read(), re
+            return f.read()
 
     def test_los_topes_encajan(self):
-        root, re = self.leer("recoger-root.sh")
+        import re
+        root, user = self.leer("recoger-root.sh"), self.leer("recoger.sh")
         limite = int(re.search(r"LIMITE=([0-9]+)", root)[1])
         cada = int(re.search(r"timeout ([0-9]+) \"\$@\"", root)[1])
-        user, _ = self.leer("recoger.sh")
-        sudo = int(re.search(r"timeout ([0-9]+) sudo -n", user)[1])
-        vigilante = int(re.search(r"sleep ([0-9]+); kill -TERM", user)[1])
-        self.assertLess(limite + cada, sudo)
-        self.assertLess(sudo, vigilante)
+        total_sudo = int(re.search(r"restante=\$\(resta ([0-9]+)\)", user)[1])
+        minimo_sudo = int(re.search(r'\[ "\$restante" -ge ([0-9]+) \]', user)[1])
+        vigilante = int(re.search(r"sleep ([0-9]+); kill", user)[1])
+        gracia = int(re.search(r"timeout -k ([0-9]+) ", user)[1])
+        self.assertLessEqual(limite + cada, 10)                         # root acaba solo, en el peor caso, en 10 s
+        self.assertLessEqual(total_sudo + gracia, vigilante)           # el sudo (con su gracia) acaba antes que el vigilante
         self.assertLessEqual(vigilante, ss.TOPE_S - 5)
-        self.assertIn("[ $(( $(date +%s) - INICIO )) -ge $LIMITE ] && return 1", root)       # el limite se aplica en cada comando
+        self.assertIn("[ $(( $(date +%s) - INICIO )) -ge $LIMITE ]", root)
+        self.assertGreaterEqual(minimo_sudo, 1)
 
-    def test_sin_comandos_sueltos_en_root_fuera_del_presupuesto(self):
-        root, re = self.leer("recoger-root.sh")
-        # los programas externos de root pasan por t (con su tope y el presupuesto)
+    def test_los_programas_de_root_pasan_por_el_presupuesto(self):
+        root = self.leer("recoger-root.sh")
         self.assertNotIn("docker ps -a --format", root.replace("t docker ps -a --format", ""))
         self.assertNotIn("sshd -T |", root.replace("t sshd -T |", ""))
 
@@ -195,6 +197,17 @@ class IntentosTest(unittest.TestCase):
             self.assertNotIn("horas", it, nombre)
             self.assertIn("histograma_cubos", it["descartes"], nombre)
 
+    def test_borde_del_desfase_de_reloj(self):
+        for delta, hay in ((899, True), (900, True), (901, False), (-901, False)):
+            it = self.interp(self.cuerpo(), ahora=AHORA + delta)
+            self.assertEqual("horas" in it, hay, delta)
+
+    def test_suma_de_cubos_acotada_por_arriba(self):
+        base = ss.analizar(texto(("intentos", seccion_v2(total=7, valores={0: 2, 1: 5}))))[0]["intentos"]
+        inflado = [l.replace(f"h {AHORA // 3600 - 1} 5", f"h {AHORA // 3600 - 1} 500") for l in base]
+        it = self.interp(inflado)
+        self.assertIn("histograma_incoherente", it["descartes"])           # mucho mas de lo que cabe en la ventana: el servidor miente
+
     def test_ips_que_suman_mas_que_el_total_se_descartan(self):
         it = self.interp(self.cuerpo(ips=(("8.8.8.8", 40), ("1.1.1.1", 30))))
         self.assertEqual(it["top"], [])
@@ -218,9 +231,12 @@ class IntentosTest(unittest.TestCase):
         self.assertEqual(horas[(AHORA // 3600 - 2) * 3600], 0)
 
 
-@unittest.skipUnless(shutil.which("bash") and shutil.which("timeout") and shutil.which("python3"), "hace falta bash, timeout y python3")
-class ScriptRealTest(unittest.TestCase):
+REQUISITOS = unittest.skipUnless(shutil.which("bash") and shutil.which("timeout") and shutil.which("python3"), "hace falta bash, timeout y python3")
+
+
+class ScriptBase(unittest.TestCase):
     """Ejecuta infobar/remoto/recoger.sh de verdad con un journalctl simulado delante en el PATH."""
+    lento_corto = True
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="cg-sh-")
@@ -228,6 +244,7 @@ class ScriptRealTest(unittest.TestCase):
         j = os.path.join(self.dir, "journalctl")
         with open(j, "w") as f:
             f.write(f'#!{sys.executable}\nimport os, sys, time\na = sys.argv[1:]\n'
+                    'if os.environ.get("FAKE_ARGS"):\n    open(os.environ["FAKE_ARGS"], "a").write(" ".join(a) + "\\n")\n'
                     'if os.environ.get("FAKE_SIN_UNIDAD"):\n    sys.exit(0)\n'
                     'if "-n" in a:\n    print("x"); sys.exit(0)\n'
                     'if "--since" not in a:\n    print(os.environ.get("FAKE_COBERTURA", "1000") + ".000000 h kernel: x"); sys.exit(0)\n'
@@ -235,12 +252,17 @@ class ScriptRealTest(unittest.TestCase):
                     'unidades = [x.split("=", 1)[1] for x in a if x.startswith("_SYSTEMD_UNIT=")]\n'
                     'for linea in open(os.environ["FAKE_JOURNAL"]):\n'
                     '    unidad, _, resto = linea.partition("|")\n'
-                    '    if not unidades or unidad in unidades:\n        sys.stdout.write(resto)\n')
+                    '    if not unidades or unidad in unidades:\n        sys.stdout.write(resto)\n'
+                    'sys.exit(int(os.environ.get("FAKE_RC", "0")))\n')
         os.chmod(j, os.stat(j).st_mode | stat.S_IXUSR)
         with open(SCRIPT) as f:
             s = f.read()
         self.assertIn("export LC_ALL=C PATH=", s)
-        s = s.replace("export LC_ALL=C PATH=", f"export LC_ALL=C PATH={self.dir}:{os.path.dirname(shutil.which('timeout'))}:", 1).replace("timeout 6 journalctl", "timeout 1 journalctl")
+        s = s.replace("export LC_ALL=C PATH=", f"export LC_ALL=C PATH={self.dir}:{os.path.dirname(shutil.which('timeout'))}:", 1)
+        self.cgroup = os.path.join(self.dir, "cgroup")
+        s = s.replace("/proc/self/cgroup", self.cgroup)
+        if self.lento_corto:
+            s = s.replace('[ "$lim" -gt 5 ] && lim=5;', "lim=1;")
         self.script = os.path.join(self.dir, "recoger.sh")
         with open(self.script, "w") as f:
             f.write(s)
@@ -262,6 +284,9 @@ class ScriptRealTest(unittest.TestCase):
         sec, marcadas, invalidas, completa = ss.analizar(salida)
         return sec, marcadas, invalidas, completa
 
+
+@REQUISITOS
+class ScriptRealTest(ScriptBase):
     def test_sintaxis(self):
         r = subprocess.run(["bash", "-n", SCRIPT], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -330,6 +355,167 @@ class ScriptRealTest(unittest.TestCase):
         sec, marcadas, invalidas, _ = self.intentos(salida)
         self.assertEqual(marcadas, {"intentos"})
         self.assertFalse(invalidas)
+
+
+    def test_el_nombre_de_usuario_no_se_hace_pasar_por_otra_linea(self):
+        j = self.diario([
+            (10, "Invalid user Failed password for invalid user from 8.8.8.8 port 2"),
+            (10, "Failed password for invalid user Failed password for invalid user from 8.8.8.8 port 2 ssh2"),      # la duplicada de arriba
+            (10, "Disconnected from invalid user Failed password for invalid user 8.8.8.8 port 2 [preauth]"),
+            (10, "Invalid user q from 1.1.1.1 port 2"),
+            (10, "Connection closed by invalid user Invalid user q from 1.1.1.1 port 2 [preauth]"),                  # no canonica
+            (10, "Disconnected from invalid user Invalid user q from 1.1.1.1 port 2 [preauth]"),                     # no canonica
+        ])
+        sec, _, _, _ = self.intentos(self.ejecuta(FAKE_JOURNAL=j))
+        it = si.interpretar(sec["intentos"], True, time.time())
+        self.assertEqual(it["total"], 2)                                    # una por intento, no 0 ni 3
+        self.assertEqual(dict(it["top"]), {"8.8.8.8": 1, "1.1.1.1": 1})
+
+    def test_ignora_lo_posterior_al_inicio_y_lo_anterior_a_los_cubos(self):
+        j = self.diario([(-100, "Invalid user a from 8.8.8.8 port 2"),          # escrito despues de que el script tomara «ahora»
+                         (26 * 3600 + 5000, "Invalid user b from 1.1.1.1 port 2"),     # mas viejo que el primer cubo
+                         (10, "Invalid user c from 9.9.9.9 port 2")])
+        sec, _, _, _ = self.intentos(self.ejecuta(FAKE_JOURNAL=j))
+        it = si.interpretar(sec["intentos"], True, time.time())
+        self.assertEqual((it["total"], [p[0] for p in it["top"]]), (1, ["9.9.9.9"]))
+        self.assertNotIn("descartes", it)                                   # y el histograma sigue siendo coherente
+
+    def test_pide_el_journal_de_la_mas_nueva_a_la_mas_vieja_y_con_limites(self):
+        args = os.path.join(self.dir, "args.txt")
+        self.ejecuta(FAKE_JOURNAL=self.diario([]), FAKE_ARGS=args)
+        with open(args) as f:
+            principal = [l for l in f.read().splitlines() if "--since" in l]
+        self.assertEqual(len(principal), 1)
+        self.assertIn(" -r ", " " + principal[0] + " ")
+        self.assertIn("--until", principal[0])
+        self.assertIn("_SYSTEMD_UNIT=ssh.service _SYSTEMD_UNIT=sshd.service", principal[0])
+
+    def test_aislamiento_segun_el_cgroup_de_la_sesion(self):
+        for contenido, esperado in (("0::/user.slice/user-1000.slice/session-3.scope\n", "aislamiento si"),
+                                    ("0::/system.slice/ssh.service\n", "aislamiento no"), ("", "aislamiento no")):
+            with open(self.cgroup, "w") as f:
+                f.write(contenido)
+            sec, _, _, _ = self.intentos(self.ejecuta(FAKE_JOURNAL=self.diario([])))
+            self.assertIn(esperado, sec["intentos"], contenido)
+        # y sin fichero de cgroup (sin systemd): no hay aislamiento
+        os.remove(self.cgroup)
+        sec, _, _, _ = self.intentos(self.ejecuta(FAKE_JOURNAL=self.diario([])))
+        self.assertIn("aislamiento no", sec["intentos"])
+
+    def test_cobertura_desconocida_deja_todas_las_horas_en_desconocido(self):
+        sec, _, _, _ = self.intentos(self.ejecuta(FAKE_JOURNAL=self.diario([(10, "Invalid user a from 8.8.8.8 port 2")]), FAKE_COBERTURA=""))
+        it = si.interpretar(sec["intentos"], True, time.time())
+        # sin cobertura todas las horas son desconocidas y el total (1) no cabe en ellas: se descarta el histograma, no se inventan ceros
+        self.assertNotIn("horas", it)
+        self.assertIn("histograma_incoherente", it["descartes"])
+
+    def test_sin_tiempo_para_el_journal_es_sin_dato_no_cero(self):
+        falso = os.path.join(self.dir, "free")
+        with open(falso, "w") as f:
+            f.write("#!/bin/bash\nexec sleep 30\n")
+        os.chmod(falso, 0o755)
+        salida = self.ejecuta(FAKE_JOURNAL=self.diario([(10, "Invalid user a from 8.8.8.8 port 2")]))      # `free` agota sus 5 s
+        sec, _, _, _ = self.intentos(salida)
+        self.assertIn("fuente error", sec["intentos"])
+        d = ss.interpretar(sec, {"intentos"}, time.time())
+        self.assertNotIn("intentos", d)
+        self.assertTrue(d["intentos_sin_dato"])
+
+    def test_journalctl_que_falla_con_otro_codigo_es_lectura_incompleta(self):
+        sec, _, _, _ = self.intentos(self.ejecuta(FAKE_JOURNAL=self.diario([(10, "Invalid user a from 8.8.8.8 port 2")]), FAKE_RC="3"))
+        it = si.interpretar(sec["intentos"], True, time.time())
+        self.assertTrue(it["parcial"])
+        sec, _, _, _ = self.intentos(self.ejecuta(FAKE_JOURNAL=self.diario([]), FAKE_RC="1"))        # «nada que mostrar» no es un fallo
+        self.assertFalse(si.interpretar(sec["intentos"], True, time.time())["parcial"])
+
+
+@REQUISITOS
+class ScriptLentoTest(ScriptBase):
+    """Todo lo lento a la vez: el último escritor del canal ha de cerrarlo antes del tope del Mac menos la conexión."""
+    lento_corto = False
+
+    def test_el_canal_se_cierra_a_tiempo_con_todo_lento(self):
+        for nombre, cuerpo in {"apt": "exec sleep 30", "sudo": "shift; exec \"$@\"", "raiz": "exec sleep 30"}.items():
+            with open(os.path.join(self.dir, nombre), "w") as f:
+                f.write("#!/bin/bash\n" + cuerpo + "\n")
+            os.chmod(os.path.join(self.dir, nombre), 0o755)
+        with open(self.script) as f:
+            texto = f.read()
+        texto = texto.replace("/usr/local/lib/infobar/recoger-root", os.path.join(self.dir, "raiz"))
+        with open(self.script, "w") as f:
+            f.write(texto)
+        t0 = time.time()
+        salida = self.ejecuta(FAKE_LENTO="1", FAKE_JOURNAL=self.diario([]))
+        duracion = time.time() - t0
+        self.assertLess(duracion, ss.TOPE_S - 5, f"tardó {duracion:.1f} s")
+        self.assertIn("### version", salida)
+        self.assertTrue(salida.rstrip().endswith("### fin"))
+
+
+@REQUISITOS
+class RootRealTest(unittest.TestCase):
+    """recoger-root.sh de verdad con programas falsos: lo que se salta o se pasa de tiempo se declara, no sale como «0»."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="cg-root-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        with open(os.path.join(RAIZ, "infobar", "remoto", "recoger-root.sh")) as f:
+            texto = f.read()
+        texto = texto.replace("export LC_ALL=C PATH=", f"export LC_ALL=C PATH={self.dir}:{os.path.dirname(shutil.which('timeout'))}:", 1)
+        self.script = os.path.join(self.dir, "recoger-root.sh")
+        with open(self.script, "w") as f:
+            f.write(texto)
+
+    def falso(self, nombre, segundos):
+        ruta = os.path.join(self.dir, nombre)
+        with open(ruta, "w") as f:
+            f.write(f"#!/bin/bash\nsleep {segundos}\n")
+        os.chmod(ruta, 0o755)
+
+    def ejecuta(self):
+        return subprocess.run(["bash", self.script], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL).stdout
+
+    def test_rapido_declara_cero_omitidos(self):
+        for n in ("docker", "sshd", "ufw", "iptables", "systemctl", "fail2ban-client"):
+            self.falso(n, 0)
+        salida = self.ejecuta()
+        sec, _, invalidas, _ = ss.analizar(salida)
+        self.assertEqual(sec["version_root"], ["2"])
+        self.assertEqual(sec["fin_root"], ["omitidos 0"])
+        self.assertFalse(invalidas)
+
+    def test_lento_declara_omitidos_y_el_mac_descarta_las_secciones_de_root(self):
+        for n in ("docker", "sshd", "ufw", "iptables", "systemctl", "fail2ban-client"):
+            self.falso(n, 2.5)
+        salida = "### version\n2\n" + self.ejecuta() + "### fin\n"
+        sec, _, invalidas, completa = ss.analizar(salida)
+        self.assertNotEqual(sec["fin_root"], ["omitidos 0"])
+        self.assertIn("root", invalidas)
+        self.assertTrue(all(n not in sec for n in ss.SECCIONES_ROOT))
+        d = ss.interpretar(sec)
+        self.assertFalse(d["con_root"])                                     # sin root: sin comprobaciones de root, no ceros ni alarmas
+        self.assertNotIn("fail2ban", d)
+
+    def test_un_comando_que_agota_su_tiempo_tambien_se_declara(self):
+        for n in ("sshd", "ufw", "iptables", "systemctl", "fail2ban-client"):
+            self.falso(n, 0)
+        ruta = os.path.join(self.dir, "docker")
+        with open(ruta, "w") as f:
+            f.write('#!/bin/bash\n[ "$1" = info ] && exec sleep 5\nexit 0\n')      # solo `docker info` agota los 3 s de `timeout`
+        os.chmod(ruta, 0o755)
+        sec, _, invalidas, _ = ss.analizar("### version\n2\n" + self.ejecuta() + "### fin\n")
+        self.assertEqual(sec["fin_root"], ["omitidos 1"])             # y el presupuesto sobraba: no es un salto, es un tiempo agotado
+        self.assertIn("root", invalidas)
+
+    def test_root_v1_sin_marcas_se_sigue_aceptando(self):
+        sec, _, invalidas, _ = ss.analizar("### fail2ban\nahora 3\ntotal 9\n### bastionado_root\nufw active\n### fin\n")
+        self.assertEqual(sec["fail2ban"], ["ahora 3", "total 9"])
+        self.assertFalse(invalidas)
+
+    def test_cortada_con_seccion_abierta_la_invalida(self):
+        sec, _, invalidas, _ = ss.analizar("### sistema\n0.1 0.1 0.1 1/1 1\n4\n10\n### cortada\n")
+        self.assertNotIn("sistema", sec)
+        self.assertIn("sistema", invalidas)
 
 
 class HistogramaEnLaBaseTest(Base):
@@ -412,6 +598,85 @@ class HistogramaEnLaBaseTest(Base):
         self.reg(e)
         self.assertEqual(self.uno("SELECT COUNT(*) FROM ips_atacantes"), 0)
         self.assertEqual(self.uno("SELECT intentos_24h FROM muestras"), 5)
+
+    def test_sin_origen_fiable_ni_lectura_completa_no_se_anotan_horas(self):
+        e = self.lectura(AHORA, {0: 3}, aislamiento="no")
+        self.reg(e)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM horas_servidor WHERE intentos_exactos IS NOT NULL"), 0)
+        e = self.lectura(AHORA + 300, {0: 3})
+        e["datos"]["completa"] = False                                       # la lectura llegó cortada
+        self.reg(e)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM horas_servidor WHERE intentos_exactos IS NOT NULL"), 0)
+        self.reg(self.lectura(AHORA + 600, {0: 3}))
+        self.assertGreater(self.uno("SELECT COUNT(*) FROM horas_servidor WHERE intentos_exactos IS NOT NULL"), 0)
+
+    def test_horas_fuera_de_la_ventana_de_26_h_no_se_escriben(self):
+        e = self.lectura(AHORA, {0: 1})
+        antes = ((AHORA // 3600) - 30) * 3600
+        e["datos"]["intentos"]["horas"].insert(0, [antes, 7])
+        self.reg(e)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM horas_servidor WHERE hora=?", antes), 0)
+        self.assertGreater(self.uno("SELECT COUNT(*) FROM horas_servidor WHERE intentos_exactos IS NOT NULL"), 0)
+
+    def test_la_hora_no_es_completa_si_el_reloj_del_servidor_va_por_detras(self):
+        # el Mac cree que la hora H terminó, pero el servidor aun esta dentro de ella
+        e = self.lectura(AHORA, {0: 2, 1: 5}, ahora_srv=AHORA - 600)
+        act = (AHORA // 3600) * 3600
+        e["datos"]["intentos"]["ahora_srv"] = act - 100                       # servidor: aun en la hora anterior
+        e["datos"]["intentos"]["horas"] = [h for h in e["datos"]["intentos"]["horas"] if h[0] <= act - 3600]
+        e["datos"]["intentos"]["horas"][-1][1] = 9
+        self.reg(e)
+        self.assertEqual(self.exactos()[act - 3600], (9, 0))
+
+    def test_doce_ips_por_muestra_y_descartes_contados(self):
+        ips = tuple((f"8.8.{i}.{i + 1}", 1) for i in range(12))
+        e = self.lectura(AHORA, {0: 12}, ips=ips)
+        self.reg(e)
+        self.assertEqual(self.uno("SELECT COUNT(*) FROM ips_atacantes"), 12)
+        e = self.lectura(AHORA + 300, {0: 3}, ahora_srv=AHORA + 3600)          # reloj del servidor desfasado: el histograma no se coloca
+        self.reg(e)
+        self.assertEqual(self.descartes("histograma_reloj"), 1)
+        e = self.lectura(AHORA + 600, {0: 3})
+        e["datos"]["secciones_invalidas"] = ["intentos", "raro"]
+        self.reg(e)
+        self.assertEqual(self.descartes("intentos"), 1)
+        self.assertEqual(self.descartes("raro"), 0)                           # solo motivos del conjunto cerrado
+
+    def test_dia_incompleto_no_se_presenta_como_completo(self):
+        import datetime
+        dia = datetime.date.fromtimestamp(AHORA)
+        h0 = (AHORA // 3600) * 3600
+        sh._alta_servidor(self.con, "a" * 12, "x", AHORA)
+        self.con.execute("BEGIN IMMEDIATE")
+        sh._anota_horas(self.con, "a" * 12, [(h0 - 3600 * k, 1, True) for k in range(1, 4)])
+        self.con.execute("COMMIT")
+        r = sl.historia(self.con, "a" * 12, dia.isoformat(), dia.isoformat(), "dia")
+        for p in r["puntos"]:
+            self.assertFalse(p["intentos_completa"])
+            self.assertGreater(p["horas_exactas"], 0)
+        # un día con una hora aún en curso tampoco
+        self.con.execute("BEGIN IMMEDIATE")
+        sh._anota_horas(self.con, "a" * 12, [(h0 - 3600 * k, 1, k != 5) for k in range(1, 25)])
+        self.con.execute("COMMIT")
+        r = sl.historia(self.con, "a" * 12, (dia - datetime.timedelta(days=1)).isoformat(), dia.isoformat(), "dia")
+        self.assertTrue(all(isinstance(p["intentos_completa"], bool) for p in r["puntos"]))
+        self.assertFalse(all(p["intentos_completa"] for p in r["puntos"]))
+
+    def test_un_dia_con_todas_sus_horas_cerradas_es_completo_y_con_una_abierta_no(self):
+        import datetime
+        from infobar import historico
+        dia = datetime.date.fromtimestamp(AHORA) - datetime.timedelta(days=3)
+        m0 = historico._medianoche(dia)
+        esperadas = (historico._medianoche(dia + datetime.timedelta(days=1)) - m0) // 3600
+        sh._alta_servidor(self.con, "a" * 12, "x", AHORA)
+        self.con.execute("BEGIN IMMEDIATE")
+        sh._anota_horas(self.con, "a" * 12, [(m0 + 3600 * k, 1, True) for k in range(esperadas)])
+        self.con.execute("COMMIT")
+        r = sl.historia(self.con, "a" * 12, dia.isoformat(), dia.isoformat(), "dia")
+        self.assertEqual([(p["intentos_exactos"], p["intentos_completa"]) for p in r["puntos"]], [(esperadas, True)])
+        self.con.execute("UPDATE horas_servidor SET intentos_completa=0 WHERE hora=?", (m0 + 3600 * 7,))
+        r = sl.historia(self.con, "a" * 12, dia.isoformat(), dia.isoformat(), "dia")
+        self.assertEqual([p["intentos_completa"] for p in r["puntos"]], [False])
 
     def test_migracion_de_v1_a_v2_conserva_los_datos(self):
         self.con.close()

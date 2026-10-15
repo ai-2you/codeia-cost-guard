@@ -7,7 +7,7 @@ import ipaddress
 
 ESTADOS = ("verde", "ambar", "rojo", "gris", "error")
 MAX_INTENTOS = 1_000_000
-MAX_IPS_POR_MUESTRA = 4
+MAX_IPS_POR_MUESTRA = 12
 
 
 class FueraDeRango(ValueError):

@@ -25,6 +25,9 @@ COPIA_VIDA_S = 30 * 86400
 TS_MIN, TS_MAX = 946_684_800, 4_102_444_800
 _RANGO = {"verde": 1, "ambar": 2, "rojo": 3, "gris": 0, "error": 4}
 
+# motivos con los que el protocolo descarta una parte de la lectura (cerrado: son los que fabrican servidores_ssh e servidores_intentos)
+MOTIVOS_PROTOCOLO = frozenset({"histograma_parcial", "histograma_reloj", "histograma_cubos", "histograma_incoherente", "ips_incoherentes",
+                               "intentos", "root"})
 METRICAS = ("carga_pct", "mem_pct", "disco_pct", "uptime_s", "intentos_24h", "intentos_1h", "baneadas", "sesiones", "sesiones_ajenas",
             "puertos_n", "puertos_expuestos", "servicios_n", "servicios_caidos", "webs_n", "webs_caidas", "web_ms_max",
             "faltas_proteccion", "reinicio_pendiente")
@@ -291,10 +294,21 @@ def registrar(con, servidor, entrada, ahora, conocidas=(), guardar_ips=True):
                                 (sid, ok_en, m["estado"], *(m[k] for k in METRICAS)))
                     con.execute("UPDATE servidores SET muestra_en=? WHERE id=?", (ok_en, sid))
                 _suma_hora(con, sid, ok_en, m, False)
-                try:
-                    _anota_horas(con, sid, horas_de(entrada, ok_en))
-                except FueraDeRango:
-                    _descartar(con, "histograma", sid)
+                d = entrada.get("datos") if isinstance(entrada.get("datos"), dict) else {}
+                it = d.get("intentos") if isinstance(d.get("intentos"), dict) else {}
+                for motivo in (it.get("descartes") if isinstance(it.get("descartes"), list) else [])[:8]:
+                    if motivo in MOTIVOS_PROTOCOLO:
+                        _descartar(con, motivo, sid)
+                for nombre in (d.get("secciones_invalidas") if isinstance(d.get("secciones_invalidas"), list) else [])[:8]:
+                    if nombre in MOTIVOS_PROTOCOLO:
+                        _descartar(con, nombre, sid)
+                # las horas exactas solo se anotan si las líneas son de sshd con garantía y la lectura llegó entera: como solo suben,
+                # un pico falso o una lectura a medias no se podría deshacer
+                if it.get("origen_fiable") is True and d.get("completa") is not False:
+                    try:
+                        _anota_horas(con, sid, horas_de(entrada, ok_en))
+                    except FueraDeRango:
+                        _descartar(con, "histograma", sid)
                 if propios:
                     _descartar(con, "ips_propias", sid)
                 if guardar_ips and top:

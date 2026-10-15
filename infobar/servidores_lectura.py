@@ -15,7 +15,8 @@ _RANGO = sh._RANGO
 
 def _fila(r):
     return {k: r[k] for k in CAMPOS} | {"estado": r["estado_peor"], "intentos_exactos": r["intentos_exactos"],
-                                        "intentos_completa": None if r["intentos_exactos"] is None else bool(r["intentos_completa"])}
+                                        "intentos_completa": None if r["intentos_exactos"] is None else bool(r["intentos_completa"]),
+                                        "horas_exactas": 0 if r["intentos_exactos"] is None else 1}
 
 
 def _junta(a, b):
@@ -30,6 +31,7 @@ def _junta(a, b):
     out["intentos_exactos"] = y if x is None else (x if y is None else x + y)
     ca, cb = a["intentos_completa"], b["intentos_completa"]
     out["intentos_completa"] = cb if ca is None else (ca if cb is None else ca and cb)
+    out["horas_exactas"] = a["horas_exactas"] + b["horas_exactas"]
     return out
 
 
@@ -62,6 +64,13 @@ def historia(con, servidor_id, desde, hasta, paso="dia"):
             clave = etiqueta = f"{t.tm_year:04d}-{t.tm_mon:02d}-{t.tm_mday:02d}"
         f = _fila(r)
         puntos[clave] = (etiqueta, _junta(puntos[clave][1], f) if clave in puntos else f)
+    if paso == "dia":
+        for etiqueta, p in puntos.values():
+            # un día solo está completo con todas sus horas (23, 24 o 25 según el cambio de hora) con dato y cerradas
+            dia = datetime.date.fromisoformat(etiqueta)
+            esperadas = (historico._medianoche(dia + datetime.timedelta(days=1)) - historico._medianoche(dia)) // 3600
+            if p["intentos_completa"] is not None:
+                p["intentos_completa"] = bool(p["intentos_completa"] and p["horas_exactas"] >= esperadas)
     return {"servidor": srv["nombre"], "paso": paso, "desde": d0.isoformat(), "hasta": d1.isoformat(),
             "nota": "intentos_pico_* son picos de la ventana de 24 h del servidor, no sumas; intentos_exactos son los de cada hora natural "
                     "(según el journal del servidor; solo si el servidor tiene la versión nueva del script)",

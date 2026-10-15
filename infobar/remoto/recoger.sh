@@ -6,9 +6,12 @@
 # Las secciones con marco ("n <lineas>" al principio y "fin <lineas> <codigo>" al final) solo se dan por
 # completas si traen el cierre; el script termina con "### fin".
 export LC_ALL=C PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-t() { timeout 5 "$@" </dev/null 2>/dev/null; }
-# Vigilante: pase lo que pase el script termina antes del tope del Mac (20 s con la conexion). Lo que llegue sin "### fin" se da por cortado.
-( sleep 14; kill -TERM $$ ) </dev/null >/dev/null 2>&1 &
+# Presupuesto de tiempo (el Mac corta a los 20 s contando la conexion): ningun comando arranca pasados 6 s, el
+# bloque de intentos y el sudo reciben solo lo que queda y el vigilante cierra a los 14 s.
+INICIO=$(date +%s)
+resta() { echo $(( $1 - ($(date +%s) - INICIO) )); }
+t() { [ "$(resta 6)" -le 0 ] && return 1; timeout 5 "$@" </dev/null 2>/dev/null; }
+( sleep 14; kill -TERM -- "-$$" 2>/dev/null; kill -TERM $$ 2>/dev/null ) </dev/null >/dev/null 2>&1 &
 VIGILANTE=$!
 trap 'kill $VIGILANTE 2>/dev/null' EXIT
 
@@ -37,22 +40,32 @@ echo "### intentos"
 # Intentos de acceso SSH rechazados. Solo cuentan las lineas que escribio sshd de verdad: se filtra por la
 # unidad de systemd (campo que pone journald; `logger -t sshd` no lo falsea, a diferencia de -t y de _COMM)
 # y las IPs solo se dan por fiables si las sesiones de usuario no viven en el cgroup de sshd (aislamiento).
-# Los cubos son horas naturales (hora de epoca); "-" = el journal no llega a esa hora (desconocido, no 0).
+# Las reglas se aplican al MENSAJE (lo que va tras "ident[pid]: "), no a la linea entera: el nombre de usuario
+# lo elige el atacante y no puede hacerse pasar por otra linea. Los cubos son horas naturales (hora de epoca);
+# "-" = el journal no llega a esa hora (desconocido, no 0). Se lee de la mas nueva a la mas vieja: si se corta
+# por tiempo se pierde lo antiguo, no lo que esta pasando ahora.
 UNIDADES="_SYSTEMD_UNIT=ssh.service _SYSTEMD_UNIT=sshd.service"
 ahora=$(date +%s)
+ini=$(( (ahora / 3600 - 24) * 3600 ))
 cuerpo=$(
   echo "ahora $ahora"
-  if [ -n "$(t journalctl -q -n 1 -o cat $UNIDADES)" ]; then
+  if [ "$(resta 4)" -le 0 ]; then
+    echo "fuente error"
+  elif [ -n "$(timeout 2 journalctl -q -n 1 -o cat $UNIDADES </dev/null 2>/dev/null)" ]; then
     echo "fuente unit"
     grep -qE 'session-[0-9]+\.scope' /proc/self/cgroup 2>/dev/null && echo "aislamiento si" || echo "aislamiento no"
-    cob=$(timeout 3 journalctl -q -o short-unix </dev/null 2>/dev/null | head -n 1 | cut -d. -f1 | tr -cd '0-9')
+    cob=$(timeout 2 journalctl -q -o short-unix </dev/null 2>/dev/null | head -n 1 | cut -d. -f1 | tr -cd '0-9')
     echo "cobertura ${cob:-0}"
-    timeout 6 journalctl -q -o short-unix --since "-25h" $UNIDADES </dev/null 2>/dev/null | cut -b -400 | awk -v ahora="$ahora" -v cob="${cob:-0}" '
-      # un intento deja varias lineas (Invalid user, Disconnected from invalid user...): se cuenta
-      # solo la linea canonica de cada uno para no multiplicar
-      /Invalid user .* from |Connection closed by authenticating user|Failed password for |maximum authentication attempts/ {
-        if ($0 ~ /Failed password for invalid user/) next
+    lim=$(resta 11); [ "$lim" -gt 5 ] && lim=5; [ "$lim" -lt 1 ] && lim=1
+    timeout "$lim" journalctl -q -r -o short-unix --since "@$ini" --until "@$ahora" $UNIDADES </dev/null 2>/dev/null | cut -b -400 | awk -v ahora="$ahora" -v ini="$ini" -v cob="${cob:-0}" '
+      {
         ts = int($1)
+        if (ts > ahora || ts < ini) next
+        msg = $0; sub(/^[^ ]+ [^ ]+ [^ ]+ /, "", msg)
+        # un intento deja varias lineas (Invalid user, Disconnected from invalid user...): se cuenta solo la linea
+        # canonica de cada uno para no multiplicar
+        if (msg !~ /^(Invalid user |Connection closed by authenticating user |Failed password for |error: maximum authentication attempts|maximum authentication attempts)/) next
+        if (msg ~ /^Failed password for invalid user /) next
         # la IP es el campo anterior al ULTIMO "port": el usuario (que elige el atacante) va antes
         ip = ""
         for (i = NF; i > 1; i--) if ($i == "port" && $(i + 1) ~ /^[0-9]+$/) {
@@ -60,7 +73,7 @@ cuerpo=$(
           if (cand ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ || cand ~ /^[0-9a-fA-F:]+:[0-9a-fA-F:]+$/) ip = cand
           break
         }
-        if (ip == "" || ts > ahora + 60) next
+        if (ip == "") next
         h[int(ts / 3600)]++
         if (ahora - ts <= 86400) { total++; n[ip]++ }
         if (ahora - ts <= 3600) hora++
@@ -76,12 +89,14 @@ cuerpo=$(
           print "ip", mejor, max; delete n[mejor]
         }
       }'
-    echo "parcial $([ "${PIPESTATUS[0]}" = 124 ] && echo si || echo no)"
+    rc=${PIPESTATUS[0]}
+    # 0 = bien, 1 = nada que mostrar en algunas versiones; cualquier otro (124 = tiempo) = lectura incompleta
+    if [ "$rc" = 0 ] || [ "$rc" = 1 ]; then echo "parcial no"; else echo "parcial si"; fi
   else
     echo "fuente ninguna"
   fi
 )
-cuerpo=${cuerpo:0:6000}
+cuerpo=$(printf '%s\n' "$cuerpo" | head -n 80)
 nlin=$(printf '%s\n' "$cuerpo" | grep -c '')
 echo "n $nlin"; printf '%s\n' "$cuerpo"; echo "fin $nlin 0"
 
@@ -99,9 +114,11 @@ echo "parches_seguridad $(t apt list --upgradable 2>/dev/null | grep -c -- '-sec
 echo "uid0_extra $(t awk -F: '$3==0 && $1!="root"' /etc/passwd | wc -l)"
 echo "hora_sincronizada $(t timedatectl show -p NTPSynchronized --value)"
 
-# docker y fail2ban necesitan root: un unico programa sin argumentos, permitido en sudoers
+# docker y fail2ban necesitan root: un unico programa sin argumentos, permitido en sudoers. Recibe solo el tiempo que queda
+# (si no hay para su peor caso, sus secciones llegan sin cierre y el Mac las descarta: «sin dato», no ceros).
 if [ -x /usr/local/lib/infobar/recoger-root ]; then
-  timeout 12 sudo -n /usr/local/lib/infobar/recoger-root </dev/null 2>/dev/null
+  restante=$(resta 13)
+  [ "$restante" -ge 4 ] && timeout -k 1 "$restante" sudo -n /usr/local/lib/infobar/recoger-root </dev/null 2>/dev/null
 fi
 
 echo "### fin"

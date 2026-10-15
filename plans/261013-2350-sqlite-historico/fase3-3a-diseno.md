@@ -47,6 +47,19 @@ bases de datos (3.3b) · cambiar `sudoers` o permisos de los servidores más all
 - Hasta 12 IPs por muestra (M1); `interpretar()` ya no recorta a 4 antes de validar. Con `aislamiento no` o `fuente ninguna` no se guardan.
 - Esquema: migración 2 añade columnas nullable a `horas_servidor`. Los picos de la 3.1 siguen para servidores v1.
 
+### Cambios tras la revisión de código de E1 (`../reports/revision-codigo-fase3-3a-e1-261015.md`)
+- Presupuesto de tiempo medido, no solo declarado: cada comando del script del usuario se salta pasados 6 s, el bloque del journal y el `sudo` reciben solo lo que queda
+  (`resta`), el vigilante mata el grupo a los 14 s y hay un test que ejecuta el script con todo lento y mide el cierre del canal. Si no hay tiempo para el journal la fuente es `error`
+  (sin dato), nunca 0.
+- Reglas de intentos aplicadas al **mensaje** de journald (tras `ident[pid]: `), no a la línea entera: el nombre de usuario que elige el atacante ya no puede esconder ni triplicar un intento.
+  Lectura de la más nueva a la más vieja (un corte pierde lo antiguo), ventana `--since @inicio_del_primer_cubo --until @ahora`, y un código de salida de journalctl distinto de 0/1 es lectura incompleta.
+- `recoger-root` v2 declara `### version_root` y `### fin_root` con `omitidos N` (comandos saltados **o** agotados). Con N > 0 el Mac descarta las cuatro secciones de root («sin dato»), nunca las toma por ceros
+  (cierra la regresión de `fail2ban 0` y las alarmas falsas de cortafuegos). Root v1 sin marcas se sigue aceptando.
+- Una sección abierta cuando llega `### cortada` queda invalidada. Las secciones y motivos descartados se cuentan en `meta` (conjunto cerrado).
+- Las horas exactas solo se anotan con **origen fiable y lectura completa**; la `completa` de una hora exige que haya terminado para el reloj del Mac y para el del servidor; la suma de cubos está acotada
+  por `total + primer cubo`. Hasta 12 IPs por muestra. En la serie por día, un día solo es «completo» con todas sus horas (23, 24 o 25) con dato y cerradas.
+- La tarjeta rotula «lectura parcial» y «origen sin verificar». Pendiente para E2: la parte de `contenedores` de `fin_root` y la ventana de 26 h (el diseño decía 25).
+
 ## E2 — Contenedores, recursos y eventos
 
 ### Recogida (C2, H7, H12, H13, M6, M7)

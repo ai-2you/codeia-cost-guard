@@ -60,7 +60,9 @@ def _horas(cubos, ahora_srv, total, parcial, ahora_mac):
         if v != "-" and n is None:
             return None, "cubos"
         salida.append([int(k) * 3600, n])
-    if sum(n for _, n in salida if n) < total:
+    suma = sum(n for _, n in salida if n)
+    # la ventana es de 24 h pero los cubos empiezan en una hora natural: el primero puede traer de más, no más que él mismo
+    if not total <= suma <= total + (salida[0][1] or 0):
         return None, "incoherente"
     return salida, None
 

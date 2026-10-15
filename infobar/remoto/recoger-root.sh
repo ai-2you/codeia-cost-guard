@@ -6,9 +6,22 @@ export LC_ALL=C PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bi
 # como root, nada del hogar de infobar (plugins de ~/.docker, etc.)
 export HOME=/root DOCKER_CONFIG=/root/.docker
 # Presupuesto de tiempo: ningun comando arranca pasados LIMITE s y cada uno dura 3 s como mucho, asi que el programa acaba en LIMITE + 3 s,
-# antes del tope de 12 s del sudo de recoger.sh (y este, antes de su vigilante de 14 s y del tope de 20 s del Mac).
+# antes del tiempo que le da recoger.sh. Lo que se salta o se pasa de tiempo se apunta en MARCAS (un fichero: `t` casi siempre corre dentro
+# de $(...) y una variable no volveria) y al final se declara en "### fin_root": con omitidos > 0 el Mac descarta TODAS las secciones de
+# root («sin dato»), nunca las toma por ceros.
 INICIO=$(date +%s); LIMITE=7
-t() { [ $(( $(date +%s) - INICIO )) -ge $LIMITE ] && return 1; timeout 3 "$@" </dev/null 2>/dev/null; }
+MARCAS=$(mktemp) || exit 0
+trap 'rm -f "$MARCAS"' EXIT
+t() {
+  if [ $(( $(date +%s) - INICIO )) -ge $LIMITE ]; then echo . >>"$MARCAS"; return 1; fi
+  timeout 3 "$@" </dev/null 2>/dev/null
+  local rc=$?
+  [ $rc = 124 ] && echo . >>"$MARCAS"
+  return $rc
+}
+
+echo "### version_root"
+echo 2
 
 echo "### servicios"
 # Dokploy y Easypanel despliegan servicios de Swarm; si el nodo no es manager, contenedores sueltos
@@ -41,3 +54,6 @@ if command -v fail2ban-client >/dev/null 2>&1; then
 else
   echo "no-instalado"
 fi
+
+echo "### fin_root"
+echo "omitidos $(grep -c . "$MARCAS")"

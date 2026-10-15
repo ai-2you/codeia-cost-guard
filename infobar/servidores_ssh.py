@@ -13,7 +13,8 @@ CLAVE = os.path.expanduser("~/.ssh/infobar_ed25519")
 TOPE_S = 20                 # segundos por servidor, conexion incluida
 TOPE_BYTES = 128 * 1024     # lo que se pasa de aqui se corta (las secciones de v1 van primero y caben): no se tira la lectura entera
 SECCIONES = {"version", "sistema", "memoria", "disco", "sesiones", "puertos", "intentos",
-             "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban"}
+             "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban", "version_root", "fin_root"}
+SECCIONES_ROOT = ("servicios", "contenedores", "bastionado_root", "fail2ban")     # las que escribe recoger-root
 MARCADAS = ("intentos",)    # secciones de v2 con marco: "n <lineas>" al principio y "fin <lineas> <codigo>" al final
 _MARCO_N = re.compile(r"n ([0-9]{1,6})")
 _MARCO_FIN = re.compile(r"fin ([0-9]{1,6}) ([0-9]{1,3})")
@@ -129,7 +130,11 @@ def analizar(texto):
                 continue
             tras_fin = tras_fin or fin_visto
             if nombre == "cortada":
-                cortada, actual = True, None
+                cortada = True
+                if actual:                                # la sección abierta acaba en una línea partida: no vale
+                    out.pop(actual, None)
+                    invalidas.add(actual)
+                actual = None
             elif nombre not in SECCIONES:
                 actual = None
             elif nombre in vistas:
@@ -142,6 +147,13 @@ def analizar(texto):
                 actual = nombre
         elif actual:
             out[actual].append(linea.rstrip())
+    if "version_root" in out:
+        # recoger-root v2 declara en «fin_root» si se saltó o agotó el tiempo de algún comando; entonces sus secciones no valen
+        # (vacías no son «0 bloqueadas»: son «sin dato») y la lectura sigue como si no hubiera root
+        if out.get("fin_root") != ["omitidos 0"]:
+            for nombre in SECCIONES_ROOT:
+                out.pop(nombre, None)
+            invalidas.add("root")
     marcadas = set()
     for nombre in MARCADAS:
         cuerpo = out.get(nombre)
