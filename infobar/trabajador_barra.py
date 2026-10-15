@@ -10,7 +10,7 @@ import threading, time, traceback
 from . import cuota_nan, desplegable_png, permisos, presupuestos, servidores_avisos, servidores_ciclo, webs_sondeo
 from . import servidores_registro, sombra
 from .agregacion import ULTIMOS, informe
-from .config_y_estado import cfg, log
+from .config_y_estado import cfg, leer_ui, log
 
 CADA_AGENTES = 60           # s entre escaneos de logs (icono)
 CADA_RENDER_AGENTES = 60    # s entre repintados de la pestana Agentes (al ritmo del escaneo)
@@ -89,6 +89,11 @@ class Trabajador(threading.Thread):
                     previa = servidores_ciclo.leer_cache()
                     self._pinta(r, previa)
                     gen_srv, ultimo_render = previa.get("generado_en"), ahora
+                if "plegar" in pedidos and self.conjunto is not None:
+                    previa = servidores_ciclo.leer_cache()
+                    self._pinta(None, previa, solo_servidor=leer_ui().get("servidor_activo"))       # una sección se abrió o se cerró: primero el que se está viendo…
+                    if len(cfg().get("servidores") or []) > 1:
+                        self._pinta(None, previa)                                                   # …y luego los demás, para que no enseñen el pliegue viejo
                 self.historial.preparar()
                 cache = servidores_ciclo.ciclo(forzar=forzar, historial=self.historial) or servidores_ciclo.leer_cache()
                 self.entregar("punto", servidores_ciclo.peor_estado(cache) if cache.get("servidores") else None)
@@ -107,10 +112,10 @@ class Trabajador(threading.Thread):
             if "refrescar" in pedidos:
                 self.entregar("refresco_hecho", None)       # quita la ruedita del boton
 
-    def _pinta(self, r, cache):
+    def _pinta(self, r, cache, solo_servidor=None):
         if not self.pintar:
             return False
-        nuevo = desplegable_png.renderizar(r, cache, cfg().get("servidores") or [], previo=self.conjunto)
+        nuevo = desplegable_png.renderizar(r, cache, cfg().get("servidores") or [], solo_servidor=solo_servidor, previo=self.conjunto)
         if nuevo:
             self.conjunto = nuevo
             self.entregar("conjunto", nuevo)

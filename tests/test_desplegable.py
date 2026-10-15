@@ -7,6 +7,7 @@ import os
 import sys
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aislamiento  # noqa: E402,F401  (HOME y rutas temporales: antes que costbar)
@@ -45,13 +46,16 @@ def _entrada(nombre_fichero, nombre_servicio="tienda-production_tienda-app", ser
             "ok_en": time.time(), "error": ""}
 
 
+TODAS = frozenset({"motivos", "falta", "intentos", "caidos"})
+
+
 class PaginasTest(unittest.TestCase):
     CFG = [{"nombre": "tienda", "ssh": "infobar@tienda.example.com"}]
 
     def test_datos_hostiles_se_escapan(self):
         e = _entrada("servidor-dokploy-con-root.txt", '<img src=x onerror=alert(1)>', servicio_ok=False)
         e["webs"] = [{"url": "https://<b>x</b>.example.com", "ms": 5, "codigo": 200, "error": ""}]
-        h = desplegable_servidores.documento("tienda", {"servidores": {"tienda": e}}, self.CFG, True)
+        h = desplegable_servidores.documento("tienda", {"servidores": {"tienda": e}}, self.CFG, True, abiertas=TODAS)
         self.assertNotIn("<img src=x", h)
         self.assertNotIn("<b>x</b>", h)
         self.assertIn("&lt;img src=x", h)
@@ -82,19 +86,19 @@ class PaginasTest(unittest.TestCase):
             self.CFG, False)
         self.assertIn("Sin conexión: timeout", caido)
         ok = desplegable_servidores.documento("tienda", {"servidores": {"tienda": _entrada("servidor-dokploy-con-root.txt")}},
-                                              self.CFG, True)
+                                              self.CFG, True, abiertas=TODAS)
         self.assertIn('class="ip">tienda.example.com<', ok)       # sin host en cache: el de la config
         for txt in ("Procesador", "Protección", "Qué falta", "Quién más intenta entrar", "tienda.example.com", "Por qué no está en verde", "Terminal"):
             self.assertIn(txt, ok)
 
-    def pagina(self, webs=None, servicios=None):
+    def pagina(self, webs=None, servicios=None, abiertas=TODAS):
         e = _entrada("servidor-dokploy-con-root.txt")
         if webs is not None:
             e["webs"] = webs
             e["tarjetas"] = servidores_estado.tarjetas(e["datos"], webs, [22, 80, 443])
         if servicios is not None:
             e["datos"]["servicios"] = servicios
-        return desplegable_servidores.documento("tienda", {"servidores": {"tienda": e}}, self.CFG, False)
+        return desplegable_servidores.documento("tienda", {"servidores": {"tienda": e}}, self.CFG, False, abiertas=abiertas)
 
     def test_enseña_todas_las_webs_con_las_que_fallan_primero(self):
         ok = lambda n: {"url": f"https://ok{n}.example.com/", "ms": 100 + n, "codigo": 200, "error": ""}  # noqa: E731
@@ -135,6 +139,29 @@ class PaginasTest(unittest.TestCase):
         self.assertIn("no está instalado", desplegable_servidores._motivos(t, {}, {"fail2ban": {"instalado": False}}, [])[0][1])
         self.assertIn("Muchas direcciones", desplegable_servidores._motivos(t, {}, {"fail2ban": {"instalado": True}}, [])[0][1])
 
+    def test_las_secciones_pesadas_empiezan_cerradas_con_aviso_y_se_abren_al_pedirlo(self):
+        cerrado = self.pagina(abiertas=frozenset())
+        for clave in ("motivos", "falta", "intentos"):
+            self.assertIn(f'data-plg="{clave}"', cerrado)
+        self.assertIn('class="sec plg cerrado"', cerrado)
+        self.assertNotIn("ajustes de seguridad hechos", cerrado)             # el detalle no se ve hasta abrirlo
+        self.assertNotIn("ufw default deny", cerrado)
+        self.assertIn('<b class="exc rojo">!</b>', cerrado)                  # y el título avisa de que hay algo
+        abierto = self.pagina(abiertas=frozenset({"motivos"}))
+        self.assertIn("ajustes de seguridad hechos", abierto)
+        self.assertIn('class="sec plg abierto"', abierto)
+        self.assertNotIn("ufw default deny", abierto)                        # las demás siguen cerradas
+        self.assertEqual(cerrado.count('class="mk"'), cerrado.count("data-plg="))
+
+    def test_sin_abiertas_explicitas_se_leen_del_estado_de_la_interfaz(self):
+        e = _entrada("servidor-dokploy-con-root.txt")
+        with mock.patch.object(desplegable_servidores, "leer_ui", return_value={"abiertas": ["falta", 5, None]}):
+            h = desplegable_servidores.documento("tienda", {"servidores": {"tienda": e}}, self.CFG, False)
+        self.assertIn('class="sec plg abierto" data-plg="falta"', h)
+        self.assertIn('class="sec plg cerrado" data-plg="motivos"', h)
+        with mock.patch.object(desplegable_servidores, "leer_ui", return_value={"abiertas": "no es una lista"}):
+            self.assertNotIn("plg abierto", desplegable_servidores.documento("tienda", {"servidores": {"tienda": e}}, self.CFG, False))
+
     def test_sin_motivos_no_hay_seccion(self):
         t = {k: {"estado": "verde"} for k in ("cpu", "memoria", "disco", "webs", "certificado", "sesiones", "intentos", "bloqueadas", "puertos", "mantenimiento", "servicios")}
         self.assertEqual(desplegable_servidores._motivos(t, {"estado": "verde", "total": 12, "hechos": 12}, {}, []), [])
@@ -154,6 +181,58 @@ class PaginasTest(unittest.TestCase):
         self.assertIn("NaN &lt;x&gt;", h)
         self.assertIn("en vivo · NaN", h)
         self.assertIn("blog/es", h)
+
+
+try:
+    import PIL  # noqa: F401
+    HAY_PIL = True
+except ImportError:
+    HAY_PIL = False
+
+
+@unittest.skipUnless(HAY_PIL, "hace falta Pillow")
+class MarcasTest(unittest.TestCase):
+    def test_encuentra_y_borra_los_marcadores(self):
+        from PIL import Image
+        from infobar import desplegable_png
+        im = Image.new("RGBA", (40, 100), (127, 127, 127, 3))
+        for y in list(range(10, 22)) + list(range(50, 62)):
+            for x in (0, 1):
+                im.putpixel((x, y), (255, 0, 255, 255))
+        im.putpixel((0, 80), (255, 0, 255, 128))                 # un píxel parecido pero translúcido no cuenta
+        self.assertEqual(desplegable_png.marcas_de_secciones(im), [(10, 22), (50, 62)])
+        self.assertEqual(im.getpixel((0, 15)), (127, 127, 127, 3))
+        self.assertEqual(im.getpixel((1, 55)), (127, 127, 127, 3))
+
+    def test_marcador_pegado_al_final(self):
+        from PIL import Image
+        from infobar import desplegable_png
+        im = Image.new("RGBA", (10, 20), (0, 0, 0, 0))
+        for y in range(15, 20):
+            im.putpixel((0, y), (255, 0, 255, 255))
+        self.assertEqual(desplegable_png.marcas_de_secciones(im), [(15, 20)])
+
+    def test_render_real_da_las_zonas_de_cada_titulo(self):
+        import tempfile
+        from PIL import Image
+        from infobar import desplegable_png
+        chrome = desplegable_png.navegador()
+        if chrome is None:
+            self.skipTest("no hay Chrome ni navegador compatible")
+        e = _entrada("servidor-dokploy-con-root.txt")
+        html = desplegable_servidores.documento("tienda", {"servidores": {"tienda": e}}, PaginasTest.CFG, True, abiertas=frozenset({"falta"}))
+        destino = os.path.join(tempfile.mkdtemp(prefix="cg-png-"), "p.png")
+        r = desplegable_png.html_a_png(html, destino, chrome)
+        self.assertIsNotNone(r)
+        ancho, alto, secciones = r
+        self.assertEqual([i for i, _, _ in secciones], ["motivos", "falta", "intentos"])
+        for _, y0, y1 in secciones:
+            self.assertTrue(0 < y0 < y1 < alto)
+            self.assertAlmostEqual(y1 - y0, 30, delta=1)             # la altura del título plegable
+        self.assertLess(secciones[0][2], secciones[1][1])
+        self.assertGreater(secciones[2][1] - secciones[1][2], 60)    # «falta» está abierta: entre su título y el siguiente hay contenido
+        im = Image.open(destino).convert("RGBA")
+        self.assertTrue(all(im.getpixel((0, y)) != (255, 0, 255, 255) for y in range(0, im.size[1], 2)))     # el marcador no queda a la vista
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ Lee solo la cache (logs/servidores.json): pintar nunca espera a la red.
 """
 import time
 
+from .config_y_estado import leer_ui
 from .desplegable_comun import cabecera, esc, icono, pagina, pestanas, pie, tarjeta
 from .servidores_ciclo import estado_visible, intervalos, peor_estado
 
@@ -37,6 +38,17 @@ def _corto(servicio):
 
 def _estado(t, clave):
     return (t.get(clave) or {}).get("estado") or "gris"
+
+
+def _plegable(clave, titulo, cuerpo, abiertas, n=None, sev=None):
+    """Sección que se despliega al pulsar su título. Cerrada solo enseña el título, cuántas cosas trae y un «!» de color si hay algo que atender; el marcador
+    `.mk` es lo que el renderizador usa para saber dónde está el título en la imagen (y lo borra)."""
+    abierto = clave in abiertas
+    badge = f'<b class="exc {sev}">!</b>' if sev in ("rojo", "ambar") else ""
+    cuenta = f'<span class="nota">{n}</span>' if n is not None else ""
+    cab = (f'<div class="sec plg {"abierto" if abierto else "cerrado"}" data-plg="{clave}"><i class="mk"></i><span>{esc(titulo)}</span>'
+           f'<span class="der">{cuenta}{badge}{icono("flecha")}</span></div>')
+    return cab + (cuerpo if abierto else "")
 
 
 def _clase_web(w):
@@ -103,7 +115,7 @@ def _cpu_texto(pct):
     return "Tranquilo" if pct < 30 else ("Con trabajo" if pct < 80 else "Al limite")
 
 
-def cuerpo_servidor(nombre, e, servidor_cfg, ahora):
+def cuerpo_servidor(nombre, e, servidor_cfg, ahora, abiertas=frozenset()):
     """Cuerpo de la pestana para un servidor (e = su entrada en la cache)."""
     d = (e or {}).get("datos") or {}
     t = (e or {}).get("tarjetas") or {}
@@ -136,15 +148,16 @@ def cuerpo_servidor(nombre, e, servidor_cfg, ahora):
     if motivos:
         filas = "".join(f'<div class="f"><span style="white-space:normal"><i class="p {c}"></i> {esc(x)}</span></div>' for c, x in motivos[:MAX_MOTIVOS])
         extra = f'<div class="nota" style="padding:4px 0">+{len(motivos) - MAX_MOTIVOS} más</div>' if len(motivos) > MAX_MOTIVOS else ""
-        h.append(f'<div class="sec"><span>Por qué no está en verde</span></div><div class="lista">{filas}{extra}</div>')
+        h.append(_plegable("motivos", "Por qué no está en verde", f'<div class="lista">{filas}{extra}</div>', abiertas, len(motivos),
+                           "rojo" if any(c == "rojo" for c, _ in motivos) else "ambar"))
     h.append(f'<div class="rejilla" style="margin-top:8px">{"".join(hw)}</div>')
 
     h.append(_seccion_webs(webs))
     caidos = [s for s in (d.get("servicios") or []) if not s["ok"]]
     if caidos:                      # los servicios sanos no se enseñan (estorban); solo los caídos, que sí piden acción
         pild = "".join(f'<div class="pil"><i class="p rojo"></i><span>{esc(_corto(s["nombre"]))}</span></div>' for s in caidos[:MAX_CAIDOS])
-        extra = f'<span class="nota">+{len(caidos) - MAX_CAIDOS} más</span>' if len(caidos) > MAX_CAIDOS else ""
-        h.append(f'<div class="sec"><span>Servicios caídos</span>{extra}</div><div class="pildoras">{pild}</div>')
+        mas = f'<div class="nota" style="padding:4px 0">+{len(caidos) - MAX_CAIDOS} más</div>' if len(caidos) > MAX_CAIDOS else ""
+        h.append(_plegable("caidos", "Servicios caídos", f'<div class="pildoras">{pild}</div>{mas}', abiertas, len(caidos), "rojo"))
 
     ses = d.get("sesiones") or []
     it = d.get("intentos") or {}
@@ -175,19 +188,22 @@ def cuerpo_servidor(nombre, e, servidor_cfg, ahora):
     if falta:
         filas = "".join(f'<div class="f falta"><div><div class="t">{esc(c["texto"])}</div>'
                         f'<div class="a">{esc(c["arreglo"][:240])}</div></div></div>' for c in falta[:3])
-        h.append(f'<div class="sec"><span>Qué falta para protegerlo</span><span class="nota">{len(falta)}</span></div>'
-                 f'<div class="lista">{filas}</div>')
+        h.append(_plegable("falta", "Qué falta para protegerlo", f'<div class="lista">{filas}</div>', abiertas, len(falta),
+                           res.get("estado") if res.get("estado") in ("rojo", "ambar") else None))
 
     top = it.get("top") or []
     if top and it.get("total"):
         filas = "".join(f'<div class="f mono"><span>{esc(ip)}</span><span>{int(n)}</span></div>' for ip, n in top)
-        h.append(f'<div class="sec"><span>Quién más intenta entrar (24 h)</span></div><div class="lista">{filas}</div>')
+        h.append(_plegable("intentos", "Quién más intenta entrar (24 h)", f'<div class="lista">{filas}</div>', abiertas, len(top)))
     return "".join(h)
 
 
-def documento(nombre, cache, servidores_cfg, oscuro, ahora=None):
-    """HTML de la pestana Servidores con `nombre` seleccionado."""
+def documento(nombre, cache, servidores_cfg, oscuro, ahora=None, abiertas=None):
+    """HTML de la pestana Servidores con `nombre` seleccionado. `abiertas`: las secciones desplegadas (por defecto, las que guardó el usuario; ninguna al empezar)."""
     ahora = ahora or time.time()
+    if abiertas is None:
+        a = leer_ui().get("abiertas")
+        abiertas = frozenset(x for x in a if isinstance(x, str)) if isinstance(a, list) else frozenset()
     entradas = (cache or {}).get("servidores") or {}
     normal, _ = intervalos()
     global_ = peor_estado(cache, ahora) if entradas else "gris"
@@ -205,6 +221,6 @@ def documento(nombre, cache, servidores_cfg, oscuro, ahora=None):
     host = (e or {}).get("host") or cfg_s.get("ssh", "").split("@")[-1]
     h.append(f'<div class="selector"><i class="p {est}"></i><span>Servidor ·</span><b>{esc(nombre)}</b>'
              f'<span class="flecha">{icono("flecha")}</span><span class="ip">{esc(host)}</span></div>')
-    h.append(cuerpo_servidor(nombre, e, next((s for s in servidores_cfg if s["nombre"] == nombre), {}), ahora))
+    h.append(cuerpo_servidor(nombre, e, next((s for s in servidores_cfg if s["nombre"] == nombre), {}), ahora, abiertas))
     h.append(pie(BOTONES, f'Medido a las {_hora((e or {}).get("ok_en"))}'))
     return pagina("".join(h), oscuro)

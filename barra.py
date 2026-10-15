@@ -143,6 +143,7 @@ class Barra(NSObject):
         boton.setImagePosition_(NSImageLeft)
         boton.setTitle_("…")
         self.pop, self.conjunto, self.escala, self.alto_mostrado = None, None, 1.0, 0
+        self._clave_vista, self._alto_prev = None, 0         # qué se veía y cuánto medía, para conservar el scroll al repintar lo mismo
         self.punto = None
         from infobar import permisos
         permisos.excluir_datos_sensibles()                  # base y logs fuera de Time Machine
@@ -264,7 +265,7 @@ class Barra(NSObject):
 
     @objc.python_method
     def imagen_actual(self):
-        """(ruta, ancho, alto, n_botones, con_selector) de la pestana/servidor/tema activos, o None."""
+        """(ruta, ancho, alto, n_botones, con_selector, secciones) de la pestana/servidor/tema activos, o None."""
         if not self.conjunto:
             return None
         tema = tema_activo()
@@ -285,8 +286,15 @@ class Barra(NSObject):
             self.pop.setContentSize_(NSMakeSize(G.ANCHO, 120))
             self.vista.setImage_(None)
             return
-        ruta, ancho, alto, n_botones, con_selector = img
-        self.forma = (n_botones, con_selector)
+        ruta, ancho, alto, n_botones, con_selector, *resto = img
+        secciones = resto[0] if resto else []
+        self.forma = (n_botones, con_selector, secciones)
+        clave = (self.pestana(), self.servidor_activo())
+        desde_arriba = None
+        if self._clave_vista == clave and self._alto_prev:
+            vis = self.scroll.documentVisibleRect()
+            desde_arriba = self._alto_prev - (vis.origin.y + vis.size.height)       # cuánto se había bajado: se conserva al desplegar una sección
+        self._clave_vista, self._alto_prev = clave, float(alto)
         # si no cabe en la pantalla, el popover se queda de la altura de la pantalla y el contenido se desplaza (no se encoge: las letras seguirían legibles)
         pantalla = NSScreen.mainScreen().visibleFrame().size.height - 40
         self.escala = 1.0
@@ -300,7 +308,10 @@ class Barra(NSObject):
         self.fondo.setFrameSize_(NSMakeSize(w, h))
         self.vista.setFrameSize_(NSMakeSize(w, h))
         self.vista.setImage_(nsimagen(ruta, w, h))
-        self.fondo.scrollPoint_(NSMakePoint(0, h))          # arriba del todo (las vistas de AppKit tienen el origen abajo)
+        if desde_arriba is None:
+            self.fondo.scrollPoint_(NSMakePoint(0, h))      # arriba del todo (las vistas de AppKit tienen el origen abajo)
+        else:
+            self.fondo.scrollPoint_(NSMakePoint(0, max(0.0, h - max(0.0, desde_arriba) - visible)))
         log(f"desplegable {self.pestana()} {tema}: {w:.0f}x{h:.0f} pt (escala {self.escala:.2f})")
 
     def pulsa_(self, sender):
@@ -322,8 +333,13 @@ class Barra(NSObject):
     def clicEn_(self, p):
         if not getattr(self, "forma", None):
             return
-        n_botones, con_selector = self.forma
+        n_botones, con_selector, secciones = self.forma
         botones = (BOTONES_SERVIDORES if self.pestana() == "servidores" else BOTONES_AGENTES)[:n_botones]
+        y_arriba = self.alto_mostrado - p.y / self.escala
+        if G.MARGEN <= p.x / self.escala < G.ANCHO - G.MARGEN:
+            for ident, y0, y1 in secciones:
+                if y0 <= y_arriba < y1:                 # el título de una sección plegable: se abre o se cierra
+                    return self.alterna(ident)
         zona = G.zona_en(p.x / self.escala, p.y / self.escala, self.alto_mostrado, n_botones, con_selector)
         log(f"clic en: {zona}")
         if zona is None:
@@ -341,6 +357,14 @@ class Barra(NSObject):
             self.boton(botones[int(zona.split(":")[1])][1])
             if self.pop.isShown():
                 self.pop.performClose_(None)          # el botón ya hizo su trabajo (abrir el panel, la guía, un Terminal…): el desplegable no se queda tapando
+
+    @objc.python_method
+    def alterna(self, ident):
+        abiertas = {x for x in (costbar.leer_ui().get("abiertas") or []) if isinstance(x, str)}
+        abiertas.symmetric_difference_update({ident})
+        costbar.guardar_ui({"abiertas": sorted(abiertas)})
+        log(f"sección {ident}: {'abierta' if ident in abiertas else 'cerrada'}")
+        self.trabajador.pide("plegar")                  # repinta solo el servidor que se está viendo
 
     @objc.python_method
     def boton(self, texto):

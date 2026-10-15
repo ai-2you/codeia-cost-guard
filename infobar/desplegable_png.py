@@ -7,7 +7,7 @@ Se ejecuta en el hilo trabajador de barra.py, nunca en el principal. Cada tanda 
 un numero de generacion en el nombre: la vista cambia de tanda de una vez y nunca lee un PNG a
 medio escribir; las tandas viejas se borran despues.
 """
-import glob, os, shutil, subprocess, tempfile, time
+import glob, os, re, shutil, subprocess, tempfile, time
 
 from . import desplegable_agentes, desplegable_servidores, permisos, plataforma, rutas
 from . import geometria_desplegable as G
@@ -30,8 +30,31 @@ def navegador():
     return next((r for r in NAVEGADORES if os.path.exists(r)), None)
 
 
+def marcas_de_secciones(im):
+    """Filas de la captura (en píxeles) donde la página dibujó el marcador magenta de cada sección plegable (una columna de 1 pt en el borde izquierdo).
+    Las repinta como el fondo de la hoja para que no se vean. Devuelve [(fila_ini, fila_fin)] de arriba abajo."""
+    px = im.load()
+    alto = im.size[1]
+    tramos, ini = [], None
+    for y in range(alto):
+        r, g, b, a = px[0, y]
+        es = a > 250 and r > 250 and g < 5 and b > 250
+        if es and ini is None:
+            ini = y
+        elif not es and ini is not None:
+            tramos.append((ini, y))
+            ini = None
+    if ini is not None:
+        tramos.append((ini, alto))
+    for y0, y1 in tramos:
+        for y in range(y0, y1):
+            for x in (0, 1):
+                px[x, y] = (127, 127, 127, 3)
+    return tramos
+
+
 def html_a_png(html_txt, destino, chrome):
-    """Pinta el HTML y lo recorta a la tarjeta. Devuelve (ancho_pt, alto_pt) o None."""
+    """Pinta el HTML y lo recorta a la tarjeta. Devuelve (ancho_pt, alto_pt, secciones) o None; `secciones` = [(id, y_arriba_pt, y_abajo_pt)] de los títulos plegables."""
     from PIL import Image
     trabajo = tempfile.mkdtemp(prefix="infobar-render-")
     try:
@@ -52,14 +75,21 @@ def html_a_png(html_txt, destino, chrome):
             p.wait()
             raise TimeoutError("Chrome no termino en 25 s")
         im = Image.open(bruto).convert("RGBA")
+        tramos = marcas_de_secciones(im)
         caja = im.getchannel("A").getbbox()      # la .hoja lleva un alfa minimo: es la caja util
         if not caja:
             return None
+        ids = re.findall(r'data-plg="([a-z_]+)"', html_txt)
+        if len(ids) != len(tramos):
+            log(f"render: {len(tramos)} marcadores para {len(ids)} secciones plegables; sin zonas de clic")
+            secciones = []
+        else:
+            secciones = [(i, (a - caja[1]) / 2, (b - caja[1]) / 2) for i, (a, b) in zip(ids, tramos)]
         im = im.crop((0, caja[1], im.size[0], caja[3]))
         tmp = destino + ".tmp.png"
         im.save(tmp)
         os.replace(tmp, destino)
-        return im.size[0] // 2, im.size[1] // 2
+        return im.size[0] // 2, im.size[1] // 2, secciones
     except Exception as e:
         log(f"render: {type(e).__name__}: {e}")
         return None
@@ -87,7 +117,7 @@ def renderizar(r, cache, servidores_cfg, solo_servidor=None, previo=None):
             ruta = os.path.join(carpeta(), f"{gen}-agentes-{tema}.png")
             tam = html_a_png(desplegable_agentes.documento(r, oscuro, ahora), ruta, chrome)
             if tam:
-                out["agentes"][tema] = (ruta, *tam, len(desplegable_agentes.BOTONES), False)
+                out["agentes"][tema] = (ruta, tam[0], tam[1], len(desplegable_agentes.BOTONES), False, [])
                 nuevas += 1
         nombres = [s["nombre"] for s in servidores_cfg] or [""]
         for i, nombre in enumerate(nombres):
@@ -98,7 +128,7 @@ def renderizar(r, cache, servidores_cfg, solo_servidor=None, previo=None):
             if tam:
                 # con la imagen va la forma de sus zonas de clic (botones y selector de ESA imagen)
                 botones = len(desplegable_servidores.BOTONES) if servidores_cfg else 0
-                out["servidores"].setdefault(nombre, {})[tema] = (ruta, *tam, botones, bool(servidores_cfg))
+                out["servidores"].setdefault(nombre, {})[tema] = (ruta, tam[0], tam[1], botones, bool(servidores_cfg), tam[2])
                 nuevas += 1
     out["servidores"] = {n: v for n, v in out["servidores"].items()
                          if n in {s["nombre"] for s in servidores_cfg} or (not servidores_cfg and n == "")}

@@ -52,6 +52,13 @@ border:1px solid var(--borde);padding:2px}}
 .sec{{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--tenue);
 margin:12px 4px 6px;display:flex;justify-content:space-between;align-items:baseline}}
 .sec .nota{{letter-spacing:0;text-transform:none;font-weight:400}}
+.plg{{height:30px;margin:6px 4px 2px;align-items:center;position:relative}}
+.mk{{position:absolute;left:-18px;top:0;width:1px;height:100%;background:#ff00ff}}
+.plg .der{{display:flex;align-items:center;gap:7px;letter-spacing:0;text-transform:none;font-weight:600}}
+.plg .der svg{{width:14px;height:14px}}
+.plg.cerrado .der svg{{transform:rotate(-90deg)}}
+.exc{{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:11px;font-weight:800;line-height:1}}
+.exc.rojo{{background:var(--rojo)}}.exc.ambar{{background:var(--ambar)}}
 .selector{{height:{G.SELECTOR_ALTO}px;margin:8px 0 0;display:flex;align-items:center;gap:6px;font-size:11px;
 font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--tenue);padding:0 4px}}
 .selector b{{color:var(--fg);letter-spacing:.08em}}
