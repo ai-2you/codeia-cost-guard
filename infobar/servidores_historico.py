@@ -32,7 +32,7 @@ MOTIVOS_PROTOCOLO = frozenset({"histograma_parcial", "histograma_reloj", "histog
                                "intentos", "root"})
 METRICAS = ("carga_pct", "mem_pct", "disco_pct", "uptime_s", "intentos_24h", "intentos_1h", "baneadas", "sesiones", "sesiones_ajenas",
             "puertos_n", "puertos_expuestos", "servicios_n", "servicios_caidos", "webs_n", "webs_caidas", "web_ms_max",
-            "faltas_proteccion", "reinicio_pendiente")
+            "faltas_proteccion", "reinicio_pendiente", "cert_dias_min")
 
 ESQUEMA_V1 = f"""
 CREATE TABLE meta(clave TEXT PRIMARY KEY, valor TEXT NOT NULL) STRICT;
@@ -100,7 +100,10 @@ CREATE TABLE eventos(
     PRIMARY KEY(servidor_id, ts, clave, evento)) STRICT, WITHOUT ROWID;
 CREATE INDEX eventos_por_clave ON eventos(servidor_id, clave, ts);
 """
-MIGRACIONES = {1: ESQUEMA_V1, 2: ESQUEMA_V2, 3: ESQUEMA_V3}       # versión -> script que lleva de la anterior a esa
+ESQUEMA_V4 = """
+ALTER TABLE muestras ADD COLUMN cert_dias_min INTEGER CHECK(cert_dias_min BETWEEN -36500 AND 36500);
+"""
+MIGRACIONES = {1: ESQUEMA_V1, 2: ESQUEMA_V2, 3: ESQUEMA_V3, 4: ESQUEMA_V4}       # versión -> script que lleva de la anterior a esa
 
 # Clase de cada columna (publico < interno < personal < secreto). Un test falla si aparece una columna sin clasificar.
 _I = "interno"

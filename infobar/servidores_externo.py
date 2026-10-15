@@ -36,6 +36,7 @@ class _HTTPSFijo(http.client.HTTPSConnection):
     def connect(self):
         sock = socket.create_connection((self._ip, self.port), self.timeout)
         self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+        self.certificado = self.sock.getpeercert()       # justo tras el handshake verificado: la respuesta puede cerrar el socket antes de leerlo
 
 
 class _HTTPFijo(http.client.HTTPConnection):
@@ -47,9 +48,24 @@ class _HTTPFijo(http.client.HTTPConnection):
         self.sock = socket.create_connection((self._ip, self.port), self.timeout)
 
 
+MAX_DIAS_CERT = 36500
+
+
+def dias_de_caducidad(cert, ahora=None):
+    """Días enteros hasta `notAfter` del certificado que el servidor presentó (la HOJA, no la cadena), o None si falta, no se entiende o es
+    imposible (±100 años). Solo se mira después de un handshake que ya verificó la cadena y el nombre; aquí nada se verifica."""
+    try:
+        final = ssl.cert_time_to_seconds(cert["notAfter"])
+    except (TypeError, KeyError, ValueError, OverflowError):
+        return None
+    dias = int((final - (ahora if ahora is not None else time.time())) // 86400)
+    return dias if -MAX_DIAS_CERT <= dias <= MAX_DIAS_CERT else None
+
+
 def medir_web(url):
-    """{"url", "ms", "codigo", "error"}. HEAD sin seguir redirecciones (una 301 tambien es 'arriba')."""
-    res = {"url": url[:120], "ms": None, "codigo": None, "error": ""}
+    """{"url", "ms", "codigo", "error", "cert_dias"}. HEAD sin seguir redirecciones (una 301 tambien es 'arriba'). `cert_dias` = días hasta que caduca el
+    certificado que sirve la web (solo https y con el certificado ya verificado; un certificado caducado o no válido no completa el handshake: ahí hay `error`)."""
+    res = {"url": url[:120], "ms": None, "codigo": None, "error": "", "cert_dias": None}
     motivo = url_valida(url)
     if motivo:
         res["error"] = motivo
@@ -65,6 +81,8 @@ def medir_web(url):
         r = c.getresponse()
         res["ms"] = int((time.time() - t0) * 1000)
         res["codigo"] = r.status
+        if u.scheme == "https":
+            res["cert_dias"] = dias_de_caducidad(getattr(c, "certificado", None))
         c.close()
     except ssl.SSLError as e:
         res["error"] = f"certificado: {getattr(e, 'reason', '') or 'no valido'}"

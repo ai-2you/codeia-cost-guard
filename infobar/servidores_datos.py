@@ -73,6 +73,15 @@ def _recuento(lista, pred=None):
     return entero(sum(1 for x in lista if pred is None or pred(x)), 0, 1_000_000)
 
 
+def _cert_min(webs):
+    """Días hasta que caduca el primer certificado de las webs https, o None si no hay https o a alguna no se le pudo leer (un dato incompleto no vale:
+    el mínimo sería de las demás y escondería la que falta)."""
+    https = [w for w in webs if isinstance(w, dict) and str(w.get("url") or "").startswith("https://")]
+    if not https or any(isinstance(w.get("cert_dias"), bool) or not isinstance(w.get("cert_dias"), int) for w in https):
+        return None
+    return entero(min(w["cert_dias"] for w in https), -36500, 36500)
+
+
 def muestra_de(entrada, conocidas=frozenset()):
     """Métricas de una lectura buena: ({columna: valor}, [(ip, intentos_24h)], intentos_propios). Lanza FueraDeRango si algo es imposible.
     `entrada` es la de la caché de servidores (datos, webs, expuestos, bastionado, estado)."""
@@ -105,6 +114,7 @@ def muestra_de(entrada, conocidas=frozenset()):
         "puertos_expuestos": _recuento(exp) if isinstance(exp, list) else None,
         "servicios_n": _recuento(servicios),
         "servicios_caidos": _recuento(servicios, lambda s: isinstance(s, dict) and not s.get("ok")),
+        "cert_dias_min": _cert_min(webs),
         "webs_n": _recuento(webs) if webs else None,
         "webs_caidas": _recuento(webs, lambda w: isinstance(w, dict) and (w.get("error") or (w.get("codigo") or 0) >= 500)) if webs else None,
         "web_ms_max": entero(max(ms), 0, 10 ** 7) if ms else None,

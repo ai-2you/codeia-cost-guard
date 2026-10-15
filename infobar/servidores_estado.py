@@ -37,7 +37,10 @@ def tarjetas(d, webs, expuestos, conocidas=(), permitidos=()):
     if webs:
         malas = [w for w in webs if w["error"] or (w["codigo"] or 0) >= 500]
         lentas = [w for w in webs if (w["ms"] or 0) > 1500]
-        t["webs"] = {"estado": "rojo" if malas else ("ambar" if lentas else "verde")}
+        dias = [w["cert_dias"] for w in webs if isinstance(w.get("cert_dias"), int) and not isinstance(w.get("cert_dias"), bool)]
+        caducan = min(dias) if dias else None                 # el certificado que antes caduca (el de la hoja que sirve cada web)
+        t["webs"] = {"estado": "rojo" if (malas or (caducan is not None and caducan < 3)) else
+                     ("ambar" if (lentas or (caducan is not None and caducan < 14)) else "verde"), "cert_dias": caducan}
     if "sesiones" in d:
         extranas = [s for s in d["sesiones"] if s["desde"] and not _ip_conocida(s["desde"], conocidas)]
         t["sesiones"] = {"estado": "ambar" if (extranas and conocidas) else "verde"}

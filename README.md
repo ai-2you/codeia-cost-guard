@@ -301,6 +301,9 @@ Si un servidor no tiene registro de sshd en el journal, la tarjeta dice «sin da
   clientes): solo viven en la etiqueta del recurso, los inactivos se olvidan a los 30 días, los eventos a los 180, y se borran al quitar el servidor.
   `python3 costbar.py --olvidar-recursos [--servidor NOMBRE]` los borra ya. Si el script de root tuvo que saltarse algo por falta de tiempo, esa
   lectura no cuenta («sin dato»).
+- **Certificados de las webs**: se guarda cuántos días faltan para que caduque el certificado que sirve cada web https (el de la hoja, ya verificado: uno caducado
+  o no válido no se conecta y aparece como error) y, por muestra, el mínimo de todas las webs; si a alguna no se le pudo leer, no se guarda mínimo para no esconderla.
+  La tarjeta de webs pasa a ámbar con menos de 14 días y a rojo con menos de 3.
 - Cada servidor tiene un `id` propio en `servidores.json`: renombrarlo no parte su historial; quitarlo y volver a añadirlo con el mismo nombre
   empieza uno nuevo.
 - Lectura: `GET /servidores/historia` (lista, o serie por día/hora con `servidor`, `desde`, `hasta`, `paso`) y `GET /servidores/ips?servidor=…&con_ips=1`

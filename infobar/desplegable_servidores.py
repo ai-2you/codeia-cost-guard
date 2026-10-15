@@ -57,7 +57,8 @@ def cuerpo_servidor(nombre, e, servidor_cfg, ahora):
     webs = (e.get("webs") or [])
     w0 = webs[0] if webs else None
     hw = [tarjeta("web", "Webs", f'{w0["ms"]} ms' if w0 and w0.get("ms") is not None else "—",
-                  " · ".join(w["url"].split("//")[-1].strip("/") for w in webs) or "sin webs",
+                  (" · ".join(w["url"].split("//")[-1].strip("/") for w in webs) or "sin webs")
+                  + (f' · certificado: {(t.get("webs") or {})["cert_dias"]} d' if isinstance((t.get("webs") or {}).get("cert_dias"), int) else ""),
                   _estado(t, "webs"))]
     cpu = d.get("cpu") or {}
     hw.append(tarjeta("cpu", "Procesador", f'{cpu.get("pct", 0):.0f} %',

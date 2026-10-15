@@ -662,10 +662,11 @@ class AlmacenRecursosTest(BaseRecursos):
         c = sqlite3.connect(sh.ruta(), isolation_level=None)
         c.execute("DROP TABLE recursos")
         c.execute("DROP TABLE eventos")
+        c.execute("ALTER TABLE muestras DROP COLUMN cert_dias_min")
         c.execute("PRAGMA user_version=2")
         c.close()
         self.con = sh.abrir()
-        self.assertEqual(self.uno("PRAGMA user_version"), 3)
+        self.assertEqual(self.uno("PRAGMA user_version"), max(sh.MIGRACIONES))
         self.assertEqual(self.uno("SELECT COUNT(*) FROM muestras"), 1)
         self.assertEqual(self.uno("SELECT COUNT(*) FROM recursos"), 0)
 
