@@ -2,5 +2,8 @@
 pillow>=10.0
 pyobjc-framework-Cocoa>=9.2
 pystray==0.19.5 ; sys_platform == "win32"
+# popover nativo del panel en Windows (sin navegador): WebView2, ya viene con Windows 10/11
+pywebview==6.2.1 ; sys_platform == "win32"
+pythonnet==3.2.1 ; sys_platform == "win32"
 # opcionales: la barra antigua basada en el menú nativo
 # rumps>=0.4

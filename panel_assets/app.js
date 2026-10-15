@@ -6,7 +6,12 @@ const D = __DATOS__;
 let periodo = "semana", plan = "todos", diasVer = 30, orden = ["mes", -1];
 let periodoModelo = "semana", planModelo = "todos";
 let periodoProyecto = "mes", planProyecto = "todos";
-let vistaDia = "barrasH", vistaModelo = "barrasH", vistaProyecto = "barrasH", vistaMatriz = "matriz";
+// el panel se recarga solo cada 60 s (ajustes.js) para traer datos frescos: sin localStorage,
+// elegir "Tarta" se perdia en cuanto tocaba el siguiente refresco (igual que ya hace "tema" arriba)
+function _vista(clave, porDefecto){ return localStorage.getItem("vista_"+clave) || porDefecto; }
+function _guardarVista(clave, valor){ localStorage.setItem("vista_"+clave, valor); }
+let vistaDia = _vista("dia","barrasH"), vistaModelo = _vista("modelo","barrasH"),
+    vistaProyecto = _vista("proyecto","barrasH"), vistaMatriz = _vista("matriz","matriz");
 let seleccion = null;           // {desde, hasta}: indices dentro de `dias`
 let arrastreDesde = null;       // indice donde empezo el mousedown, mientras se arrastra
 
@@ -105,10 +110,10 @@ function setPeriodo(p){ periodo=p; diasVer=Math.min(diasVer, opcionesDias().slic
 function setPlan(p){ plan=p; limpiarSeleccion(); pintar(); }
 function setDias(n){ diasVer=n; limpiarSeleccion(); pintar(); }
 function setOrden(k){ orden = (orden[0]===k) ? [k,-orden[1]] : [k,-1]; pintarTablas(); }
-function setVistaDia(v){ vistaDia=v; pintarTablas(); }
-function setVistaModelo(v){ vistaModelo=v; pintarTablas(); }
-function setVistaProyecto(v){ vistaProyecto=v; pintarTablas(); }
-function setVistaMatriz(v){ vistaMatriz=v; pintarTablas(); }
+function setVistaDia(v){ vistaDia=v; _guardarVista("dia",v); pintarTablas(); }
+function setVistaModelo(v){ vistaModelo=v; _guardarVista("modelo",v); pintarTablas(); }
+function setVistaProyecto(v){ vistaProyecto=v; _guardarVista("proyecto",v); pintarTablas(); }
+function setVistaMatriz(v){ vistaMatriz=v; _guardarVista("matriz",v); pintarTablas(); }
 function setPeriodoModelo(p){ periodoModelo=p; pintarTablas(); }
 function setPlanModelo(p){ planModelo=p; pintarTablas(); }
 function setPeriodoProyecto(p){ periodoProyecto=p; pintarTablas(); }
@@ -148,12 +153,12 @@ function tablaPlanes(){
   const bloqueCuotas = cuotas.length ? `<h3 style="margin:18px 0 6px">Cuotas mensuales por modelo <span class="sub" style="font-weight:400">· mes natural (día 1) contra el tope de config.json${enVivo?" · consumo en vivo (API NaN)":" · de tus logs"}</span></h3>
     <table><tr><th style="text-align:left">Modelo</th><th style="text-align:left">Plan</th><th style="text-align:right">Mes</th><th style="text-align:right">Tope</th><th style="text-align:right">Consumido</th></tr>
     ${cuotas.map(c=>`<tr><td>${c.modelo} ${c.fuente==="api"?'<span class="auto">en vivo</span>':(c.sin_tope&&c.plan?'<span class="auto">solo logs</span>':'')}</td><td style="color:var(--suave)">${c.plan}</td><td style="text-align:right">${fmt(c.mes)}</td><td style="text-align:right">${c.limite?fmt(c.limite):"—"}</td><td style="text-align:right">${c.pct!=null?c.pct+" %":"sin tope"}</td></tr>`).join("")}</table>` : "";
-  return `<section><h2>Por plan (proveedor) <span style="text-transform:none;letter-spacing:0">· pulsa una cabecera para ordenar</span></h2><table>
+  return `<section><h2>Por plan (proveedor) <span style="text-transform:none;letter-spacing:0">· pulsa una cabecera para ordenar · pasa el ratón por el plan para ver sus modelos</span></h2><table>
   <tr>${cab.map(c=>{const act=orden[0]===c[0];const f=act?(orden[1]<0?"▼":"▲"):"↕";
-    return `<th class="${act?"act":""}" onclick="setOrden('${c[0]}')">${c[1]} <span class="f">${f}</span></th>`;}).join("")}<th>Modelos</th></tr>
-  ${filas.map(([n,x],i)=>`<tr><td><span class="punto" style="background:${colorI(i)}"></span>${n}${x.auto?"<span class='auto'>auto</span>":""}</td>
+    return `<th class="${act?"act":""}" onclick="setOrden('${c[0]}')">${c[1]} <span class="f">${f}</span></th>`;}).join("")}</tr>
+  ${filas.map(([n,x],i)=>`<tr><td title="Modelos: ${(x.modelos||[]).join(", ")||"-"}"><span class="punto" style="background:${colorI(i)}"></span>${n}${x.auto?"<span class='auto'>auto</span>":""}</td>
     <td>${fmt(x.cinco_h)}${x.pct_5h?" ("+x.pct_5h+" %)":""}</td><td>${fmt(x.semana)}${x.pct_semana?" ("+x.pct_semana+" %)":""}</td>
-    <td>${fmt(x.mes)}</td><td>${fmt(x.hoy)}</td><td style="color:var(--suave);font-size:11.5px">${(x.modelos||[]).join(", ")||"-"}</td></tr>`).join("")}
+    <td>${fmt(x.mes)}</td><td>${fmt(x.hoy)}</td></tr>`).join("")}
   </table>${(D.limites.limite_5h_tokens||D.limites.limite_semana_tokens)?"":"<p class='sub' style='margin:10px 0 0'>Los planes con etiqueta <span class='auto'>auto</span> salen solos de tus logs. Para agrupar modelos o poner cuota, edita config.json; con la cuota aparece el % consumido.</p>"}${bloqueCuotas}</section>`;
 }
 

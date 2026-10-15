@@ -84,6 +84,40 @@ class TextoMenuTest(unittest.TestCase):
     def test_titulo_icono(self):
         self.assertEqual(bwm.titulo_icono(_r_ejemplo(cinco_h_tok=1_200_000)), "1,2 M")
 
+    def test_tooltip_trae_5h_y_hoy(self):
+        txt = bwm.texto_tooltip(_r_ejemplo(cinco_h_tok=1_200_000, hoy_tok=300_000))
+        self.assertIn("1,2 M", txt)
+        self.assertIn("300,0 K", txt)
+
+
+@unittest.skipUnless(_TIENE_PYSTRAY, "pystray no esta instalado (dependencia de la fase 2)")
+class ImagenIconoTest(unittest.TestCase):
+    """imagen_icono_windows no usa pystray (solo PIL), pero se agrupa con el resto de la fase 2:
+    si no hay pystray no hay bandeja que pinte el icono, no tiene sentido probarlo aislado."""
+
+    def test_devuelve_imagen_cuadrada_rgba(self):
+        im = bwm.imagen_icono_windows(0.5, alerta=False, tamano=64)
+        self.assertEqual(im.size, (64, 64))
+        self.assertEqual(im.mode, "RGBA")
+
+    def test_fraccion_cero_no_pinta_relleno(self):
+        # sin relleno, el centro del anillo (fuera del propio trazo) debe seguir siendo el fondo
+        im = bwm.imagen_icono_windows(0.0, tamano=64)
+        self.assertEqual(im.getpixel((32, 32))[:3], bwm.FONDO[:3])
+
+    def test_alerta_usa_el_color_de_alerta_no_el_normal(self):
+        # en fraccion=1 el trazo de relleno cubre todo el anillo; se mira el centro de la banda
+        # superior. grosor calculado con la MISMA formula que imagen_icono_windows (no un numero
+        # magico): si esa formula cambia, el punto de muestreo cambia con ella en vez de romper
+        # el test por una coordenada que ya no corresponde al trazo.
+        tamano = 64
+        grosor = max(3, tamano // 8)
+        punto = (tamano // 2, grosor)
+        normal = bwm.imagen_icono_windows(1.0, alerta=False, tamano=tamano)
+        alerta = bwm.imagen_icono_windows(1.0, alerta=True, tamano=tamano)
+        self.assertEqual(normal.getpixel(punto)[:3], bwm.RELLENO_OK[:3])
+        self.assertEqual(alerta.getpixel(punto)[:3], bwm.RELLENO_ALERTA[:3])
+
 
 if __name__ == "__main__":
     unittest.main()

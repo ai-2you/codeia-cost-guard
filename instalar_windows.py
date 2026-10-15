@@ -3,7 +3,8 @@
 
 Equivalente Windows de install.sh (que hoy solo monta la parte de macOS, LaunchAgent). Copia
 el motor + infobar/ a ~/.cost-guard (mismo destino que macOS/Linux), crea un entorno virtual
-propio con pillow + pystray==0.19.5, y registra una tarea en el Programador de Tareas de
+propio con pillow + pystray==0.19.5 (icono de bandeja) + pywebview==6.2.1 + pythonnet==3.2.1 (popover
+nativo del panel, sin navegador), y registra una tarea en el Programador de Tareas de
 Windows (schtasks /sc onlogon) que lanza bandeja_windows.py sin ventana de consola
 (pythonw.exe) en cada inicio de sesion. No requiere permisos de administrador: una tarea
 ONLOGON para el propio usuario en el equipo local se crea con los permisos del usuario actual
@@ -47,6 +48,11 @@ def copiar_ficheros(destino):
         if nombre.endswith(".py"):
             shutil.copy2(os.path.join(origen_infobar, nombre), os.path.join(destino_infobar, nombre))
 
+    # panel.py lee sus plantillas de aqui (plantilla.html/estilos.css/app.js/graficos.js/ajustes.js);
+    # sin esto, abrir el panel desde la bandeja fallaba con FileNotFoundError (500 silencioso).
+    shutil.copytree(os.path.join(AQUI, "panel_assets"), os.path.join(destino, "panel_assets"),
+                     dirs_exist_ok=True)
+
     config_destino = os.path.join(destino, "config.json")
     if not os.path.isfile(config_destino):
         config_origen = os.path.join(AQUI, "config.json")
@@ -78,9 +84,10 @@ def _ejecutar(cmd, error_msg):
 
 
 def crear_venv_e_instalar(destino):
-    """Entorno virtual propio en destino/venv con pillow + pystray==0.19.5 (version exacta
-    pedida por el plan: backend Windows de pystray es 100% ctypes, sin pywin32). Reejecutar es
-    idempotente: si el venv ya existe no se recrea, solo se reinstalan/confirman los paquetes."""
+    """Entorno virtual propio en destino/venv con pillow + pystray==0.19.5 (icono de bandeja;
+    backend Windows 100% ctypes, sin pywin32) + pywebview==6.2.1 + pythonnet==3.2.1 (popover nativo del
+    panel). Reejecutar es idempotente: si el venv ya existe no se recrea, solo se
+    reinstalan/confirman los paquetes."""
     venv_dir = os.path.join(destino, "venv")
     python_venv = os.path.join(venv_dir, "Scripts", "python.exe")
     if not os.path.isfile(python_venv):
@@ -88,8 +95,9 @@ def crear_venv_e_instalar(destino):
                   "No se pudo crear el entorno virtual en " + venv_dir)
     _ejecutar([python_venv, "-m", "pip", "install", "--quiet", "--upgrade", "pip"],
               "No se pudo actualizar pip en el entorno virtual")
-    _ejecutar([python_venv, "-m", "pip", "install", "--quiet", "pillow", "pystray==0.19.5"],
-              "No se pudo instalar pillow/pystray en el entorno virtual")
+    _ejecutar([python_venv, "-m", "pip", "install", "--quiet",
+               "pillow", "pystray==0.19.5", "pywebview==6.2.1", "pythonnet==3.2.1"],
+              "No se pudo instalar pillow/pystray/pywebview/pythonnet en el entorno virtual")
     return venv_dir
 
 
@@ -143,7 +151,7 @@ def main():
     print(f"-> Copiando a {DESTINO}")
     copiar_ficheros(DESTINO)
 
-    print("-> Entorno virtual + pillow + pystray")
+    print("-> Entorno virtual + pillow + pystray + pywebview + pythonnet")
     venv_dir = crear_venv_e_instalar(DESTINO)
 
     print("-> Registrando arranque automatico (Programador de tareas)")
