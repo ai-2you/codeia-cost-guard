@@ -69,7 +69,12 @@ Un servidor con `AuthenticationMethods` raros o bastión/ProxyJump: se dice «no
 ## Avance (2026-10-15)
 Hechos y probados (tests y mutaciones): **F1** guardado por revisión (409 si la lista cambió; la revisión viaja en `servidores_rev`), **F2** campos de servidor cerrados y más nombres
 secretos, **F3** sondeador de webs aparte (`webs_sondeo`, hilo propio, calendario 5 min / 60 s, tope de 20 aceleradas con rotación, canario de red, la caché del ciclo se relee dentro del
-cerrojo), **F4** las webs no cuentan como salud viva, y `ip_no_publica` rechaza NAT64, site-local y SRv6. Pendiente: revisión de código independiente de F1–F4, y 3.7a/b/c.
+cerrojo), **F4** las webs no cuentan como salud viva, y `ip_no_publica` rechaza NAT64, site-local y SRv6. Revisión de código independiente (`../reports/revision-codigo-fase3-7-fundamentos-261015.md`) y correcciones: el canario cuenta solo fallos de red (un 5xx demuestra que hay red) y
+nunca esconde una caída real más de 3 pasadas seguidas; las medidas de más de 15 min no se enseñan («sin dato»); `webs.json` se sanea al leer y un fallo de las webs no tumba la lectura SSH;
+los sondeos colgados no se relanzan (pool permanente y «en vuelo»); un reloj adelantado no congela el calendario; `reaplicar_webs` solo toca las tarjetas de webs y certificado; la lista de
+servidores se modifica siempre con leer–modificar–escribir bajo el cerrojo de `servidores.json` (`modificar_servidores`, usado por `preparar`); un 409 en Ajustes trae la lista actual y conserva lo
+demás; un servidor inválido o una URL mala se apartan ellos solos (`servidores_validos`) en vez de parar el monitor; y `ip_no_publica` evalúa la IPv4 incrustada de NAT64 y 6to4 (público si la IPv4
+lo es) y fija los rangos que dependían de la versión de Python. Pendiente: 3.7a/b/c.
 
 ## Orden de entrega (cada paso con revisión de código independiente y mutaciones)
 **F1+F2** (guardado seguro) → **F3+F4** (sondeador) → **3.7a** alta → **3.7b** detección → **3.7c** seguimiento.

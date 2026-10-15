@@ -120,6 +120,53 @@ class GuardadoTest(LimpiaConfig):
             self.assertNotIn(b"hunter2", f.read())
 
 
+class ModificarServidoresTest(LimpiaConfig):
+    def setUp(self):
+        for ruta in (rutas.CONFIG_SERVIDORES, rutas.CONFIG_SERVIDORES + ".lock"):
+            if os.path.exists(ruta):
+                os.remove(ruta)
+        super().setUp()
+        config_y_estado.cfg()                                                   # migra la lista a servidores.json
+
+    def test_dos_escritores_no_pierden_cambios(self):
+        def anade(prefijo):
+            for i in range(25):
+                config_y_estado.modificar_servidores(lambda l: l + [{"nombre": f"{prefijo}{i}", "ssh": f"infobar@{prefijo}{i}"}])
+        hilos = [threading.Thread(target=anade, args=(p,)) for p in ("a", "b")]
+        [h.start() for h in hilos]
+        [h.join() for h in hilos]
+        nombres = {s["nombre"] for s in config_y_estado.cfg()["servidores"]}
+        self.assertEqual(len(nombres), 1 + 50)                                  # el heredado de config.json y los 50 añadidos, ninguno pisado
+
+    def test_trabaja_sobre_la_lista_actual_y_no_escribe_si_no_cambia(self):
+        self.assertEqual(config_y_estado.modificar_servidores(lambda l: l), CONFIG_BASE["servidores"])      # parte de la lista heredada de config.json
+        self.assertTrue(os.path.exists(rutas.CONFIG_SERVIDORES))
+        antes = os.stat(rutas.CONFIG_SERVIDORES).st_mtime_ns
+        self.assertEqual(config_y_estado.modificar_servidores(lambda l: l), CONFIG_BASE["servidores"])
+        self.assertEqual(os.stat(rutas.CONFIG_SERVIDORES).st_mtime_ns, antes)                              # sin cambios no se reescribe
+
+    def test_preparar_da_id_sobre_la_lista_actual(self):
+        from infobar import servidores_registro
+        config_y_estado.guardar_config({"servidores": [{"nombre": "uno", "ssh": "infobar@h1"}, {"nombre": "dos", "ssh": "infobar@h2"}]})
+        servidores_registro.Historial().preparar()
+        lista = config_y_estado.cfg()["servidores"]
+        self.assertEqual([s["nombre"] for s in lista], ["uno", "dos"])
+        self.assertTrue(all(len(s["id"]) == 32 for s in lista))
+        ids = [s["id"] for s in lista]
+        servidores_registro.Historial().preparar()
+        self.assertEqual([s["id"] for s in config_y_estado.cfg()["servidores"]], ids)     # idempotente
+
+    def test_un_servidor_invalido_no_para_a_los_demas(self):
+        from infobar.servidores import servidores_validos
+        lista = [{"nombre": "ok", "ssh": "infobar@h"}, {"nombre": "campo", "ssh": "infobar@h", "contrasena": "x"}, {"nombre": "ok", "ssh": "infobar@otro"},
+                 {"nombre": "mal ssh", "ssh": "-oProxyCommand=x"}, "raro", {"nombre": "web", "ssh": "infobar@w", "webs": ["https://a.example.com", "http://127.0.0.1/"]}]
+        v = servidores_validos(lista)
+        self.assertEqual([s["nombre"] for s in v], ["ok", "web"])
+        self.assertEqual(v[1]["webs"], ["https://a.example.com"])
+        self.assertEqual(servidores_validos(None), [])
+        self.assertEqual(servidores_validos("x"), [])
+
+
 class CamposTest(unittest.TestCase):
     def test_campos_conocidos_validos(self):
         s = {"nombre": "a", "ssh": "infobar@h", "ssh_admin": "root@h", "puerto": 22, "id": "a" * 32, "webs": ["https://x.example.com"], "panel": "dokploy",

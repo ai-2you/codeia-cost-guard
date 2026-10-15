@@ -12,7 +12,7 @@ import concurrent.futures, math, os, threading, time
 
 from . import rutas
 from .config_y_estado import _bloqueo, _escribe_json, _lee_json, cfg, leer_ui, log
-from .servidores import errores_ips, errores_servidores
+from .servidores import errores_ips, servidores_validos
 from .servidores_estado import bastionado, peor, resumen_bastionado, tarjetas
 from .servidores_externo import host_de_ssh, puertos_expuestos
 from . import webs_sondeo
@@ -72,7 +72,11 @@ def activar_incidencia(nombre, ahora=None):
 def recoger_uno(servidor, conocidas):
     """Lee un servidor (SSH + webs + puertos desde fuera) y calcula su estado."""
     datos, error, dur = leer(servidor)
-    webs = webs_sondeo.medidas(servidor)                  # las webs las sondea otro hilo (webs_sondeo): aquí solo se lee lo último que midió
+    try:
+        webs = webs_sondeo.medidas(servidor)              # las webs las sondea otro hilo (webs_sondeo): aquí solo se lee lo último que midió
+    except Exception as e:                                # un fallo de las webs no tira la lectura SSH del servidor
+        log(f"servidores: no se pudieron leer las webs ({type(e).__name__})")
+        webs = []
     host = host_de_ssh(servidor["ssh"], servidor.get("puerto") or 22)      # IP o nombre real (se muestra)
     expuestos = None
     if datos and datos.get("puertos"):
@@ -117,7 +121,13 @@ def reaplicar_webs(estado_webs=None):
             webs = webs_sondeo.medidas(s, estado_webs)
             if webs == e.get("webs"):
                 continue
-            t = tarjetas(e["datos"], webs, e.get("expuestos"), conocidas, {int(s.get("puerto") or 22)})
+            nuevas = tarjetas(e["datos"], webs, e.get("expuestos"), conocidas, {int(s.get("puerto") or 22)})
+            t = dict(e.get("tarjetas") or {})
+            for k in ("webs", "certificado"):             # solo lo que depende de las webs: el resto de tarjetas se queda como las dejó la lectura SSH
+                if k in nuevas:
+                    t[k] = nuevas[k]
+                else:
+                    t.pop(k, None)
             e["webs"], e["tarjetas"] = webs, t
             e["estado_vivo"], e["estado"] = estados(t, e.get("bastionado_resumen"))
             cambio = True
@@ -147,10 +157,10 @@ def ciclo(forzar=False, historial=None):
         return None
     try:
         c = cfg()
-        servidores = c.get("servidores") or []
-        if errores_servidores(servidores):
-            log("servidores: configuracion no valida, no se recoge nada")
-            return leer_cache()
+        todos = c.get("servidores") or []
+        servidores = servidores_validos(todos)
+        if isinstance(todos, list) and len(servidores) != len(todos):
+            log(f"servidores: {len(todos) - len(servidores)} con configuracion no valida (se omiten; los demas siguen)")
         conocidas = [] if errores_ips(c.get("ips_conocidas")) else (c.get("ips_conocidas") or [])
         normal, incidencia = intervalos(c)
         ui, ahora = leer_ui(), time.time()

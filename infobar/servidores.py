@@ -20,17 +20,27 @@ _DNS = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a
 _DNS_INTERNOS = (".local", ".localhost", ".internal", ".lan", ".home.arpa")
 
 
-# Redes IPv6 que `is_global` da por públicas pero no lo son o llevan una IPv4 incrustada que no se comprueba: NAT64 (64:ff9b::/96, un nombre podría empaquetar
-# 127.0.0.1 o 10.x), site-local obsoleta (fec0::/10) y SIDs de SRv6 (5f00::/16).
-_IPV6_NO_PUBLICAS = tuple(ipaddress.ip_network(r) for r in ("64:ff9b::/96", "fec0::/10", "5f00::/16"))
+# Redes IPv6 que `is_global` da por públicas según la versión de Python pero no lo son: site-local obsoleta (fec0::/10), SIDs de SRv6 (5f00::/16), el uso local de
+# NAT64 (64:ff9b:1::/48), Teredo (2001::/32), las direcciones «IPv4 compatibles» y «IPv4 traducidas» (::/96, ::ffff:0:0:0/96). Estas dependen de la versión de Python
+# y aquí se fijan para que el resultado sea el mismo en todas.
+_IPV6_NO_PUBLICAS = tuple(ipaddress.ip_network(r) for r in ("fec0::/10", "5f00::/16", "64:ff9b:1::/48", "2001::/32", "::/96", "::ffff:0:0:0/96"))
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")      # RFC 6052: lleva una IPv4 en los últimos 32 bits; es pública solo si esa IPv4 lo es
+_SEIS_A_CUATRO = ipaddress.ip_network("2002::/16")
 
 
 def ip_no_publica(ip):
     ip = ipaddress.ip_address(ip)
     # is_global deja fuera tambien 100.64/10 (CGNAT, Tailscale), que is_private no cubre
-    if ip.version == 6 and ip.ipv4_mapped is not None:
-        return ip_no_publica(ip.ipv4_mapped)            # ::ffff:10.0.0.1 es 10.0.0.1 en cualquier versión de Python
-    return not ip.is_global or ip.is_multicast or (ip.version == 6 and any(ip in red for red in _IPV6_NO_PUBLICAS))
+    if ip.version == 6:
+        if ip.ipv4_mapped is not None:
+            return ip_no_publica(ip.ipv4_mapped)            # ::ffff:10.0.0.1 es 10.0.0.1 en cualquier versión de Python
+        if ip in _NAT64:
+            return ip_no_publica(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))     # 64:ff9b::808:808 es 8.8.8.8; 64:ff9b::7f00:1 es 127.0.0.1
+        if ip in _SEIS_A_CUATRO:
+            return ip_no_publica(ip.sixtofour) if ip.sixtofour is not None else True
+        if any(ip in red for red in _IPV6_NO_PUBLICAS):
+            return True
+    return not ip.is_global or ip.is_multicast
 
 
 def _host_local(host):
@@ -153,6 +163,20 @@ def errores_ips(ips):
         except ValueError:
             malas.append(str(ip)[:45])
     return [f"ips_conocidas: no son IPs validas: {', '.join(malas)}"] if malas else []
+
+
+def servidores_validos(lista):
+    """Los servidores de la lista que cumplen la validación, cada uno por separado y sin repetir nombre. Un servidor mal escrito (un campo que no existe, una URL
+    rara) deja de vigilarse él solo, no todos."""
+    if not isinstance(lista, list):
+        return []
+    vistos, out = set(), []
+    for s in lista:
+        # un servidor vale por sí mismo; una URL de `webs` mal escrita se ignora ella sola y no deja sin vigilar el servidor
+        if isinstance(s, dict) and isinstance(s.get("webs", []), list) and not errores_servidores([dict(s, webs=[])]) and s["nombre"] not in vistos:
+            vistos.add(s["nombre"])
+            out.append(dict(s, webs=[u for u in s.get("webs") or [] if isinstance(u, str) and not url_valida(u)]))
+    return out
 
 
 def revision_servidores(lista):

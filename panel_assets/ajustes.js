@@ -238,7 +238,16 @@
     const m = $("msg-guardar"); leer();
     const envio = Object.assign({}, A.config);
     if (envio.presupuestos) envio.presupuestos = envio.presupuestos.filter(f => f.nombre && f.tokens > 0);
-    post("/guardar", envio).then(j => { m.className = "msg " + (j.ok ? "ok" : "err"); if (j.ok && j.servidores_rev) A.config.servidores_rev = j.servidores_rev; m.textContent = j.ok ? "✓ Guardado. Se aplica en el próximo refresco (≤ 1 min)." : "Error: " + (j.error || "?"); })
+    post("/guardar", envio).then(j => {
+      if (j.conflicto) {      // un alta (u otra pestaña) cambió la lista de servidores: se trae la actual y se conserva todo lo demás que se haya escrito
+        return fetch("/ajustes").then(r => r.json()).then(d => {
+          A.config.servidores = (d.config && d.config.servidores) || []; A.config.servidores_rev = d.config && d.config.servidores_rev;
+          $("vista-ajustes").replaceChildren(...pinta());
+          const m2 = $("msg-guardar"); m2.className = "msg err";
+          m2.textContent = "La lista de servidores había cambiado (por ejemplo, por un alta): la he actualizado. Revisa los servidores y vuelve a guardar; lo demás que escribiste se conserva.";
+        });
+      }
+      m.className = "msg " + (j.ok ? "ok" : "err"); if (j.ok && j.servidores_rev) A.config.servidores_rev = j.servidores_rev; m.textContent = j.ok ? "✓ Guardado. Se aplica en el próximo refresco (≤ 1 min)." : "Error: " + (j.error || "?"); })
       .catch(e => { m.className = "msg err"; m.textContent = "Error al guardar: " + e; });
   }
 

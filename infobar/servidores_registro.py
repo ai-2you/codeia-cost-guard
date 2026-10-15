@@ -8,7 +8,7 @@ import time
 import uuid
 
 from . import servidores_historico as sh
-from .config_y_estado import cfg, guardar_config, log
+from .config_y_estado import cfg, log, modificar_servidores
 
 ID_SERVIDOR = re.compile(r"^[0-9a-f]{32}$")
 RETROCESO_S = 3600
@@ -63,10 +63,8 @@ class Historial:
     def preparar(self):
         """Da id a los servidores guardados que aún no lo tienen (instalaciones anteriores). Nunca lanza."""
         try:
-            lista = cfg().get("servidores") or []
-            nueva, cambio = asegurar_ids(lista, lista)
-            if cambio:
-                guardar_config({"servidores": nueva})
+            cfg()                                           # migra la lista a servidores.json si aún estaba en config.json
+            modificar_servidores(lambda lista: asegurar_ids(lista, lista)[0])      # sobre la lista ACTUAL y bajo el cerrojo: no pisa un alta o un guardado de Ajustes
         except Exception as e:
             log(f"servidores: no se pudieron asignar ids ({type(e).__name__})")
 

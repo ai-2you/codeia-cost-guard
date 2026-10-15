@@ -387,7 +387,7 @@ def crear_servidor(puerto=PUERTO):
                 with _CERROJO_GUARDADO:
                     if "servidores" in nuevo and rev != revision_servidores(sin_secretos(cfg().get("servidores"))):
                         # la lista cambió desde que la página la leyó (un alta, otra pestaña): guardar la copia vieja la pisaría
-                        return self._json(409, {"ok": False, "error": "la lista de servidores cambió: recarga la página antes de guardar"})
+                        return self._json(409, {"ok": False, "conflicto": True, "error": "la lista de servidores cambió: recarga la página antes de guardar"})
                     try:
                         with open(rutas.CONFIG, encoding="utf-8") as f:
                             en_disco = json.load(f)

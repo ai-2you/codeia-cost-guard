@@ -136,6 +136,21 @@ def _guarda_servidores(parche):
         return nuevo
 
 
+def modificar_servidores(fn):
+    """Leer–modificar–escribir de la lista de servidores bajo el cerrojo de servidores.json (barra, panel y CLI): `fn(lista)` recibe una copia de la lista
+    actual y devuelve la nueva. Nadie escribe la lista «de memoria»: lo que otro proceso cambió entre medias no se pisa. Devuelve la lista resultante."""
+    with _bloqueo(rutas.CONFIG_SERVIDORES):
+        actual = _lee_json(rutas.CONFIG_SERVIDORES)
+        lista = actual.get("servidores")
+        if not isinstance(lista, list):
+            heredada = _lee_json(rutas.CONFIG).get("servidores")        # instalación anterior sin migrar: la lista aún vive en config.json
+            lista = heredada if isinstance(heredada, list) else []
+        nueva = fn(json.loads(json.dumps(lista)))
+        if nueva != actual.get("servidores") or "servidores" not in actual:
+            _escribe_json(rutas.CONFIG_SERVIDORES, {**actual, "servidores": nueva})
+        return nueva
+
+
 def guardar_config(parche):
     """Fusiona `parche` (claves de primer nivel) y lo guarda de forma atomica: lo de servidores en
     servidores.json y el resto en config.json. Las claves que no vienen se conservan. Antes de
