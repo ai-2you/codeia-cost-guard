@@ -3,10 +3,12 @@
 
 Equivalente Windows de barra.py (macOS, AppKit) / costbar.py -> CostBar (rumps): mismo motor
 (costbar.escanear(), costbar.url_panel(), costbar.servir(), costbar.endurecer()), con pystray
-(ctypes puro en Windows, sin pywin32) para el icono y un popover nativo (infobar/
-bandeja_windows_popover.py, pywebview/WebView2) que carga el panel SIN navegador -- lo mas
-parecido al desplegable "glass" de macOS que se puede conseguir sin ese PNG renderizado por
-Chrome (fuera de alcance, ver plan). Si pywebview no esta instalado, o si crear/arrancar la
+(ctypes puro en Windows, sin pywin32) para el icono y una ventana nativa propia (infobar/
+bandeja_windows_popover.py, pywebview/WebView2) que carga el panel SIN navegador. A diferencia
+del popover sin bordes de la primera version, esta ventana lleva el marco normal de Windows
+(minimizar, maximizar, cerrar): el boton de cerrar la OCULTA (la app sigue en la bandeja), solo
+"Salir" del menu la destruye de verdad -- pedido explicito del usuario tras probar el popover sin
+marco, que se cerraba solo al clicar fuera. Si pywebview no esta instalado, o si crear/arrancar la
 ventana falla por cualquier motivo (runtime de WebView2 ausente/roto, por ejemplo), cae a abrir
 el panel con Edge en modo --app (sin pestanas ni barra de direcciones) y, si tampoco hay un
 navegador Chromium, al navegador por defecto a secas.
@@ -179,24 +181,23 @@ def main():
             # roto (imagen de Windows recortada, politica de grupo, etc.): sin este try/except el
             # proceso moria aqui en silencio (pythonw.exe no tiene consola) y sin dejar ni rastro
             # en el log -- hallazgo de la revision adversarial.
-            costbar.log(f"bandeja: ERROR no se pudo crear el popover nativo ({type(e).__name__}: "
+            costbar.log(f"bandeja: ERROR no se pudo crear la ventana nativa ({type(e).__name__}: "
                         f"{e}); cae al navegador para Abrir panel")
             _usa_popover = False
 
     if _usa_popover:
-        popover.iniciar_vigilancia_foco(costbar.log)
         _icon.run_detached()      # spawnea su propio hilo: el principal lo necesita webview.start()
-        costbar.log("bandeja: icono listo, entrando en el bucle (popover nativo)")
+        costbar.log("bandeja: icono listo, entrando en el bucle (ventana nativa)")
         try:
             import webview
             webview.start()       # bloqueante en el hilo principal (lo exige pywebview)
         except Exception as e:
             _usa_popover = False   # el bucle de webview ya no esta vivo: de aqui en mas, navegador
             costbar.log(f"bandeja: ERROR webview.start() {type(e).__name__}: {e}; "
-                        "el icono sigue activo (pystray ya corre detached) pero sin popover, "
+                        "el icono sigue activo (pystray ya corre detached) pero sin ventana nativa, "
                         "Abrir panel cae al navegador")
     else:
-        costbar.log("bandeja: icono listo, entrando en el bucle (sin popover: navegador para Abrir panel)")
+        costbar.log("bandeja: icono listo, entrando en el bucle (sin ventana nativa: navegador para Abrir panel)")
         _icon.run()               # bloqueante en el hilo principal (patron recomendado en Windows)
 
 
