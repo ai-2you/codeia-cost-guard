@@ -15,7 +15,7 @@
   const entero = v => Math.max(0, parseInt(String(v).replace(/[\s._]/g, ""), 10) || 0);
   const lista = t => t.split(",").map(x => x.trim()).filter(Boolean);
   const post = (ruta, cuerpo) => fetch(ruta, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cuerpo)})
-    .then(r => r.ok || r.status === 400 || r.status === 409 ? r.json() : r.text().then(t => ({ok: false, error: t || ("HTTP " + r.status)})));
+    .then(r => r.ok || r.status === 400 || r.status === 409 || r.status === 429 ? r.json() : r.text().then(t => ({ok: false, error: t || ("HTTP " + r.status)})));
 
   let enHistorico = false;
   window.vista = function(v){
@@ -74,6 +74,59 @@
       k.fila);
   }
 
+  /* Alta guiada: comprueba el servidor (solo lectura) y ofrece instalar con tu clave SSH o hacerlo en el Terminal. La contraseña NUNCA pasa por esta página.
+     Todo lo que pinta viene de mensajes cerrados del servidor local, aun así va por el DOM. */
+  function altaGuiada(){
+    const nombre = h("input", {class: "ancho", placeholder: "produccion", maxlength: 40}), destino = h("input", {class: "ancho", placeholder: "root@203.0.113.10"});
+    const puerto = h("input", {class: "num-in", placeholder: "22", inputmode: "numeric"});
+    const salida = h("div", {style: "margin-top:10px"});
+    let id = null, reloj = null;
+    const parar = () => { if (reloj) { clearTimeout(reloj); reloj = null; } };
+    const boton = (texto, f, extra) => h("button", Object.assign({onclick: f}, extra || {}), texto);
+    const envia = (accion, cuerpo) => post("/servidores/alta/" + accion, cuerpo).then(r => { if (r.id) id = r.id; dibuja(r); if (r.estado === "en_curso") sondea(); }).catch(e => dibuja({ok: false, mensaje: "No se pudo hablar con la barra: " + e}));
+    function sondea(){
+      parar();
+      reloj = setTimeout(() => fetch("/servidores/alta/estado?id=" + encodeURIComponent(id)).then(r => r.json()).then(r => { dibuja(r); if (r.estado === "en_curso") sondea(); }).catch(() => {}), 1000);
+    }
+    function recarga(){
+      leer();
+      fetch("/ajustes").then(r => r.json()).then(d => { A.config.servidores = (d.config && d.config.servidores) || []; A.config.servidores_rev = d.config && d.config.servidores_rev; $("vista-ajustes").replaceChildren(...pinta()); });
+    }
+    function terminal(r){
+      if (!r.linea_terminal) return [];
+      return [h("p", {class: "ayuda"}, "O hazlo en el Terminal de tu Mac (ahí es donde tecleas tu contraseña, no aquí):"),
+              h("pre", {style: "user-select:all;white-space:pre-wrap;word-break:break-all"}, r.linea_terminal),
+              h("div", {}, boton("Copiar la línea", () => navigator.clipboard && navigator.clipboard.writeText(r.linea_terminal)), " ",
+                boton("Comprobar conexión", () => envia("comprobar", {id})))];
+    }
+    function dibuja(r){
+      parar();
+      const msg = h("p", {class: "msg " + (r.estado === "hecho" ? "ok" : (r.estado === "error" || r.ok === false || r.estado === "no_soportado") ? "err" : "")}, r.mensaje || "");
+      const piezas = [msg];
+      if (r.estado === "huella") {
+        piezas.push(h("p", {}, "Huella del servidor: ", h("code", {}, r.huella)),
+          h("p", {class: "ayuda"}, "Compárala con la del propio servidor (ejecuta allí: ", h("code", {}, r.comprobar_en_servidor), "). Si no coincide, no la aceptes."),
+          h("div", {}, boton("Es esta", () => envia("huella", {id, acepto: true})), " ", boton("No es esta", () => { id = null; salida.replaceChildren(); })));
+      } else if (r.estado === "listo") {
+        piezas.push(h("div", {}, boton(r.ya_instalado ? "Actualizar con mi clave" : "Instalar con mi clave", () => envia("instalar", {id}))), ...terminal(r));
+      } else if (r.estado === "terminal" || r.estado === "error") {
+        piezas.push(...terminal(r));
+      } else if (r.estado === "hecho") {
+        piezas.push(h("div", {}, boton("Ver la lista de servidores", recarga)));
+      }
+      salida.replaceChildren(...piezas);
+    }
+    return h("div", {class: "prov"},
+      h("div", {class: "prov-cab"}, h("strong", {}, "Dar de alta un servidor")),
+      h("p", {class: "ayuda"}, "Comprueba el servidor sin tocarlo y te dice si se puede instalar con tu clave SSH o si hay que hacerlo en el Terminal. Crea en él el usuario «infobar» (solo lectura)."),
+      h("div", {class: "campos"}, h("label", {}, "Nombre", nombre), h("label", {}, "Usuario y servidor", destino), h("label", {}, "Puerto SSH", puerto)),
+      h("div", {style: "margin-top:8px"}, boton("Comprobar servidor", () => {
+        salida.replaceChildren(h("p", {}, "Comprobando…"));
+        envia("diagnostico", {nombre: nombre.value.trim(), ssh: destino.value.trim(), puerto: puerto.value.trim() ? (parseInt(puerto.value, 10) || 0) : 22});
+      })),
+      salida);
+  }
+
   function servidor(s, i){
     const info = (A.paneles || {})[s.nombre];
     const f = (et, k, ph) => h("label", {}, et, h("input", {class: "ancho", "data-s": i, "data-k": k, value: s[k] == null ? "" : s[k], placeholder: ph || ""}));
@@ -84,7 +137,7 @@
         h("button", {onclick: () => { leer(); A.config.servidores.splice(i, 1); $("vista-ajustes").replaceChildren(...pinta()); }}, "Quitar servidor")),
       h("div", {class: "campos"}, f("Nombre", "nombre", "produccion"), f("SSH (usuario@IP)", "ssh", "infobar@203.0.113.10"), f("SSH admin (botón Terminal)", "ssh_admin", "tuusuario@203.0.113.10"),
         f("Puerto SSH", "puerto", "22"), h("label", {}, "Panel", panel), f("URL del panel (https)", "panel_url", "https://dokploy.example.com"),
-        h("label", {}, "Webs a medir (una por línea, máx. 4)", h("textarea", {rows: 3, "data-s": i, "data-k": "webs"}, (s.webs || []).join("\n")))),
+        h("label", {}, "Webs a medir (una por línea, máx. 100)", h("textarea", {rows: 3, "data-s": i, "data-k": "webs"}, (s.webs || []).join("\n")))),
       k ? k.fila : (s.panel ? h("p", {class: "ayuda"}, "Guarda los ajustes y aquí podrás poner la clave del panel.") : null));
   }
 
@@ -171,8 +224,9 @@
           : h("p", {class: "vacio"}, "Aún no hay proyectos detectados.")),
       seccionPresupuestos(c),
       h("section", {}, h("h2", {}, "Servidores (VPS)"),
-        h("p", {class: "ayuda"}, "Monitor por SSH de solo lectura: CPU, memoria, disco, servicios, intentos de acceso, fail2ban, puertos abiertos y protección. Para dar de alta uno nuevo, ejecuta una vez ", h("code", {}, "infobar/remoto/alta-servidor.sh usuario@IP"), " (crea el usuario de solo lectura en el servidor) y añádelo aquí. Guía: docs/guia-servidores.md."),
+        h("p", {class: "ayuda"}, "Monitor por SSH de solo lectura: CPU, memoria, disco, servicios, contenedores, intentos de acceso, fail2ban, puertos abiertos y protección. Para dar de alta uno nuevo usa el formulario de abajo (o, a mano, ", h("code", {}, "infobar/remoto/alta-servidor.sh usuario@IP"), "). Guía: docs/guia-servidores.md."),
         ...(c.servidores || []).map(servidor),
+        altaGuiada(),
         h("div", {class: "prov-cab", style: "margin-top:8px"}, h("button", {onclick: () => { leer(); (c.servidores = c.servidores || []).push({nombre: "", ssh: ""}); $("vista-ajustes").replaceChildren(...pinta()); }}, "Añadir servidor")),
         h("div", {class: "campos", style: "margin-top:10px"},
           h("label", {}, "IPs conocidas (coma): una sesión desde otra sale en ámbar", h("input", {class: "ancho", id: "g-ips", value: (c.ips_conocidas || []).join(", ")})),

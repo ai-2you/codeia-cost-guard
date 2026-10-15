@@ -16,7 +16,7 @@ import hmac, json, os, secrets, subprocess, sys, threading, time
 
 from urllib.parse import parse_qs, urlsplit
 
-from . import ajustes, claves, exportacion, exportacion_csv, historico, presupuestos, rutas, servidores_api
+from . import ajustes, claves, exportacion, exportacion_csv, historico, presupuestos, rutas, servidores_alta, servidores_api
 from . import cuota_nan
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_config, log, olvidar_cache
@@ -125,6 +125,7 @@ def es_secreto(nombre):
     return n in SECRETOS or n.endswith(SUFIJOS_SECRETOS)
 
 
+RUTAS_ALTA = {f"/servidores/alta/{a}": a for a in ("diagnostico", "huella", "instalar", "comprobar")}
 _CERROJO_GUARDADO = threading.Lock()       # comprobar la revisión de los servidores y escribir son un solo paso
 
 
@@ -313,6 +314,15 @@ def crear_servidor(puerto=PUERTO):
                 self._historico(como_csv=True)
             elif ruta in ("/servidores/historia", "/servidores/ips"):
                 self._servidores(ruta)
+            elif ruta == "/servidores/alta/estado":
+                try:
+                    q = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=3)
+                except ValueError:
+                    return self._json(400, {"ok": False})
+                ids = q.get("id") or []
+                if set(q) != {"id"} or len(ids) != 1:
+                    return self._json(400, {"ok": False, "codigo": "entrada_invalida"})
+                self._json(*servidores_alta.atiende("estado", {"id": ids[0]}))
             elif ruta == "/origenes":
                 try:
                     r = informe()
@@ -372,7 +382,7 @@ def crear_servidor(puerto=PUERTO):
             if not self._host_ok() or not self._sesion_ok():
                 return
             ruta = self.path.split("?")[0]
-            if ruta not in ("/guardar", "/clave"):
+            if ruta not in ("/guardar", "/clave") and ruta not in RUTAS_ALTA:
                 return self._manda(404, b"no", "text/plain")
             nuevo = self._cuerpo_json()
             if nuevo is None:
@@ -380,6 +390,8 @@ def crear_servidor(puerto=PUERTO):
             try:
                 if ruta == "/clave":
                     return self._clave(nuevo)
+                if ruta in RUTAS_ALTA:
+                    return self._json(*servidores_alta.atiende(RUTAS_ALTA[ruta], nuevo))
                 errores = errores_config(nuevo)
                 if errores:
                     return self._json(400, {"ok": False, "error": "; ".join(errores[:5])})

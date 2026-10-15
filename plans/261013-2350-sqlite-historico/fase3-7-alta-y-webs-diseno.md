@@ -76,6 +76,10 @@ servidores se modifica siempre con leer–modificar–escribir bajo el cerrojo d
 demás; un servidor inválido o una URL mala se apartan ellos solos (`servidores_validos`) en vez de parar el monitor; y `ip_no_publica` evalúa la IPv4 incrustada de NAT64 y 6to4 (público si la IPv4
 lo es) y fija los rangos que dependían de la versión de Python. Pendiente: 3.7a/b/c.
 
+**3.7a hecha (2026-10-15)**: `servidores_alta.py` (diagnóstico, huella, instalación por stdin con tar, prueba y guardado por `modificar_servidores`), rutas `/servidores/alta/*` con toda la puerta del
+panel, componente en Ajustes (probado en un navegador real con ssh falsos: huella → instalar → hecho → 409 al guardar con la lista vieja), `desinstalar-del-servidor.sh`, 32 tests y 24 mutaciones.
+Pendiente: revisión de código independiente de la 3.7a.
+
 ## Orden de entrega (cada paso con revisión de código independiente y mutaciones)
 **F1+F2** (guardado seguro) → **F3+F4** (sondeador) → **3.7a** alta → **3.7b** detección → **3.7c** seguimiento.
 

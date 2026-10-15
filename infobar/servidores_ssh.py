@@ -20,6 +20,12 @@ _MARCO_N = re.compile(r"n ([0-9]{1,6})")
 _MARCO_FIN = re.compile(r"fin ([0-9]{1,6}) ([0-9]{1,3})")
 
 
+OPCIONES_SEGURAS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=3", "-o", "ServerAliveCountMax=2",
+                    "-o", "StrictHostKeyChecking=yes", "-o", "ForwardAgent=no", "-o", "ForwardX11=no",
+                    "-o", "ClearAllForwardings=yes", "-o", "PermitLocalCommand=no", "-o", "ProxyCommand=none",
+                    "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "LogLevel=ERROR")
+
+
 def orden_ssh(servidor):
     """La orden ssh (lista, sin shell). Revalida el servidor justo antes de usarlo."""
     if errores_servidores([servidor]):
@@ -27,13 +33,7 @@ def orden_ssh(servidor):
     puerto = int(servidor.get("puerto") or 22)
     if not 0 < puerto < 65536:
         raise ValueError("puerto no valido")
-    return ["ssh", "-T", "-p", str(puerto),
-            "-i", CLAVE, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=3", "-o", "ServerAliveCountMax=2",
-            "-o", "StrictHostKeyChecking=yes", "-o", "ForwardAgent=no", "-o", "ForwardX11=no",
-            "-o", "ClearAllForwardings=yes", "-o", "PermitLocalCommand=no", "-o", "ProxyCommand=none",
-            "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "LogLevel=ERROR",
-            "--", servidor["ssh"]]
+    return ["ssh", "-T", "-p", str(puerto), "-i", CLAVE, "-o", "IdentitiesOnly=yes", *OPCIONES_SEGURAS, "--", servidor["ssh"]]
 
 
 def clasifica_error(codigo, stderr):
