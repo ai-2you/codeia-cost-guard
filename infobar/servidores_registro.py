@@ -52,11 +52,42 @@ def politicas(conf=None):
     return out
 
 
+def webs_vigentes(conf=None):
+    """{id de servidor: {URLs}} de la configuración vigente (solo servidores válidos)."""
+    from . import webs_sondeo
+    from .servidores import servidores_validos
+    return {s["id"]: {u for _, u in webs_sondeo.urls_de([s])} for s in servidores_validos((conf or cfg()).get("servidores")) if s.get("id")}
+
+
+def sincronizar_webs(conf=None):
+    """Quita ya de la base el seguimiento de las webs que no están en la configuración (el panel lo llama al quitar una web). No crea la base. Devuelve cuántas borró."""
+    import os
+    if not os.path.exists(sh.ruta()):
+        return 0
+    with sh.ESCRITOR:
+        vigentes = webs_vigentes(conf)
+        con = sh.abrir()
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                n = sh.servidores_seguimiento.sincronizar(con, vigentes)
+                con.execute("COMMIT")
+            except Exception:
+                sh._rollback(con)
+                raise
+            if n:
+                sh._consolidar(con, int(time.time()), False)
+            return n
+        finally:
+            con.close()
+
+
 class Historial:
     """Registrador para `servidores_ciclo.ciclo(historial=...)`. Una instancia por trabajador; solo se usa desde su hilo."""
     def __init__(self, reloj=time.time):
         self.reloj = reloj
         self.no_antes = 0
+        self.no_antes_webs = 0                 # el retroceso del seguimiento de webs es aparte: sus fallos no frenan el historial SSH
         self.ultimo_mantenimiento = 0
         self.firma = None
 
@@ -68,6 +99,40 @@ class Historial:
         except Exception as e:
             log(f"servidores: no se pudieron asignar ids ({type(e).__name__})")
 
+    def registrar_webs(self, resultados, ahora):
+        """Anota lo que midió el sondeador de webs (`{url: entrada}`) en el seguimiento. Corre en el hilo del sondeador; nunca lanza y, si la base falla, se detiene una hora."""
+        if self.reloj() < self.no_antes_webs or not resultados:
+            return
+        try:
+            from . import webs_sondeo
+            from .servidores import servidores_validos
+            with sh.ESCRITOR:                              # la configuración se lee ya con el cerrojo: una web quitada mientras se esperaba no vuelve a la base
+                servidores = servidores_validos(cfg().get("servidores"))
+                pertenece = {}
+                for s in servidores:
+                    if s.get("id"):
+                        for _, u in webs_sondeo.urls_de([s]):
+                            pertenece.setdefault(u, s["id"])      # la misma URL en dos servidores se anota en el primero, como hace el sondeador
+                con = sh.abrir()
+                try:
+                    con.execute("BEGIN IMMEDIATE")
+                    try:
+                        for url, r in resultados.items():
+                            sid = pertenece.get(url)
+                            if sid is None:
+                                continue
+                            sh._alta_servidor(con, sid, next(s["nombre"] for s in servidores if s["id"] == sid), int(ahora))
+                            sh.servidores_seguimiento.anota_web(con, sid, url, r, ahora)
+                        con.execute("COMMIT")
+                    except Exception:
+                        sh._rollback(con)
+                        raise
+                finally:
+                    con.close()
+        except Exception as e:
+            self.no_antes_webs = self.reloj() + RETROCESO_S
+            log(f"seguimiento de webs: {type(e).__name__}; no se reintenta hasta dentro de una hora")
+
     def __call__(self, servidores, salida, nuevos, ahora):
         if self.reloj() < self.no_antes:
             return
@@ -78,16 +143,17 @@ class Historial:
         if firma != self.firma:                 # quitar un servidor o apagar guardar_ips borra las IPs ya, no a la próxima hora
             self.firma, self.ultimo_mantenimiento = firma, 0
         try:
-            con = sh.abrir()
-            try:
-                for s in servidores:
-                    if s.get("nombre") in nuevos and s.get("id") in pol:
-                        sh.registrar(con, s, salida.get(s["nombre"]) or {}, ahora, conocidas, pol[s["id"]]["guardar_ips"])
-                if self.reloj() - self.ultimo_mantenimiento >= MANTENER_CADA_S:
-                    sh.mantener(con, pol, self.reloj())
-                    self.ultimo_mantenimiento = self.reloj()
-            finally:
-                con.close()
+            with sh.ESCRITOR:
+                con = sh.abrir()
+                try:
+                    for s in servidores:
+                        if s.get("nombre") in nuevos and s.get("id") in pol:
+                            sh.registrar(con, s, salida.get(s["nombre"]) or {}, ahora, conocidas, pol[s["id"]]["guardar_ips"])
+                    if self.reloj() - self.ultimo_mantenimiento >= MANTENER_CADA_S:
+                        sh.mantener(con, pol, self.reloj(), webs_vigentes=webs_vigentes(conf))
+                        self.ultimo_mantenimiento = self.reloj()
+                finally:
+                    con.close()
         except Exception as e:
             # un solo aviso por fallo y sin valores: ni filas ni str(e), que en un IntegrityError las repite
             self.no_antes = self.reloj() + RETROCESO_S

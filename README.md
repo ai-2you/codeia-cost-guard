@@ -318,6 +318,11 @@ Si un servidor no tiene registro de sshd en el journal, la tarjeta dice «sin da
 - **Webs de cada servidor** (`webs` en la configuración): se sondean en un hilo aparte, no dentro de la lectura SSH. Cada 5 minutos, y cada 60 s mientras una web falla
   (como mucho 20 a la vez). Un 4xx cuenta como «responde»; un 5xx, un fallo de conexión o un timeout, como fallo. Si el Mac no tiene red (fallan todas y también los
   tres canarios públicos) esa pasada se descarta entera y no anota ninguna caída. Una web caída pone el servidor en rojo pero no acelera la lectura SSH.
+- **Seguimiento de cada web** (`servidores.sqlite`, tablas `webs`, `eventos_web`, `horas_web`, `dias_web`): cada sondeo se clasifica en *ok* (200–399, y 401/403: la aplicación
+  está viva), *mal* (otros 4xx o más de 5 s) o *caída* (5xx, sin respuesta, TLS inválido). El estado confirmado cambia con dos sondeos seguidos (≥ 45 s entre ellos) para pasar a
+  caída o a «mal», y con uno para volver a «ok»; la primera vez que se ve una web solo fija la línea base. Eventos `cayo`, `volvio` y `degradada` (hasta 20 por web y día).
+  La disponibilidad observada se cuenta por hora (90 días) y por día (permanente) con los sondeos del Mac: los huecos con el Mac apagado son «sin dato», no caída.
+  Dejar de vigilar una web, quitar el servidor o `--olvidar-recursos` borran su dominio, sus eventos y sus resúmenes al instante.
 - Cada servidor tiene un `id` propio en `servidores.json`: renombrarlo no parte su historial; quitarlo y volver a añadirlo con el mismo nombre
   empieza uno nuevo.
 - Lectura: `GET /servidores/historia` (lista, o serie por día/hora con `servidor`, `desde`, `hasta`, `paso`) y `GET /servidores/ips?servidor=…&con_ips=1`

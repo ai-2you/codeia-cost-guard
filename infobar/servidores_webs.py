@@ -325,6 +325,11 @@ def atiende_cambio(cuerpo):
         if quitadas:
             from . import webs_sondeo
             webs_sondeo.olvidar(quitadas)                          # el estado de lo que se deja de vigilar se borra ya, no en la siguiente pasada
+            from . import servidores_registro
+            try:
+                servidores_registro.sincronizar_webs()             # y su seguimiento (estado, eventos, resúmenes) en la base
+            except Exception as e:
+                log(f"webs: el seguimiento no se pudo limpiar ({type(e).__name__}); se limpia en el siguiente mantenimiento")
         return 200, {"ok": True, "webs": webs, "servidores_rev": revision_servidores(sin_secretos(nueva))}
     except ErrorWebs as e:
         c = str(e)

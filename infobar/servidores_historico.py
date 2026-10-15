@@ -9,11 +9,12 @@
 · Identidad por `id` estable: renombrar un servidor cambia su etiqueta, no su historial."""
 import os
 import sqlite3
+import threading
 import time
 
 from . import plataforma, rutas
 from .servidores_datos import ESTADOS, FueraDeRango, conjunto_canonico, horas_de, muestra_de
-from . import servidores_recursos
+from . import servidores_recursos, servidores_seguimiento
 from .servidores_recursos import descartar as _descartar
 from .sqlite_base import ErrorAlmacen, abrir_base, _rollback, _sentencias, _tablas, _version
 
@@ -106,7 +107,42 @@ ALTER TABLE muestras ADD COLUMN webs_cert_mal INTEGER CHECK(webs_cert_mal BETWEE
 ALTER TABLE horas_servidor ADD COLUMN cert_dias_min INTEGER CHECK(cert_dias_min BETWEEN -36500 AND 36500);
 ALTER TABLE horas_servidor ADD COLUMN webs_cert_mal_max INTEGER CHECK(webs_cert_mal_max BETWEEN 0 AND 1000000);
 """
-MIGRACIONES = {1: ESQUEMA_V1, 2: ESQUEMA_V2, 3: ESQUEMA_V3, 4: ESQUEMA_V4}       # versión -> script que lleva de la anterior a esa
+ESQUEMA_V5 = f"""
+CREATE TABLE webs(
+    servidor_id TEXT NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
+    clave TEXT NOT NULL CHECK(length(clave) = 32),
+    etiqueta TEXT NOT NULL CHECK(length(etiqueta) BETWEEN 8 AND 300 AND etiqueta NOT GLOB '*[^A-Za-z0-9._~:/?#@!$&*+,;=%-]*'),
+    primera INTEGER NOT NULL, ultima INTEGER NOT NULL,
+    estado TEXT NOT NULL CHECK(estado IN ('ok','mal','caida')),
+    codigo INTEGER CHECK(codigo BETWEEN 100 AND 599), ms INTEGER CHECK(ms BETWEEN 0 AND 100000000), cert_dias INTEGER CHECK(cert_dias BETWEEN -36500 AND 36500),
+    desde INTEGER NOT NULL,
+    pend_estado TEXT CHECK(pend_estado IN ('ok','mal','caida')), pend_n INTEGER NOT NULL DEFAULT 0, pend_desde INTEGER,
+    PRIMARY KEY(servidor_id, clave)) STRICT, WITHOUT ROWID;
+CREATE TABLE eventos_web(
+    servidor_id TEXT NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
+    ts INTEGER NOT NULL CHECK(ts BETWEEN {TS_MIN} AND {TS_MAX}),
+    clave TEXT NOT NULL CHECK(length(clave) = 32),
+    evento TEXT NOT NULL CHECK(evento IN ('cayo','volvio','degradada')),
+    codigo INTEGER CHECK(codigo BETWEEN 100 AND 599),
+    PRIMARY KEY(servidor_id, ts, clave, evento)) STRICT, WITHOUT ROWID;
+CREATE INDEX eventos_web_por_clave ON eventos_web(servidor_id, clave, ts);
+CREATE TABLE horas_web(
+    servidor_id TEXT NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
+    clave TEXT NOT NULL CHECK(length(clave) = 32),
+    hora INTEGER NOT NULL CHECK(hora BETWEEN {TS_MIN} AND {TS_MAX}),
+    ok INTEGER NOT NULL DEFAULT 0, mal INTEGER NOT NULL DEFAULT 0, caidas INTEGER NOT NULL DEFAULT 0, ms_max INTEGER CHECK(ms_max BETWEEN 0 AND 100000000),
+    PRIMARY KEY(servidor_id, clave, hora)) STRICT, WITHOUT ROWID;
+CREATE TABLE dias_web(
+    servidor_id TEXT NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
+    clave TEXT NOT NULL CHECK(length(clave) = 32),
+    dia INTEGER NOT NULL CHECK(dia BETWEEN {TS_MIN} AND {TS_MAX}),
+    ok INTEGER NOT NULL DEFAULT 0, mal INTEGER NOT NULL DEFAULT 0, caidas INTEGER NOT NULL DEFAULT 0, ms_max INTEGER CHECK(ms_max BETWEEN 0 AND 100000000),
+    PRIMARY KEY(servidor_id, clave, dia)) STRICT, WITHOUT ROWID;
+"""
+MIGRACIONES = {1: ESQUEMA_V1, 2: ESQUEMA_V2, 3: ESQUEMA_V3, 4: ESQUEMA_V4, 5: ESQUEMA_V5}
+# Un solo escritor a la vez DENTRO del proceso: el hilo del ciclo SSH, el sondeador de webs y las operaciones del panel (olvidar, sincronizar) abren su propia conexión
+# y se turnan con este cerrojo (SQLite ya serializa, pero así no se pelean por `busy_timeout`).
+ESCRITOR = threading.RLock()       # versión -> script que lleva de la anterior a esa
 
 # Clase de cada columna (publico < interno < personal < secreto). Un test falla si aparece una columna sin clasificar.
 _I = "interno"
@@ -123,6 +159,12 @@ CLASES_SERVIDORES = {
     "recursos": {**{c: _I for c in ("servidor_id", "tipo", "clave", "primera", "ultima", "activo", "estado", "salud", "reinicios", "inicio",
                                     "visto_n", "visto_desde", "ausente_n", "ausente_desde", "bucle_n")}, "etiqueta": "personal"},
     "eventos": {c: _I for c in ("servidor_id", "ts", "clave", "tipo", "evento", "severidad")},
+    # la etiqueta de una web es su URL (el dominio puede ser el de un cliente): dato personal
+    "webs": {**{c: _I for c in ("servidor_id", "clave", "primera", "ultima", "estado", "codigo", "ms", "cert_dias", "desde", "pend_estado", "pend_n", "pend_desde")},
+             "etiqueta": "personal"},
+    "eventos_web": {c: _I for c in ("servidor_id", "ts", "clave", "evento", "codigo")},
+    "horas_web": {c: _I for c in ("servidor_id", "clave", "hora", "ok", "mal", "caidas", "ms_max")},
+    "dias_web": {c: _I for c in ("servidor_id", "clave", "dia", "ok", "mal", "caidas", "ms_max")},
 }
 
 
@@ -176,7 +218,7 @@ def copia_sin_ips(con, directorio):
     memoria = sqlite3.connect(":memory:", isolation_level=None)
     try:
         con.backup(memoria)
-        for tabla in ("ips_atacantes", "recursos", "eventos"):          # datos personales: ni IPs ni nombres de recursos en una copia que no caduca por retención
+        for tabla in ("ips_atacantes", "recursos", "eventos", "webs", "eventos_web", "horas_web", "dias_web"):          # datos personales: ni IPs ni nombres de recursos en una copia que no caduca por retención
             if tabla in _tablas(memoria):
                 memoria.execute(f"DELETE FROM {tabla}")
         os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
@@ -368,7 +410,7 @@ def registrar(con, servidor, entrada, ahora, conocidas=(), guardar_ips=True):
 
 # ---------------------------------------------------------------- mantenimiento y olvido
 
-def mantener(con, politicas, ahora, vacuum=True):
+def mantener(con, politicas, ahora, vacuum=True, webs_vigentes=None):
     """Purga y consolidación. `politicas` = {id: {"guardar_ips": bool, "retencion_dias": int}} de los servidores que siguen en la config.
     Devuelve {"ips_borradas", "crudo_borrado", "consolidado"}. Un servidor que ya no está en la config se retira y pierde sus IPs en este paso."""
     ahora = int(ahora)
@@ -394,6 +436,11 @@ def mantener(con, politicas, ahora, vacuum=True):
         crudo = con.execute("DELETE FROM muestras WHERE ts < ?", (ahora - RETENCION_CRUDO_S,)).rowcount
         retirados = [r[0] for r in con.execute("SELECT id FROM servidores WHERE retirado_en IS NOT NULL")]
         borrados = servidores_recursos.purgar(con, ahora, retirados)
+        for sid in retirados:
+            borrados += servidores_seguimiento.olvidar(con, sid)           # los dominios de un servidor retirado también se olvidan
+        borrados += servidores_seguimiento.purgar(con, ahora)
+        if webs_vigentes is not None:
+            borrados += servidores_seguimiento.sincronizar(con, webs_vigentes)
         caducar_copias(os.path.join(os.path.dirname(ruta()), "copias"), ahora)
         con.execute("INSERT INTO meta(clave, valor) VALUES('mantenido_en', ?) ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor", (str(ahora),))
         con.execute("COMMIT")
@@ -440,6 +487,7 @@ def olvidar_recursos(con, servidor_id=None, ahora=None):
     con.execute("BEGIN IMMEDIATE")
     try:
         n = servidores_recursos.olvidar(con, servidor_id)
+        n = (n[0] + servidores_seguimiento.olvidar(con, servidor_id), n[1])      # los dominios vigilados también son nombres: se cuentan con los recursos
         con.execute("COMMIT")
     except Exception:
         _rollback(con)

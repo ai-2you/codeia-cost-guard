@@ -420,6 +420,8 @@ def crear_servidor(puerto=PUERTO):
                 try:
                     from . import webs_sondeo
                     webs_sondeo.olvidar(servidores=cfg().get("servidores") or [])     # las webs que ya no están en la lista pierden su estado ahora
+                    from . import servidores_registro
+                    servidores_registro.sincronizar_webs()                              # y su seguimiento en la base
                 except Exception as e:
                     log(f"webs: no se pudo podar el estado ({type(e).__name__})")
                 try:

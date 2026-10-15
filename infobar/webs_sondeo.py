@@ -126,8 +126,9 @@ def _entrada(r, previa, ahora):
             "proximo_en": ahora + (CADA_FALLO_S if fallos else CADA_S)}
 
 
-def pasada(servidores, ahora=None, medir=medir_web, red=sin_red):
-    """Sondea las webs a las que les toca. Devuelve (cambiaron, estado): `cambiaron` = hubo resultados nuevos que guardar. None si ya había una pasada."""
+def pasada(servidores, ahora=None, medir=medir_web, red=sin_red, registrar=None):
+    """Sondea las webs a las que les toca. Devuelve (cambiaron, estado): `cambiaron` = hubo resultados nuevos que guardar. None si ya había una pasada.
+    `registrar(resultados, ahora)` recibe lo medido en esta pasada (nunca una pasada descartada por falta de red)."""
     if not _EN_MARCHA.acquire(blocking=False):
         return None
     try:
@@ -168,6 +169,7 @@ def pasada(servidores, ahora=None, medir=medir_web, red=sin_red):
             with _bloqueo(ruta()):
                 _escribe_json(ruta(), estado)
             return False, estado
+        dudar = estado["descartes_seguidos"] < MAX_DESCARTES_SEGUIDOS
         for u, r in resultados.items():
             webs[u] = _entrada(r, webs.get(u) or {}, ahora)
         for u in [u for u in webs if u not in {x for _, x in todas}]:
@@ -177,6 +179,11 @@ def pasada(servidores, ahora=None, medir=medir_web, red=sin_red):
         estado["generado_en"] = ahora
         with _bloqueo(ruta()):
             _escribe_json(ruta(), estado)
+        if registrar is not None and resultados and not (dudar and all(_sin_respuesta(r) for r in resultados.values()) and red()):
+            try:
+                registrar(resultados, ahora)                  # el seguimiento (estado confirmado, eventos, disponibilidad); un fallo suyo no frena el sondeo
+            except Exception as e:
+                log(f"webs: el seguimiento falló ({type(e).__name__})")
         return True, estado
     finally:
         _EN_MARCHA.release()

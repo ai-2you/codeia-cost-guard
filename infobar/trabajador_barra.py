@@ -35,7 +35,7 @@ class Trabajador(threading.Thread):
         """Hilo propio: las webs se sondean con su calendario (5 min; 60 s mientras fallan), sin esperar al ciclo SSH ni frenarlo."""
         while True:
             try:
-                r = webs_sondeo.pasada(cfg().get("servidores") or [])
+                r = webs_sondeo.pasada(cfg().get("servidores") or [], registrar=self.historial.registrar_webs)
                 if r and r[0] and servidores_ciclo.reaplicar_webs(r[1]):
                     self.pide("render")                      # el desplegable enseña las webs al momento, sin esperar al ciclo SSH
             except Exception:
