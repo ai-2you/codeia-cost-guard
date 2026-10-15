@@ -8,7 +8,9 @@ import time
 from .desplegable_comun import cabecera, esc, icono, pagina, pestanas, pie, tarjeta
 from .servidores_ciclo import estado_visible, intervalos, peor_estado
 
-MAX_PILDORAS = 6
+MAX_WEBS = 14
+MAX_CAIDOS = 6
+MAX_MOTIVOS = 6
 BOTONES = [("terminal", "Terminal"), ("caja", "Panel"), ("brujula", "Abrir")]
 
 
@@ -37,6 +39,66 @@ def _estado(t, clave):
     return (t.get(clave) or {}).get("estado") or "gris"
 
 
+def _clase_web(w):
+    """verde (responde bien), ambar (responde con error de cliente o muy lenta) o rojo (error del servidor o sin respuesta)."""
+    c, ms = w.get("codigo"), w.get("ms")
+    if not isinstance(c, int) or isinstance(c, bool) or c >= 500 or w.get("error"):
+        return "rojo"
+    if 200 <= c < 400 or c in (401, 403):
+        return "ambar" if isinstance(ms, (int, float)) and ms > 5000 else "verde"
+    return "ambar"
+
+
+def _seccion_webs(webs):
+    """Todas las webs vigiladas, las que fallan primero: punto de color, dirección, código HTTP y latencia."""
+    if not webs:
+        return ""
+    orden = {"rojo": 0, "ambar": 1, "verde": 2}
+    filas = sorted(webs, key=lambda w: orden[_clase_web(w)])
+    caidas = sum(1 for w in webs if _clase_web(w) == "rojo")
+    html = []
+    for w in filas[:MAX_WEBS]:
+        c = _clase_web(w)
+        dato = (str(w["codigo"]) if isinstance(w.get("codigo"), int) else "sin respuesta") + (f' · {w["ms"]} ms' if isinstance(w.get("ms"), (int, float)) and w.get("codigo") else "")
+        html.append(f'<div class="f"><span><i class="p {c}"></i> {esc(w["url"].split("//")[-1].strip("/"))}</span><span class="mono">{esc(dato)}</span></div>')
+    nota = f'{len(webs)}' + (f' · {caidas} con error' if caidas else " · todas responden")
+    extra = f'<div class="nota" style="padding:4px 0">+{len(webs) - MAX_WEBS} más</div>' if len(webs) > MAX_WEBS else ""
+    return f'<div class="sec"><span>Webs</span><span class="nota">{nota}</span></div><div class="lista">{"".join(html)}{extra}</div>'
+
+
+def _motivos(t, res, d, webs):
+    """Por qué el servidor no está en verde, en palabras: [(color, texto)] de las tarjetas ámbar y rojas y del bastionado."""
+    out = []
+
+    def mal(clave):
+        return (t.get(clave) or {}).get("estado") in ("ambar", "rojo")
+
+    def color(clave):
+        return (t.get(clave) or {}).get("estado")
+    raros = (t.get("puertos") or {}).get("raros") or []
+    if mal("puertos"):
+        out.append((color("puertos"), "Puertas abiertas a Internet que no deberían: " + ", ".join(map(str, raros[:8])) + ("…" if len(raros) > 8 else "")))
+    if res.get("total") and res.get("estado") in ("ambar", "rojo"):
+        out.append((res["estado"], f'Protección: solo {res.get("hechos", 0)} de {res["total"]} ajustes de seguridad hechos'))
+    caidas = sum(1 for w in webs if _clase_web(w) == "rojo")
+    if caidas:
+        out.append(("rojo", f"{caidas} web{'s' if caidas > 1 else ''} con error o sin responder"))
+    elif mal("webs"):
+        out.append((color("webs"), "Alguna web va lenta o responde con error"))
+    nombres = {"cpu": "Procesador al límite", "memoria": "Memoria justa", "disco": "El disco se está llenando", "sesiones": "Sesiones SSH que no reconozco",
+               "intentos": "Muchos intentos de acceso",
+               "bloqueadas": "Muchas direcciones bloqueadas por fail2ban" if (d.get("fail2ban") or {}).get("instalado") else "fail2ban no está instalado (nadie bloquea a quien insiste)",
+               "mantenimiento": "Paquetes del sistema por actualizar", "certificado": "Un certificado caduca pronto o no es válido"}
+    for clave, texto in nombres.items():
+        if mal(clave):
+            out.append((color(clave), texto))
+    n_caidos = len((t.get("servicios") or {}).get("caidos") or [])
+    if mal("servicios") and n_caidos:
+        out.append((color("servicios"), f"{n_caidos} servicio{'s' if n_caidos > 1 else ''} caído{'s' if n_caidos > 1 else ''}"))
+    out.sort(key=lambda x: 0 if x[0] == "rojo" else 1)
+    return out
+
+
 def _cpu_texto(pct):
     return "Tranquilo" if pct < 30 else ("Con trabajo" if pct < 80 else "Al limite")
 
@@ -57,7 +119,7 @@ def cuerpo_servidor(nombre, e, servidor_cfg, ahora):
     webs = (e.get("webs") or [])
     w0 = webs[0] if webs else None
     hw = [tarjeta("web", "Webs", f'{w0["ms"]} ms' if w0 and w0.get("ms") is not None else "—",
-                  (" · ".join(w["url"].split("//")[-1].strip("/") for w in webs) or "sin webs")
+                  (f"{len(webs)} vigilada{'s' if len(webs) != 1 else ''}" if webs else "sin webs")
                   + (" · certificado inválido" if (t.get("certificado") or {}).get("invalido") else
                      f' · certificado: {t["certificado"]["cert_dias"]} d' if isinstance((t.get("certificado") or {}).get("cert_dias"), int) else ""),
                   _estado(t, "webs"))]
@@ -70,16 +132,19 @@ def cuerpo_servidor(nombre, e, servidor_cfg, ahora):
     k = d.get("disco") or {}
     hw.append(tarjeta("disco", "Disco", f'{_gb(k.get("usado"))} / {_gb(k.get("total"))} GB',
                       "Espacio de sobra" if _estado(t, "disco") == "verde" else "Se está llenando", _estado(t, "disco")))
+    motivos = _motivos(t, e.get("bastionado_resumen") or {}, d, webs)
+    if motivos:
+        filas = "".join(f'<div class="f"><span style="white-space:normal"><i class="p {c}"></i> {esc(x)}</span></div>' for c, x in motivos[:MAX_MOTIVOS])
+        extra = f'<div class="nota" style="padding:4px 0">+{len(motivos) - MAX_MOTIVOS} más</div>' if len(motivos) > MAX_MOTIVOS else ""
+        h.append(f'<div class="sec"><span>Por qué no está en verde</span></div><div class="lista">{filas}{extra}</div>')
     h.append(f'<div class="rejilla" style="margin-top:8px">{"".join(hw)}</div>')
 
-    serv = d.get("servicios") or []
-    if serv:
-        caidos = [s for s in serv if not s["ok"]]
-        orden = caidos + [s for s in serv if s["ok"]]
-        pild = "".join(f'<div class="pil"><i class="p {"verde" if s["ok"] else "rojo"}"></i><span>{esc(_corto(s["nombre"]))}</span></div>'
-                       for s in orden[:MAX_PILDORAS])
-        extra = f'<span class="nota">+{len(serv) - MAX_PILDORAS} más</span>' if len(serv) > MAX_PILDORAS else ""
-        h.append(f'<div class="sec"><span>Servicios</span>{extra}</div><div class="pildoras">{pild}</div>')
+    h.append(_seccion_webs(webs))
+    caidos = [s for s in (d.get("servicios") or []) if not s["ok"]]
+    if caidos:                      # los servicios sanos no se enseñan (estorban); solo los caídos, que sí piden acción
+        pild = "".join(f'<div class="pil"><i class="p rojo"></i><span>{esc(_corto(s["nombre"]))}</span></div>' for s in caidos[:MAX_CAIDOS])
+        extra = f'<span class="nota">+{len(caidos) - MAX_CAIDOS} más</span>' if len(caidos) > MAX_CAIDOS else ""
+        h.append(f'<div class="sec"><span>Servicios caídos</span>{extra}</div><div class="pildoras">{pild}</div>')
 
     ses = d.get("sesiones") or []
     it = d.get("intentos") or {}
