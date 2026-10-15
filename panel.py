@@ -93,6 +93,7 @@ def construye(d):
 {app_js}
 {_leer("ajustes.js")}
 {_leer("historico.js")}
+{_leer("servidores.js")}
 </script></body></html>"""
     return html
 

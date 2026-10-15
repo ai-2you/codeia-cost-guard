@@ -330,6 +330,11 @@ Si un servidor no tiene registro de sshd en el journal, la tarjeta dice «sin da
   inventa avisos. Se apagan todos con `avisos_servidores: false` y los de un servidor con `avisos: false` (casilla en Ajustes): lo que pase mientras están apagados no
   cae al reactivarlos. Estado en `avisos_servidores.json`. Límites conocidos: no hay previsión de disco ni aviso de «copia sin hacer» (necesita la API del panel), el disco es
   el que mide el script, y un servidor comprometido puede mentir a la baja.
+- **Pestaña «Servidores» del panel**: elige un servidor y ve sus webs (estado, código, respuesta, certificado y disponibilidad en 24 h, 7 y 30 días **sobre cuántos sondeos**),
+  sus contenedores y servicios agrupados según el nombre que da el servidor (lo que ya no está, plegado) y una línea de tiempo de 14 días (webs que caen y vuelven, contenedores en
+  bucle, altas y bajas). Nada se enseña como bueno si su última lectura es vieja («sin lectura desde hace…»), las webs sin sondeo salen como tales y un hueco sin datos
+  se dice como hueco. Lectura: `GET /servidores/detalle?servidor=<id>` (solo lectura, sin IPs). El botón **Probar aviso** (`POST /servidores/avisos/probar`, una cada 30 s) manda una
+  notificación de prueba y avisa si los avisos reales están apagados; que macOS la muestre depende de sus permisos de notificaciones y del modo No molestar.
 - Cada servidor tiene un `id` propio en `servidores.json`: renombrarlo no parte su historial; quitarlo y volver a añadirlo con el mismo nombre
   empieza uno nuevo.
 - Lectura: `GET /servidores/historia` (lista, o serie por día/hora con `servidor`, `desde`, `hasta`, `paso`) y `GET /servidores/ips?servidor=…&con_ips=1`

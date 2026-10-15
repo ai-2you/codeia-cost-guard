@@ -142,6 +142,9 @@ def lista(con, servidor_id, ahora):
             ok, mal, caidas = con.execute(f"SELECT SUM(ok), SUM(mal), SUM(caidas) FROM {tabla} WHERE servidor_id=? AND clave=? AND {campo} >= ?",
                                           (servidor_id, f["clave"], ahora - segundos)).fetchone()
             d[nombre] = _disponibilidad(ok, mal, caidas)
+            sufijo = nombre.split("_", 1)[1]
+            d["n_" + sufijo] = (ok or 0) + (mal or 0) + (caidas or 0)           # sobre cuántos sondeos se calcula
+            d["mal_" + sufijo] = mal or 0                                       # de ellos, cuántos respondieron con error o lentos (las caídas no entran: son las que restan)
         out.append(d)
     return out
 

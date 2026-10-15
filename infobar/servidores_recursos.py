@@ -10,6 +10,7 @@
   que agota su presupuesto deja un único evento `inestable`."""
 import hashlib
 import os
+import re
 
 from .servidores_inventario import reclama_swarm, recursos as agrega
 
@@ -20,6 +21,7 @@ EVENTOS_DIA_POR_CLAVE = 10
 RETENCION_EVENTOS_S = 180 * 86400
 RETENCION_INACTIVOS_S = 30 * 86400
 BUCLE_RECIENTE_S = 600
+_ETIQUETA_OK = re.compile(r"[A-Za-z0-9_./-]{1,130}")
 EVENTOS = ("aparecio", "desaparecio", "cambio_estado", "inestable", "reinicios_en_bucle")
 SEVERIDAD = {"aparecio": "info", "desaparecio": "aviso", "inestable": "aviso", "reinicios_en_bucle": "critica"}
 _MAL = frozenset({"mal", "caido", "reiniciando"})
@@ -96,6 +98,10 @@ def anota_inventario(con, sid, inv, swarm, ts):
     if inv.get("descartados"):
         descartar(con, "inventario_contenedores_descartados", sid)
     recs = agrega(inv, swarm)
+    largos = [k for k in recs if len(k[1]) > 130 or not _ETIQUETA_OK.fullmatch(k[1])]
+    for k in largos:                       # un nombre que la base no admite descarta ese recurso, no toda la lectura (un contenedor hostil no ciega el inventario)
+        descartar(con, "recurso_nombre_no_valido", sid)
+        del recs[k]
     filas = {(t, c): r for t, c, *r in con.execute(
         "SELECT tipo, clave, estado, reinicios, activo, visto_n, visto_desde, ausente_n, ausente_desde, bucle_n FROM recursos WHERE servidor_id=?", (sid,))}
     marca = f"inv_base:{sid}"

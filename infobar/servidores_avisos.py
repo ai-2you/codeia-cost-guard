@@ -13,6 +13,7 @@ import re
 import stat
 import sys
 import tempfile
+import threading
 import time
 
 from . import plataforma, rutas, servidores_historico as sh, servidores_ciclo, webs_sondeo
@@ -208,6 +209,46 @@ def _texto(reglas):
         return TEXTO[reglas[0]]
     clases = sorted({CLASE[r] for r in reglas})
     return f"{len(reglas)} avisos de servidores: {', '.join(clases)}."
+
+
+TEXTO_PRUEBA = "Prueba de CostGuard: si ves este aviso, las notificaciones de servidores funcionan."
+ESPERA_PRUEBA_S, MAX_PRUEBAS_HORA = 30, 10
+_PRUEBA = threading.Lock()
+_PRUEBAS = []               # instantes (monótonos) de los intentos de la última hora
+
+
+def probar(cuerpo, conf=None, canal=plataforma.avisar, reloj=time.monotonic, es_mac=None):
+    """POST /servidores/avisos/probar → (código, dict). Manda una notificación de prueba (texto distinto de los reales). Una a la vez, 1 cada 30 s y 10 por hora para
+    toda la aplicación; el intento cuenta aunque falle. Dice si los avisos reales están apagados (global o del servidor pedido): la prueba no los respeta, a propósito."""
+    if not isinstance(cuerpo, dict) or set(cuerpo) - {"servidor"}:
+        return 400, {"ok": False, "error": "entrada no válida"}
+    sid = cuerpo.get("servidor")
+    if sid is not None and not (isinstance(sid, str) and re.fullmatch(r"[0-9a-f]{32}", sid)):
+        return 400, {"ok": False, "error": "entrada no válida"}
+    conf = conf if conf is not None else cfg()
+    apagados = []
+    if conf.get("avisos_servidores") is False:
+        apagados.append("global")
+    if sid and any(s.get("id") == sid and s.get("avisos") is False for s in servidores_validos(conf.get("servidores"))):
+        apagados.append("servidor")
+    if not _PRUEBA.acquire(blocking=False):
+        return 429, {"ok": False, "espera_s": ESPERA_PRUEBA_S}
+    try:
+        ahora = reloj()
+        _PRUEBAS[:] = [t for t in _PRUEBAS if ahora - t < 3600]
+        if _PRUEBAS and ahora - _PRUEBAS[-1] < ESPERA_PRUEBA_S:
+            return 429, {"ok": False, "espera_s": int(ESPERA_PRUEBA_S - (ahora - _PRUEBAS[-1])) + 1}
+        if len(_PRUEBAS) >= MAX_PRUEBAS_HORA:
+            return 429, {"ok": False, "espera_s": int(3600 - (ahora - _PRUEBAS[0])) + 1}
+        _PRUEBAS.append(ahora)
+        mac = (sys.platform == "darwin") if es_mac is None else es_mac
+        if not mac:
+            return 200, {"ok": False, "motivo": "solo_macos", "apagados": apagados}
+        ok = bool(canal("CostGuard", TEXTO_PRUEBA))
+        log("aviso de prueba enviado" if ok else "aviso de prueba: macOS no lo aceptó")
+        return 200, {"ok": ok, "motivo": "" if ok else "no_aceptado", "apagados": apagados}
+    finally:
+        _PRUEBA.release()
 
 
 class Vigilante:

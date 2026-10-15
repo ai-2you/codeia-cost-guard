@@ -91,7 +91,15 @@ class TestHistoricoSinHtmlDeDatos(unittest.TestCase):
         html = panel.construye({"proveedores": {}})
         for marca in ('id="vista-historico"', 'id="nav-historico"', "window.cargarHistorico"):
             self.assertIn(marca, html)
-        self.assertIn("!enAjustes && !enHistorico", asset("ajustes.js"))                # la recarga de cada minuto no echa del histórico
+        self.assertIn('vistaActual === "panel"', asset("ajustes.js"))                   # la recarga de cada minuto solo ocurre en el panel: no echa de otras pestañas
+        for marca in ('id="vista-servidores"', 'id="nav-servidores"', "window.cargarServidores"):
+            self.assertIn(marca, html)
+
+    def test_la_pestana_servidores_se_construye_por_dom_y_se_abre_por_hash_tras_definir_la_carga(self):
+        js = asset("servidores.js")
+        for malo in ("innerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"):
+            self.assertNotIn(malo, js)
+        self.assertLess(js.index("window.cargarServidores = function"), js.index('location.hash === "#servidores"'))
 
     def test_la_apertura_por_hash_va_despues_de_definir_la_carga(self):
         js = asset("historico.js")

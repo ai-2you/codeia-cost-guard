@@ -140,5 +140,18 @@ input.num-in{width:9.5rem;text-align:right} input.ancho{width:100%}
 .chip.ok{color:#1a9d55;border-color:#1a9d55} .chip.aviso{color:#c47a00;border-color:#c47a00}
 .guardar{position:sticky;bottom:0;display:flex;gap:12px;align-items:center;padding:12px 0;background:var(--fondo)}
 button.primario{background:linear-gradient(90deg,var(--marca),var(--marca2));color:#fff;border-color:transparent;font-weight:600}
+.sv-barra{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
+.sv-estado{margin:4px 0 0;font-size:13.5px}.sv-suave{color:var(--suave);font-size:12.5px}
+.sv-tabla{overflow-x:auto}table.sv th{cursor:default}table.sv th:hover{color:var(--suave)}table.sv td{unicode-bidi:plaintext}
+.sv-nombre{overflow-wrap:break-word;unicode-bidi:plaintext}
+#vista-servidores .ayuda{margin:10px 0 0}#vista-servidores table.sv td:first-child{min-width:12rem}
+table.sv-rec{table-layout:fixed}table.sv-rec td:nth-child(1){width:42%}table.sv-rec td:nth-child(2){width:28%}table.sv-rec td:nth-child(3){width:12%}table.sv-rec td:nth-child(4){width:18%}
+.sv-ins{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid transparent;white-space:nowrap}
+.sv-ok{color:#1a8f3c;background:rgba(26,143,60,.12)}.sv-aviso{color:#a15c00;background:rgba(255,159,10,.16)}.sv-mal{color:#c4281c;background:rgba(255,69,58,.14)}.sv-neutro{color:var(--suave);background:var(--pista)}
+span.sv-ok,span.sv-aviso,span.sv-mal{background:none}.sv-ins.sv-ok{background:rgba(26,143,60,.12)}.sv-ins.sv-aviso{background:rgba(255,159,10,.16)}.sv-ins.sv-mal{background:rgba(255,69,58,.14)}
+:root[data-tema="oscuro"] .sv-ok{color:#30d158}:root[data-tema="oscuro"] .sv-aviso{color:#ff9f0a}:root[data-tema="oscuro"] .sv-mal{color:#ff6a60}
+.sv-grupo{margin:10px 0}.sv-grupo-cab{display:flex;gap:10px;align-items:center;padding:4px 8px}
+.sv-dia{margin:14px 0 4px;font-weight:600}.sv-dia::first-letter{text-transform:uppercase}.sv-evento{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:3px 0}.sv-hora{color:var(--suave);font-variant-numeric:tabular-nums;min-width:3.2rem}.sv-evento .sv-nombre{min-width:0;overflow-wrap:anywhere}
+.sv-check{display:block;margin-bottom:8px;font-size:13px}
 .msg{font-size:13px} .msg.err{color:#d6336c} .msg.ok{color:#1a9d55}
 .mini{height:8px;margin-top:4px;min-width:110px}

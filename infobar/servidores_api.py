@@ -6,11 +6,11 @@ import json
 import os
 import time
 
-from . import historico, rutas, servidores_historico as sh, servidores_lectura as sl
+from . import historico, rutas, servidores_detalle, servidores_historico as sh, servidores_lectura as sl
 from .config_y_estado import log
 from .servidores_registro import politicas
 
-PARAMS = {"/servidores/historia": {"servidor", "desde", "hasta", "paso"}, "/servidores/ips": {"servidor", "con_ips"}}
+PARAMS = {"/servidores/historia": {"servidor", "desde", "hasta", "paso"}, "/servidores/ips": {"servidor", "con_ips"}, "/servidores/detalle": {"servidor"}}
 NO_HAY = {"disponible": False, "motivo": "Aún no hay historial de servidores: se crea con la primera lectura buena."}
 
 
@@ -27,6 +27,8 @@ def atiende(ruta, q, ahora=None):
     """`q` = {parámetro: [valores]} ya parseado. Rechaza parámetros desconocidos o repetidos."""
     if ruta not in PARAMS or set(q) - PARAMS[ruta] or any(len(v) != 1 for v in q.values()):
         return 400, {"error": "parámetros no permitidos"}
+    if ruta == "/servidores/detalle":
+        return servidores_detalle.atiende(q, ahora)
     g = {k: v[0] for k, v in q.items()}
     if ruta == "/servidores/ips" and ("servidor" not in g or g.get("con_ips") != "1"):
         return 400, {"error": "las IPs se piden de un servidor y con con_ips=1"}

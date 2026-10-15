@@ -16,7 +16,7 @@ import hmac, json, os, secrets, subprocess, sys, threading, time
 
 from urllib.parse import parse_qs, urlsplit
 
-from . import ajustes, claves, exportacion, exportacion_csv, guia_web, historico, presupuestos, rutas, servidores_alta, servidores_api, servidores_webs
+from . import ajustes, claves, exportacion, exportacion_csv, guia_web, historico, presupuestos, rutas, servidores_alta, servidores_api, servidores_avisos, servidores_webs
 from . import cuota_nan
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_con_revision, guardar_config, log, olvidar_cache
@@ -188,6 +188,7 @@ def crear_servidor(puerto=PUERTO):
 
     base = rutas.RAIZ
     historiando = threading.BoundedSemaphore(2)        # como mucho dos consultas de histórico a la vez
+    detallando = threading.BoundedSemaphore(1)         # y una del detalle de servidor, aparte
     generando = threading.Lock()        # un solo panel.py a la vez aunque lleguen muchas peticiones
 
     class H(http.server.BaseHTTPRequestHandler):
@@ -288,12 +289,13 @@ def crear_servidor(puerto=PUERTO):
                 q = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=6)
             except ValueError:
                 return self._json(400, {"error": "parámetros no permitidos"})
-            if not historiando.acquire(blocking=False):
+            plaza = detallando if ruta == "/servidores/detalle" else historiando        # el detalle no compite con el histórico por sus dos plazas
+            if not plaza.acquire(blocking=False):
                 return self._json(429, {"error": "hay otras consultas en curso; vuelve a intentarlo"})
             try:
                 self._json(*servidores_api.atiende(ruta, q))
             finally:
-                historiando.release()
+                plaza.release()
 
         def do_GET(self):
             if not self._host_ok():
@@ -323,7 +325,7 @@ def crear_servidor(puerto=PUERTO):
                 self._historico()
             elif ruta == "/historico.csv":
                 self._historico(como_csv=True)
-            elif ruta in ("/servidores/historia", "/servidores/ips"):
+            elif ruta in ("/servidores/historia", "/servidores/ips", "/servidores/detalle"):
                 self._servidores(ruta)
             elif ruta == "/servidores/webs/detectadas":
                 try:
@@ -402,7 +404,7 @@ def crear_servidor(puerto=PUERTO):
             if not self._host_ok() or not self._sesion_ok():
                 return
             ruta = self.path.split("?")[0]
-            if ruta not in ("/guardar", "/clave", "/servidores/webs") and ruta not in RUTAS_ALTA:
+            if ruta not in ("/guardar", "/clave", "/servidores/webs", "/servidores/avisos/probar") and ruta not in RUTAS_ALTA:
                 return self._manda(404, b"no", "text/plain")
             nuevo = self._cuerpo_json()
             if nuevo is None:
@@ -412,6 +414,8 @@ def crear_servidor(puerto=PUERTO):
                     return self._clave(nuevo)
                 if ruta == "/servidores/webs":
                     return self._json(*servidores_webs.atiende_cambio(nuevo))
+                if ruta == "/servidores/avisos/probar":
+                    return self._json(*servidores_avisos.probar(nuevo))
                 if ruta in RUTAS_ALTA:
                     return self._json(*servidores_alta.atiende(RUTAS_ALTA[ruta], nuevo))
                 errores = errores_config(nuevo)
