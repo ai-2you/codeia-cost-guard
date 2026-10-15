@@ -152,7 +152,9 @@ class SshTest(unittest.TestCase):
         with mock.patch.object(servidores_ssh, "orden_ssh", return_value=["sh", "-c", "yes ABCDEFGHIJ | head -c 50000000"]):
             t0 = time.time()
             salida, error = servidores_ssh.ejecutar({"nombre": "a", "ssh": "h"})
-        self.assertEqual((salida, error), ("", "salida demasiado grande"))
+        self.assertEqual(error, "")
+        self.assertTrue(salida.endswith("\n### cortada\n"))                   # se corta en el tope y se deja constancia
+        self.assertLessEqual(len(salida), servidores_ssh.TOPE_BYTES + 20)
         self.assertLess(time.time() - t0, 5)
 
     def test_servidor_colgado_respeta_el_tope(self):

@@ -62,7 +62,7 @@ class EsquemaTest(Base):
 
     def test_permisos_pragmas_y_version(self):
         self.assertEqual(self.uno("PRAGMA secure_delete"), 1)
-        self.assertEqual(self.uno("PRAGMA user_version"), 1)
+        self.assertEqual(self.uno("PRAGMA user_version"), max(sh.MIGRACIONES))
         if os.name != "nt":
             self.assertEqual(os.stat(sh.ruta()).st_mode & 0o777, 0o600)
 
@@ -78,11 +78,12 @@ class EsquemaTest(Base):
         self.reg(entrada(T0, [(A, 5)]))
         self.assertEqual(self.uno("SELECT COUNT(*) FROM ips_atacantes"), 1)
         self.con.close()
-        v2 = dict(sh.MIGRACIONES)
-        v2[2] = "CREATE TABLE extra(x INTEGER) STRICT;"
-        with mock.patch.object(sh, "MIGRACIONES", v2):
+        siguiente = max(sh.MIGRACIONES) + 1
+        nueva = dict(sh.MIGRACIONES)
+        nueva[siguiente] = "CREATE TABLE extra(x INTEGER) STRICT;"
+        with mock.patch.object(sh, "MIGRACIONES", nueva):
             self.con = sh.abrir()
-        self.assertEqual(self.uno("PRAGMA user_version"), 2)
+        self.assertEqual(self.uno("PRAGMA user_version"), siguiente)
         copias = os.listdir(os.path.join(self.dir, "copias"))
         self.assertEqual(len(copias), 1)
         with open(os.path.join(self.dir, "copias", copias[0]), "rb") as f:

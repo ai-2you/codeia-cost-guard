@@ -5,7 +5,10 @@
 export LC_ALL=C PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # como root, nada del hogar de infobar (plugins de ~/.docker, etc.)
 export HOME=/root DOCKER_CONFIG=/root/.docker
-t() { timeout 3 "$@" </dev/null 2>/dev/null; }      # el conjunto cabe en los 15 s de recoger.sh
+# Presupuesto de tiempo: ningun comando arranca pasados LIMITE s y cada uno dura 3 s como mucho, asi que el programa acaba en LIMITE + 3 s,
+# antes del tope de 12 s del sudo de recoger.sh (y este, antes de su vigilante de 14 s y del tope de 20 s del Mac).
+INICIO=$(date +%s); LIMITE=7
+t() { [ $(( $(date +%s) - INICIO )) -ge $LIMITE ] && return 1; timeout 3 "$@" </dev/null 2>/dev/null; }
 
 echo "### servicios"
 # Dokploy y Easypanel despliegan servicios de Swarm; si el nodo no es manager, contenedores sueltos

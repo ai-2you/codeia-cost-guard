@@ -14,7 +14,8 @@ _RANGO = sh._RANGO
 
 
 def _fila(r):
-    return {k: r[k] for k in CAMPOS} | {"estado": r["estado_peor"]}
+    return {k: r[k] for k in CAMPOS} | {"estado": r["estado_peor"], "intentos_exactos": r["intentos_exactos"],
+                                        "intentos_completa": None if r["intentos_exactos"] is None else bool(r["intentos_completa"])}
 
 
 def _junta(a, b):
@@ -24,6 +25,11 @@ def _junta(a, b):
         x, y = a[k], b[k]
         out[k] = y if x is None else (x if y is None else max(x, y))
     out["estado"] = max(a["estado"], b["estado"], key=lambda e: _RANGO[e])
+    # los intentos exactos por hora SÍ se suman (son recuentos de horas naturales, no ventanas solapadas); el punto es completo si todas lo son
+    x, y = a["intentos_exactos"], b["intentos_exactos"]
+    out["intentos_exactos"] = y if x is None else (x if y is None else x + y)
+    ca, cb = a["intentos_completa"], b["intentos_completa"]
+    out["intentos_completa"] = cb if ca is None else (ca if cb is None else ca and cb)
     return out
 
 
@@ -57,7 +63,8 @@ def historia(con, servidor_id, desde, hasta, paso="dia"):
         f = _fila(r)
         puntos[clave] = (etiqueta, _junta(puntos[clave][1], f) if clave in puntos else f)
     return {"servidor": srv["nombre"], "paso": paso, "desde": d0.isoformat(), "hasta": d1.isoformat(),
-            "nota": "los intentos de acceso son picos de la ventana de 24 h del servidor, no sumas",
+            "nota": "intentos_pico_* son picos de la ventana de 24 h del servidor, no sumas; intentos_exactos son los de cada hora natural "
+                    "(según el journal del servidor; solo si el servidor tiene la versión nueva del script)",
             "puntos": [{"t": e, **p} for e, p in puntos.values()]}
 
 

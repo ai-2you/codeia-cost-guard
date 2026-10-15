@@ -281,8 +281,12 @@ avisa en vez de enseñar otras).
 
 La barra guarda en `servidores.sqlite` (misma carpeta de datos, permisos 0600, **no entra en las copias cifradas**) cómo ha ido cada servidor:
 una muestra por lectura buena (carga, memoria, disco, intentos de acceso, puertos, servicios, webs y protección; 14 días) y un resumen por hora
-que no caduca. Los intentos de acceso son **picos de la ventana de 24 h que mide el servidor**, no sumas, y las IPs son «según ese servidor»:
-un proceso local sin privilegios puede falsearlas mientras `recoger.sh` no filtre por campos de confianza.
+que no caduca. Los intentos de acceso de un servidor con el script antiguo son **picos de la ventana de 24 h que mide el servidor**, no sumas.
+Con el script nuevo (`recoger.sh` v2, se instala con `alta-servidor.sh`; el Mac sigue leyendo el antiguo) además se guardan los intentos
+**exactos de cada hora natural**, que nunca bajan aunque el servidor reinicie su registro, y solo cuentan las líneas que escribió sshd de
+verdad (filtro por la unidad de systemd, no por el nombre que pone el proceso). Las IPs son «según ese servidor» y **solo se guardan si el
+script v2 comprueba que las sesiones de usuario no viven en el cgroup de sshd**: con el script antiguo se muestran pero no se guardan.
+Si un servidor no tiene registro de sshd en el journal, la tarjeta dice «sin dato», no 0.
 
 - **IPs de quien intenta entrar** (dato personal): solo las públicas; nunca las de `ips_conocidas`. Se olvidan a los **90 días** desde la última
   vez que se vieron (`retencion_ips_dias`, de 7 a 90, global o por servidor), al quitar el servidor de la lista y al poner `guardar_ips: false`

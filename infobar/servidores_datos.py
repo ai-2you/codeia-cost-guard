@@ -112,7 +112,9 @@ def muestra_de(entrada, conocidas=frozenset()):
         "reinicio_pendiente": (1 if act.get("reinicio") else 0) if act else None,
     }
     ips, propios = {}, 0
-    for par in (it.get("top") if isinstance(it.get("top"), list) else [])[:MAX_IPS_POR_MUESTRA * 4]:
+    # sin garantía de que las líneas del journal las escribiera sshd (formato v1, o sesiones dentro del cgroup de ssh) no se guarda ninguna IP
+    candidatas = it.get("top") if isinstance(it.get("top"), list) and it.get("origen_fiable") is not False else []
+    for par in candidatas[:MAX_IPS_POR_MUESTRA * 4]:
         if not (isinstance(par, (list, tuple)) and len(par) == 2):
             continue
         c = canonica(par[0])
@@ -128,3 +130,30 @@ def muestra_de(entrada, conocidas=frozenset()):
         ips[c] = max(n, ips.get(c, 0))
     top = sorted(ips.items(), key=lambda kv: -kv[1])[:MAX_IPS_POR_MUESTRA]      # se recorta tras validar, no antes
     return m, top, propios
+
+
+def horas_de(entrada, ok_en):
+    """[(hora, n, completa)] de los cubos horarios exactos de intentos de una lectura buena hecha en `ok_en` (reloj del Mac).
+    Hora en segundos, alineada. Solo las horas cubiertas por el journal del servidor y no posteriores a la lectura, dentro de las últimas 26 h.
+    Completa = la hora ya había terminado tanto para el Mac como para el servidor. Lista vacía si no hay histograma; FueraDeRango si algo es
+    imposible (se descarta el histograma entero, no la muestra)."""
+    d = entrada.get("datos") if isinstance(entrada.get("datos"), dict) else {}
+    it = d.get("intentos") if isinstance(d.get("intentos"), dict) else {}
+    horas = it.get("horas")
+    if not isinstance(horas, list) or not horas:
+        return []
+    srv = it.get("ahora_srv")
+    fin = min(ok_en, srv) if isinstance(srv, int) and not isinstance(srv, bool) else ok_en
+    ultima, salida = None, []
+    for par in horas:
+        if not (isinstance(par, (list, tuple)) and len(par) == 2) or isinstance(par[0], bool) or not isinstance(par[0], int):
+            raise FueraDeRango("cubo de intentos mal formado")
+        if par[0] % 3600 or not 946_684_800 <= par[0] <= 4_102_444_800 or par[0] > ok_en + 900:
+            raise FueraDeRango("hora de cubo fuera de rango")
+        if ultima is not None and par[0] <= ultima:
+            raise FueraDeRango("cubos desordenados o repetidos")
+        ultima = par[0]
+        n = entero(par[1], 0, MAX_INTENTOS)                   # None = hora que el journal no cubre: no se escribe
+        if n is not None and par[0] <= ok_en and par[0] > ok_en - 26 * 3600:
+            salida.append((par[0], n, par[0] + 3600 <= fin))
+    return salida

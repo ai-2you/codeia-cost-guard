@@ -12,7 +12,7 @@ import sqlite3
 import time
 
 from . import plataforma, rutas
-from .servidores_datos import ESTADOS, FueraDeRango, conjunto_canonico, muestra_de
+from .servidores_datos import ESTADOS, FueraDeRango, conjunto_canonico, horas_de, muestra_de
 from .sqlite_base import ErrorAlmacen, abrir_base, _rollback, _sentencias, _tablas, _version
 
 RETENCION_CRUDO_S = 14 * 86400
@@ -67,7 +67,11 @@ CREATE TABLE ips_atacantes(
     PRIMARY KEY(servidor_id, ip)) STRICT, WITHOUT ROWID;
 CREATE INDEX ips_por_ultima ON ips_atacantes(servidor_id, ultima);
 """
-MIGRACIONES = {1: ESQUEMA_V1}       # versión -> script que lleva de la anterior a esa
+ESQUEMA_V2 = """
+ALTER TABLE horas_servidor ADD COLUMN intentos_exactos INTEGER CHECK(intentos_exactos BETWEEN 0 AND 1000000);
+ALTER TABLE horas_servidor ADD COLUMN intentos_completa INTEGER CHECK(intentos_completa IN (0, 1));
+"""
+MIGRACIONES = {1: ESQUEMA_V1, 2: ESQUEMA_V2}       # versión -> script que lleva de la anterior a esa
 
 # Clase de cada columna (publico < interno < personal < secreto). Un test falla si aparece una columna sin clasificar.
 _I = "interno"
@@ -77,7 +81,7 @@ CLASES_SERVIDORES = {
                    "altas_dia": _I, "altas_dia_num": _I},
     "muestras": {"servidor_id": _I, "ts": _I, "estado": _I, **{c: _I for c in METRICAS}},
     "horas_servidor": {c: _I for c in ("servidor_id", "hora", "n", "errores", "carga_max", "mem_max", "disco_max", "intentos_pico_24h",
-                                       "intentos_pico_1h", "baneadas_max", "sesiones_ajenas_max", "estado_peor")},
+                                       "intentos_pico_1h", "baneadas_max", "sesiones_ajenas_max", "estado_peor", "intentos_exactos", "intentos_completa")},
     "ips_atacantes": {"servidor_id": _I, "ip": "personal", "primera": _I, "ultima": _I, "max_24h": _I, "horas_vista": _I, "ultima_hora": _I},
 }
 
@@ -212,6 +216,16 @@ def _suma_hora(con, sid, ts, m, error):
         (sid, hora, 0 if error else 1, 1 if error else 0, *v, peor))
 
 
+def _anota_horas(con, sid, horas):
+    """Intentos exactos por hora natural. Solo suben: una hora ya anotada no baja aunque el journal del servidor se haya reiniciado, rotado
+    o un servidor comprometido mienta sobre el pasado (el valor viejo es el máximo que se llegó a ver). Una hora completa se marca como tal."""
+    for hora, n, completa in horas:
+        con.execute(
+            "INSERT INTO horas_servidor(servidor_id, hora, n, errores, estado_peor, intentos_exactos, intentos_completa) VALUES(?,?,0,0,'gris',?,?) "
+            "ON CONFLICT(servidor_id, hora) DO UPDATE SET intentos_exactos = MAX(COALESCE(intentos_exactos, 0), excluded.intentos_exactos), "
+            "intentos_completa = MAX(COALESCE(intentos_completa, 0), excluded.intentos_completa)", (sid, hora, n, 1 if completa else 0))
+
+
 def _anota_ips(con, sid, top, ts, ahora_dia):
     """Altas y actualizaciones monótonas: `max_24h` solo sube, `ultima` es el último ts y `horas_vista` cuenta horas de reloj distintas."""
     fila = con.execute("SELECT altas_dia, altas_dia_num FROM servidores WHERE id=?", (sid,)).fetchone()
@@ -277,6 +291,10 @@ def registrar(con, servidor, entrada, ahora, conocidas=(), guardar_ips=True):
                                 (sid, ok_en, m["estado"], *(m[k] for k in METRICAS)))
                     con.execute("UPDATE servidores SET muestra_en=? WHERE id=?", (ok_en, sid))
                 _suma_hora(con, sid, ok_en, m, False)
+                try:
+                    _anota_horas(con, sid, horas_de(entrada, ok_en))
+                except FueraDeRango:
+                    _descartar(con, "histograma", sid)
                 if propios:
                     _descartar(con, "ips_propias", sid)
                 if guardar_ips and top:

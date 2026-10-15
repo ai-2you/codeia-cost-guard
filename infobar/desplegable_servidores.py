@@ -86,8 +86,9 @@ def cuerpo_servidor(nombre, e, servidor_cfg, ahora):
     res = e.get("bastionado_resumen") or {}
     seg = [tarjeta("persona", "Dentro ahora", "Nadie" if not ses else f"{len(ses)} sesión" + ("es" if len(ses) > 1 else ""),
                    "Sin sesiones SSH" if not ses else ", ".join(s["usuario"] for s in ses[:3]), _estado(t, "sesiones")),
-           tarjeta("mano", "Intentos 1 h", f'{it.get("hora", 0):,}'.replace(",", "."),
-                   f'{it.get("total", 0):,} en 24 h'.replace(",", "."), _estado(t, "intentos")),
+           tarjeta("mano", "Intentos 1 h", f'{it.get("hora", 0):,}'.replace(",", ".") if it else "—",
+                   f'{it.get("total", 0):,} en 24 h'.replace(",", ".") if it else "sin dato (el servidor no registra intentos)",
+                   _estado(t, "intentos")),
            tarjeta("prohibido", "Bloqueadas", str(f2b.get("ahora", "—")) if f2b.get("instalado") else "—",
                    f'{f2b.get("total", 0)} en total (fail2ban)' if f2b.get("instalado") else "sin fail2ban",
                    _estado(t, "bloqueadas")),

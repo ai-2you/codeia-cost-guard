@@ -6,14 +6,17 @@ heredar nada peligroso de ~/.ssh/config (ProxyCommand, LocalCommand, reenvios).
 """
 import math, os, re, subprocess, time
 
-from . import plataforma
+from . import plataforma, servidores_intentos
 from .servidores import errores_servidores
 
 CLAVE = os.path.expanduser("~/.ssh/infobar_ed25519")
 TOPE_S = 20                 # segundos por servidor, conexion incluida
-TOPE_BYTES = 64 * 1024
+TOPE_BYTES = 128 * 1024     # lo que se pasa de aqui se corta (las secciones de v1 van primero y caben): no se tira la lectura entera
 SECCIONES = {"version", "sistema", "memoria", "disco", "sesiones", "puertos", "intentos",
              "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban"}
+MARCADAS = ("intentos",)    # secciones de v2 con marco: "n <lineas>" al principio y "fin <lineas> <codigo>" al final
+_MARCO_N = re.compile(r"n ([0-9]{1,6})")
+_MARCO_FIN = re.compile(r"fin ([0-9]{1,6}) ([0-9]{1,3})")
 
 
 def orden_ssh(servidor):
@@ -96,29 +99,78 @@ def ejecutar(servidor):
         p.wait()
         for h in hilos:
             h.join(2)
-        return "", ("salida demasiado grande" if excedido.is_set() else "timeout")
-    for h in hilos:
-        h.join(2)
+        if not excedido.is_set():
+            return "", "timeout"
+    else:
+        for h in hilos:
+            h.join(2)
     texto = b"".join(salida).decode("utf-8", "replace")
     if excedido.is_set():
-        return "", "salida demasiado grande"
+        # se corta en el tope y se deja constancia: lo que ya llego sirve, pero las secciones con marco sin cierre no
+        return texto + "\n### cortada\n", ""
     if p.returncode != 0 and "### version" not in texto:
         return "", clasifica_error(p.returncode, b"".join(err).decode("utf-8", "replace"))
     return texto, ""
 
 
-def secciones(texto):
-    """'### nombre' -> lineas. Solo las secciones conocidas; el resto se ignora."""
-    out, actual = {}, None
+def analizar(texto):
+    """(secciones, marcadas, invalidas, completa) de la salida del servidor.
+
+    Solo las secciones conocidas; el resto se ignora. Una sección que aparece dos veces es inválida (ni la primera ni la segunda valen: así un
+    texto del servidor con un `### nombre` dentro no puede reabrir y vaciar una sección). Las secciones con marco (`MARCADAS`) solo valen con
+    `n <lineas>` y `fin <lineas> <0>` coherentes entre sí y con lo recibido; se devuelven sin el marco. `completa` = el script llegó a `### fin`."""
+    out, vistas, invalidas = {}, set(), set()
+    actual, fin_visto, cortada, tras_fin = None, False, False, False
     for linea in (texto or "").splitlines():
         if linea.startswith("### "):
             nombre = linea[4:].strip()
-            actual = nombre if nombre in SECCIONES else None
-            if actual:
-                out[actual] = []
+            if nombre == "fin":
+                fin_visto, actual = True, None
+                continue
+            tras_fin = tras_fin or fin_visto
+            if nombre == "cortada":
+                cortada, actual = True, None
+            elif nombre not in SECCIONES:
+                actual = None
+            elif nombre in vistas:
+                invalidas.add(nombre)
+                out.pop(nombre, None)
+                actual = None
+            else:
+                vistas.add(nombre)
+                out[nombre] = []
+                actual = nombre
         elif actual:
             out[actual].append(linea.rstrip())
-    return out
+    marcadas = set()
+    for nombre in MARCADAS:
+        cuerpo = out.get(nombre)
+        if cuerpo is None:
+            continue
+        while cuerpo and not cuerpo[-1]:
+            cuerpo.pop()
+        if not cuerpo:
+            continue
+        esperado = _MARCO_N.fullmatch(cuerpo[0])
+        if esperado is None:
+            if cuerpo[0].startswith("n "):            # intenta ser v2 y no lo es (v1 nunca empieza por "n")
+                out.pop(nombre)
+                invalidas.add(nombre)
+            continue                                  # sin marco: formato de v1
+        interior = cuerpo[1:-1]
+        cierre = _MARCO_FIN.fullmatch(cuerpo[-1]) if len(cuerpo) >= 2 else None
+        if cierre and cierre[2] == "0" and int(esperado[1]) == int(cierre[1]) == len(interior):
+            out[nombre] = interior
+            marcadas.add(nombre)
+        else:
+            out.pop(nombre)
+            invalidas.add(nombre)
+    return out, marcadas, invalidas, fin_visto and not cortada and not tras_fin
+
+
+def secciones(texto):
+    """'### nombre' -> lineas (ver `analizar`)."""
+    return analizar(texto)[0]
 
 
 def _num(x, defecto=0.0):
@@ -142,8 +194,8 @@ def _clave_valor(lineas):
 _IP = re.compile(r"^[0-9a-fA-F.:]{3,45}$")
 
 
-def interpretar(sec):
-    """Secciones -> datos del servidor (numeros y listas cortas, listos para pintar)."""
+def interpretar(sec, marcadas=frozenset(), ahora=None):
+    """Secciones -> datos del servidor (numeros y listas cortas, listos para pintar). `marcadas` = secciones con marco validado (v2)."""
     d = {}
     s = sec.get("sistema") or []
     if len(s) >= 2:
@@ -173,15 +225,11 @@ def interpretar(sec):
         d["puertos"] = sorted({int(p) for p in " ".join(sec["puertos"]).split()
                                if p.isascii() and p.isdecimal() and 0 < int(p) < 65536})
     if "intentos" in sec:
-        it = {"total": 0, "hora": 0, "top": []}
-        for l in sec["intentos"]:
-            p = l.split()
-            if len(p) == 2 and p[0] in ("total", "hora"):
-                it[p[0]] = int(_num(p[1]))
-            elif len(p) == 3 and p[0] == "ip" and _IP.match(p[1]):
-                it["top"].append([p[1], int(_num(p[2]))])
-        it["top"] = sorted(it["top"], key=lambda x: -x[1])[:4]
-        d["intentos"] = it
+        it = servidores_intentos.interpretar(sec["intentos"], "intentos" in marcadas, ahora)
+        if it is not None:
+            d["intentos"] = it
+        elif "intentos" in marcadas:
+            d["intentos_sin_dato"] = True               # el servidor no tiene fuente de intentos: se muestra «sin dato», nunca 0
     a = sec.get("actualizaciones") or []
     if a:
         d["actualizaciones"] = {"pendientes": int(_num(a[0])), "reinicio": len(a) > 1 and a[1] == "reinicio"}
@@ -230,6 +278,11 @@ def leer(servidor):
     if error:
         return None, error, round(time.time() - t0, 2)
     try:
-        return interpretar(secciones(salida)), "", round(time.time() - t0, 2)
+        sec, marcadas, invalidas, completa = analizar(salida)
+        datos = interpretar(sec, marcadas)
+        datos["completa"] = completa
+        if invalidas:
+            datos["secciones_invalidas"] = sorted(invalidas)
+        return datos, "", round(time.time() - t0, 2)
     except Exception as e:                          # una salida inesperada no tumba el ciclo
         return None, f"salida no reconocida ({type(e).__name__})", round(time.time() - t0, 2)
