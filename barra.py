@@ -326,6 +326,8 @@ class Barra(NSObject):
             self.menu_general(p)
         elif zona.startswith("boton:"):
             self.boton(botones[int(zona.split(":")[1])][1])
+            if self.pop.isShown():
+                self.pop.performClose_(None)          # el botón ya hizo su trabajo (abrir el panel, la guía, un Terminal…): el desplegable no se queda tapando
 
     @objc.python_method
     def boton(self, texto):
