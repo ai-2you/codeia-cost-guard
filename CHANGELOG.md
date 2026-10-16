@@ -2,6 +2,41 @@
 
 Las versiones anteriores a la 0.3.0 están en las etiquetas de git (`v0.1.1`, `v0.1.2`, `v0.2.0`).
 
+## 0.5.0 — 2026-10-16
+
+Esta versión añade la bandeja de Windows, a partir de la contribución de @ai-2you (PR #6), integrada con el motor actual.
+
+### Windows
+- **Icono en la bandeja del sistema** (`bandeja_windows.py`): hace lo mismo que la barra de macOS salvo el desplegable con imágenes
+  (ingesta, copias cifradas, servidores, presupuestos, avisos y panel local), con el mismo hilo trabajador. El icono es un anillo con
+  la parte consumida de las 5 h; las cifras salen al pasar el ratón y en el menú del clic derecho.
+- **Panel en una ventana nativa** (WebView2) junto al icono, sin abrir el navegador: se coloca bien con cualquier escala de pantalla,
+  se cierra al pulsar fuera (no con sus propios diálogos), oculta no recarga el panel y Alt+F4 la oculta sin perderla. Si WebView2
+  no está, cae a Edge en modo aplicación o al navegador.
+- **Una sola bandeja por sesión**, y el servidor local pide su puerto en exclusiva: dos copias ya no se reparten las conexiones.
+- **Instalador** (`instalar_windows.py`): copia lo mismo que `install.sh`, crea su entorno con `pystray`, `pywebview`, `pythonnet`
+  y `cryptography`, registra el arranque con la clave `Run` del usuario (sin administrador, sin las condiciones de batería de una
+  tarea programada) y arranca la bandeja.
+- `ssh` y `taskkill` se lanzan sin ventana de consola.
+
+### Correcciones
+- Las rutas con `/` y `\` mezcladas (lo que devuelve `glob` en Windows) ya no pierden el proyecto ni el plan en el lector antiguo
+  ni en la comparación en sombra.
+- El panel recuerda el tipo de gráfica elegido entre recargas, y los modelos de cada plan pasan al título de la fila.
+- `requirements.txt` instala `pyobjc` solo en macOS y las dependencias de la bandeja solo en Windows.
+- `.gitattributes` normaliza los finales de línea a LF.
+
+### Seguridad
+- La ventana del panel solo carga el panel local o contenido HTML: nunca una dirección que haga a pywebview levantar su propio
+  servidor web (sin sesión). Un test lo vigila.
+- Cuando la bandeja cae al navegador, el ticket de entrada va en la línea de órdenes del navegador; en Windows solo la leen tus
+  propios procesos y los administradores, y el ticket es de un solo uso y caduca a los 60 s.
+
+### Límites conocidos
+- **Sin probar en un Windows real** tras la integración: la escala de pantalla, Alt+F4, los diálogos y el arranque están razonados
+  sobre el código de pywebview 6.2.1 y pystray 0.19.5, y probados con tests en macOS.
+- Los avisos de escritorio todavía no salen en Windows (solo se ven en el panel); OpenCode sigue sin leerse en Windows.
+
 ## 0.4.0 — 2026-10-16
 
 Esta versión añade la lectura opcional de la API de Dokploy: copias de seguridad, despliegues y el árbol real de proyectos.
