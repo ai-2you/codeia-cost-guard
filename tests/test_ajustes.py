@@ -90,6 +90,10 @@ class Auxiliares(unittest.TestCase):
         self.assertTrue(claves.cuenta_valida(ajustes.cuenta_de("OpenCode Go")))
         self.assertTrue(claves.cuenta_valida(ajustes.cuenta_de("¿¿??")))
 
+    def test_un_plan_con_la_api_de_nan_usa_su_cuenta_aunque_se_llame_distinto(self):
+        self.assertEqual(ajustes.cuenta_de("NaN Pro", "nan"), "nan")
+        self.assertEqual(ajustes.cuenta_de("NaN Pro", ""), "prov:nan-pro")
+
     def test_api_soportada(self):
         self.assertTrue(ajustes.api_soportada({"nombre": "NaN"}))
         self.assertTrue(ajustes.api_soportada({"nombre": "Otro", "uso_api": "nan"}))
@@ -167,6 +171,17 @@ class ServidorAjustes(unittest.TestCase):
         self.assertEqual(self.guardadas, {"prov:opencode-go": "abcdefgh12345678"})
         st, d = self._pide("POST", "/clave", {"proveedor": "OpenCode Go", "borrar": True})
         self.assertEqual((st, self.guardadas), (200, {}))
+
+    def test_la_clave_de_un_plan_renombrado_con_api_de_nan_va_a_la_cuenta_nan(self):
+        conf = dict(self.CONFIG, proveedores=[{"nombre": "NaN Pro", "modelos": [], "uso_api": "nan"}])
+        with open(rutas.CONFIG, "w", encoding="utf-8") as f:
+            json.dump(conf, f)
+        config_y_estado._ULTIMO_CFG = {}
+        st, d = self._pide("POST", "/clave", {"proveedor": "NaN Pro", "clave": "abcdefgh12345678"})
+        self.assertEqual((st, d["ok"]), (200, True))
+        self.assertEqual(self.guardadas, {"nan": "abcdefgh12345678"})
+        st, d = self._pide("GET", "/ajustes")
+        self.assertEqual({p["nombre"]: p["clave_guardada"] for p in d["proveedores"]}, {"NaN Pro": True})
 
     def test_clave_de_panel_por_cuenta(self):
         st, d = self._pide("POST", "/clave", {"cuenta": "dokploy:d.example.com", "clave": "abcdefgh12345678"})

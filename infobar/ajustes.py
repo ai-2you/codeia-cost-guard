@@ -13,10 +13,11 @@ def slug(nombre):
     return re.sub(r"[^a-z0-9]+", "-", str(nombre).lower()).strip("-")[:40] or "sin-nombre"
 
 
-def cuenta_de(nombre):
-    """Cuenta del Llavero de un proveedor: 'nan' para NaN (la lee el lector de cuota) y prov:<slug> para el resto."""
+def cuenta_de(nombre, uso_api=""):
+    """Cuenta del Llavero de un proveedor: 'nan' para NaN o para un plan que lee la cuota por la API de NaN (la cuenta que
+    busca el lector de cuota, se llame como se llame el plan) y prov:<slug> para el resto."""
     s = slug(nombre)
-    return "nan" if s == "nan" else f"prov:{s}"
+    return "nan" if s == "nan" or str(uso_api or "").lower() == "nan" else f"prov:{s}"
 
 
 def api_soportada(prov):
