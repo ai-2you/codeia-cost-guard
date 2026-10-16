@@ -321,7 +321,8 @@ def _correo(servicios, contenedores, sistema):
     en_marcha += [p[0] for p in (l.split("\t") for l in contenedores) if len(p) >= 2 and p[1] == "running"]
     en_marcha += [l.strip() for l in sistema]
     texto = " ".join(en_marcha).lower()
-    return next((nombre for clave, nombre in _CORREO if clave in texto), "")
+    # como palabra entera (separada por -, _, punto o espacio): «mailu-front» es Mailu, «emailupdater» no
+    return next((nombre for clave, nombre in _CORREO if re.search(rf"(?<![a-z0-9]){re.escape(clave)}(?![a-z0-9])", texto)), "")
 
 
 def leer(servidor):

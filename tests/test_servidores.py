@@ -124,6 +124,9 @@ class RevisionCodigoTest(unittest.TestCase):
         self.assertEqual(c(["mailu_smtp\t0/0"], [], []), "")
         self.assertEqual(c([], [], ["postfix"]), "Postfix")
         self.assertEqual(c(["pspro-db\t1/1"], ["app\trunning\tUp"], []), "")
+        # solo como palabra entera: un nombre que la lleva dentro no es un servidor de correo
+        self.assertEqual(c(["emailupdater\t1/1", "maximo\t1/1"], ["postgres\trunning\tUp"], []), "")
+        self.assertEqual(c(["mail.mailu_smtp\t1/1"], [], []), "Mailu")
         d = servidores_ssh.interpretar(servidores_ssh.secciones("### correo\ndovecot\n"))
         self.assertEqual(d.get("correo"), "Dovecot")
 
@@ -150,6 +153,7 @@ class RevisionCodigoTest(unittest.TestCase):
         self.assertEqual(_puertas([22, 25, 80, 443, 465, 587, 993], {"correo": "Mailu"}), ("22·80·443", "+ correo (Mailu)"))
         self.assertEqual(_puertas([22, 80, 443, 3000, 8080, 9000], {})[0], "6 abiertas")
         self.assertEqual(_puertas([22, 80, 443, 3000], {"raros": [3000]}), ("22·80·443·3000", "¡3000 expuesto!"))
+        self.assertEqual(_puertas([25, 465], {"correo": "Mailu"}), ("—", "+ correo (Mailu)"))      # solo los del correo: la cifra no queda vacía
 
     def test_correo_en_config(self):
         from infobar.servidores import errores_servidores

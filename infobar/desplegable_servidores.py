@@ -136,7 +136,7 @@ def _puertas(exp, tp):
     correo, raros = tp.get("correo"), tp.get("raros") or []
     grandes = [p for p in exp if not (correo and p in PUERTOS_CORREO)]
     de_correo = [p for p in exp if correo and p in PUERTOS_CORREO]
-    cifra = "·".join(map(str, grandes)) if len(grandes) <= MAX_PUERTOS_GRANDES else f"{len(exp)} abiertas"
+    cifra = ("·".join(map(str, grandes)) or "—") if len(grandes) <= MAX_PUERTOS_GRANDES else f"{len(exp)} abiertas"
     if raros:
         return cifra, f'¡{", ".join(map(str, raros))} expuesto!'
     if de_correo:
