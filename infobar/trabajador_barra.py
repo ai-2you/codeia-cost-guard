@@ -18,8 +18,9 @@ DESPIERTA = 15              # s maximos dormido: el ciclo de servidores decide s
 
 
 class Trabajador(threading.Thread):
-    def __init__(self, entregar, pintar=True):
-        """`pintar=False` es el modo sin interfaz (`costbar.py --demonio`): hace todo salvo renderizar el desplegable con Chrome."""
+    def __init__(self, entregar, pintar=True, tema=None):
+        """`pintar=False` es el modo sin interfaz (`costbar.py --demonio`): hace todo salvo renderizar el desplegable con Chrome.
+        `tema()`: 'claro' u 'oscuro'. Con él solo se pinta el tema que se ve (la mitad de Chrome por tanda); sin él, los dos."""
         super().__init__(name="infobar-trabajador", daemon=True)
         self.entregar = entregar
         self.pintar = pintar
@@ -27,6 +28,8 @@ class Trabajador(threading.Thread):
         self._cerrojo = threading.Lock()
         self._pedidos = set()
         self.conjunto = None
+        self.tema = tema
+        self._tema_pintado = None
         self.historial = servidores_registro.Historial()      # único escritor de servidores.sqlite
         self.avisos_servidores = servidores_avisos.Vigilante()      # único escritor de avisos_servidores.json
         self._evento.set()                  # la primera vuelta, nada mas arrancar
@@ -55,7 +58,8 @@ class Trabajador(threading.Thread):
             time.sleep(DESPIERTA)
 
     def pide(self, *cosas):
-        """'refrescar' (todo ya, servidores incluidos) o 'render' (solo repintar)."""
+        """'refrescar' (todo ya, servidores incluidos), 'render' (repintar los servidores), 'agentes' (repintar Agentes),
+        'plegar' (repintar ya el servidor que se ve; corta la tanda en curso) o 'tema' (mirar si cambió el tema)."""
         with self._cerrojo:
             self._pedidos.update(cosas)
         self._evento.set()
@@ -73,6 +77,7 @@ class Trabajador(threading.Thread):
             try:
                 ahora = time.time()
                 forzar = "refrescar" in pedidos
+                temas = self._temas()                           # el mismo en toda la vuelta, aunque cambie a mitad
                 if forzar:
                     cuota_nan.invalidar()
                 if r is None or forzar or ahora - ultimo_scan >= CADA_AGENTES:
@@ -98,27 +103,33 @@ class Trabajador(threading.Thread):
                                               "turnos": r["hoy"]["turnos"], "pct_5h": r.get("pct_5h", 0),
                                               "ritmo": (r.get("ritmo") or {}).get("tok", 0),      # la bandeja de Windows lo enseña en su menú
                                               "limite_5h": lim.get("limite_5h_tokens") or 0, "limite_hora": lim.get("limite_hora_tokens") or 0})
-                if self.conjunto is None:
-                    # primera imagen cuanto antes, con la ultima cache de servidores; la recogida
-                    # (que puede tardar segundos por SSH) repinta despues
-                    previa = servidores_ciclo.leer_cache()
-                    self._pinta(r, previa)
-                    gen_srv, ultimo_render = previa.get("generado_en"), ahora
                 if "plegar" in pedidos and self.conjunto is not None:
                     previa = servidores_ciclo.leer_cache()
-                    self._pinta(None, previa, solo_servidor=leer_ui().get("servidor_activo"))       # una sección se abrió o se cerró: primero el que se está viendo…
+                    self._pinta(None, previa, temas, solo_servidor=leer_ui().get("servidor_activo"))       # una sección se abrió o se cerró: primero el que se está viendo…
                     if len(cfg().get("servidores") or []) > 1:
-                        self._pinta(None, previa)                                                   # …y luego los demás, para que no enseñen el pliegue viejo
+                        self._pinta(None, previa, temas, cortable=True)                                   # …y luego los demás, para que no enseñen el pliegue viejo
+                    pedidos.discard("render")              # ya están todos repintados (si la tanda se cortó, se ha vuelto a pedir)
+                if self.conjunto is None or temas != self._tema_pintado:
+                    # primera imagen (o la del tema nuevo) cuanto antes, con la ultima cache de servidores; la recogida
+                    # (que puede tardar segundos por SSH) repinta despues
+                    previa = servidores_ciclo.leer_cache()
+                    primera = self.conjunto is None
+                    if self._pinta(r, previa, temas, cortable=True) or primera:
+                        gen_srv, ultimo_render, self._tema_pintado = previa.get("generado_en"), ahora, temas
+                        pedidos -= {"agentes", "render"}   # recién pintado todo: no hace falta otra tanda en esta vuelta
+                if self._clic_esperando(pedidos):
+                    continue                               # un clic cortó una tanda: va antes que el ciclo SSH (lo pendiente se conserva)
                 self.historial.preparar()
                 cache = servidores_ciclo.ciclo(forzar=forzar, historial=self.historial) or servidores_ciclo.leer_cache()
                 self.entregar("punto", servidores_ciclo.peor_estado(cache) if cache.get("servidores") else None)
-                pintar_agentes = (self.conjunto is None or forzar or "render" in pedidos
+                # un cambio en las webs o en el panel de un servidor ('render') no repinta Agentes: no sale ahí
+                pintar_agentes = (self.conjunto is None or forzar or "agentes" in pedidos
                                   or ahora - ultimo_render >= CADA_RENDER_AGENTES)
-                if pintar_agentes or cache.get("generado_en") != gen_srv:
-                    if self._pinta(r if pintar_agentes else None, cache):
+                if pintar_agentes or "render" in pedidos or cache.get("generado_en") != gen_srv:
+                    if self._pinta(r if pintar_agentes else None, cache, temas, cortable=True):
                         gen_srv = cache.get("generado_en")
                         if pintar_agentes:
-                            ultimo_render = ahora
+                            ultimo_render, self._tema_pintado = ahora, temas
             except Exception:
                 log("trabajador: " + traceback.format_exc()[-600:])
             if time.time() - ultimo_aviso >= 60:        # aparte y tras pintar: un fallo al pintar no deja sin avisos ni la notificación (osascript, hasta 5 s) retrasa el repintado
@@ -127,11 +138,39 @@ class Trabajador(threading.Thread):
             if "refrescar" in pedidos:
                 self.entregar("refresco_hecho", None)       # quita la ruedita del boton
 
-    def _pinta(self, r, cache, solo_servidor=None):
+    def _clic_esperando(self, pedidos):
+        """True si hay un 'plegar' pendiente: devuelve los demás pedidos de esta vuelta a la cola y despierta el bucle."""
+        with self._cerrojo:
+            if "plegar" not in self._pedidos:
+                return False
+            self._pedidos |= pedidos - {"plegar"}
+        self._evento.set()
+        return True
+
+    def _temas(self):
+        try:
+            return (self.tema(),) if self.tema else desplegable_png.TEMAS
+        except Exception:
+            return desplegable_png.TEMAS
+
+    def _pinta(self, r, cache, temas=None, solo_servidor=None, cortable=False):
+        """True si la tanda se pintó entera. Cortada por un clic ('plegar'), se vuelve a pedir y el clic va primero."""
         if not self.pintar:
             return False
-        nuevo = desplegable_png.renderizar(r, cache, cfg().get("servidores") or [], solo_servidor=solo_servidor, previo=self.conjunto)
-        if nuevo:
+        cortada = []
+
+        def parar():
+            with self._cerrojo:
+                if "plegar" in self._pedidos:
+                    cortada.append(1)
+                    return True
+            return False
+
+        nuevo = desplegable_png.renderizar(r, cache, cfg().get("servidores") or [], solo_servidor=solo_servidor, previo=self.conjunto,
+                                           temas=temas or self._temas(), parar=parar if cortable else None)
+        if cortada:
+            self.pide("render", *(("agentes",) if r is not None else ()))
+        if nuevo and nuevo is not self.conjunto:          # Chrome no pintó nada: devuelve el previo y no hay nada que entregar
             self.conjunto = nuevo
             self.entregar("conjunto", nuevo)
-        return bool(nuevo)
+        return bool(nuevo) and not cortada

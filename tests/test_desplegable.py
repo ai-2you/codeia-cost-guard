@@ -235,5 +235,71 @@ class MarcasTest(unittest.TestCase):
         self.assertTrue(all(im.getpixel((0, y)) != (255, 0, 255, 255) for y in range(0, im.size[1], 2)))     # el marcador no queda a la vista
 
 
+class TandaDeRenderTest(unittest.TestCase):
+    """Cuánto Chrome cuesta cada tanda: solo el tema que se ve, Agentes solo cuando toca y un clic corta la tanda."""
+    CFG = [{"nombre": "a", "ssh": "u@a"}, {"nombre": "b", "ssh": "u@b"}]
+
+    def setUp(self):
+        from infobar import desplegable_png
+        self.png = desplegable_png
+        self.pintados = []
+        for p in (mock.patch.object(desplegable_png, "navegador", return_value="chrome"),
+                  mock.patch.object(desplegable_png, "html_a_png", side_effect=self._pinta),
+                  mock.patch.object(desplegable_agentes, "documento", return_value="<agentes>"),
+                  mock.patch.object(desplegable_servidores, "documento", side_effect=lambda n, *a, **k: f"<{n}>"),
+                  mock.patch.object(desplegable_png.permisos, "purgar_render")):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _pinta(self, html, ruta, chrome):
+        self.pintados.append((html, os.path.basename(ruta).split("-", 1)[1]))
+        return (10, 20, [])
+
+    def test_solo_el_tema_pedido_y_sin_restos_del_otro(self):
+        previo = self.png.renderizar({}, {}, self.CFG)
+        self.assertEqual(len(self.pintados), 6)                     # Agentes + 2 servidores, en claro y oscuro
+        self.pintados.clear()
+        out = self.png.renderizar({}, {}, self.CFG, previo=previo, temas=("oscuro",))
+        self.assertEqual(len(self.pintados), 3)
+        self.assertEqual(set(out["agentes"]), {"oscuro"})
+        self.assertEqual({n: set(v) for n, v in out["servidores"].items()}, {"a": {"oscuro"}, "b": {"oscuro"}})
+
+    def test_lo_que_no_se_repinta_conserva_su_imagen_del_otro_tema(self):
+        previo = self.png.renderizar({}, {}, self.CFG, temas=("claro",))
+        out = self.png.renderizar(None, {}, self.CFG, previo=previo, temas=("oscuro",), solo_servidor="a")
+        self.assertEqual(set(out["agentes"]), {"claro"})            # Agentes no se repintó: sigue habiendo qué enseñar
+        self.assertEqual(set(out["servidores"]["a"]), {"oscuro"})
+        self.assertEqual(set(out["servidores"]["b"]), {"claro"})
+        self.assertIs(self.png.renderizar(None, {}, [], previo=previo, parar=lambda: True), previo)    # nada pintado: el previo tal cual
+
+    def test_parar_corta_la_tanda_y_entrega_lo_pintado(self):
+        out = self.png.renderizar({}, {}, self.CFG, temas=("claro",), parar=lambda: len(self.pintados) >= 2)
+        self.assertEqual(len(self.pintados), 2)
+        self.assertIn("claro", out["agentes"])
+        self.assertEqual(set(out["servidores"]), {"a"})
+
+    def test_el_trabajador_no_repinta_agentes_por_un_cambio_de_webs_y_cede_al_clic(self):
+        from infobar import trabajador_barra
+        t = trabajador_barra.Trabajador(lambda *a: None, tema=lambda: "claro")
+        with mock.patch.object(trabajador_barra, "cfg", return_value={"servidores": self.CFG}):
+            t.pide("plegar")                                     # un clic ya esperando: la tanda no llega a pintar nada
+            self.assertFalse(t._pinta({}, {}, cortable=True))
+            self.assertEqual(self.pintados, [])
+            self.assertTrue({"render", "agentes"} <= t._pedidos)  # se vuelve a pedir entera, después del clic
+            t._pedidos.clear()
+            self.assertTrue(t._pinta(None, {}, cortable=True))     # 'render' sin Agentes: solo los servidores, y del tema que se ve
+        self.assertEqual(self.pintados, [("<a>", "servidor0-claro.png"), ("<b>", "servidor1-claro.png")])
+
+    def test_un_clic_pendiente_salta_el_ciclo_sin_perder_lo_pedido(self):
+        from infobar import trabajador_barra
+        t = trabajador_barra.Trabajador(lambda *a: None, tema=lambda: "claro")
+        self.assertFalse(t._clic_esperando({"refrescar"}))
+        t.pide("plegar")
+        t._evento.clear()
+        self.assertTrue(t._clic_esperando({"refrescar", "plegar"}))
+        self.assertEqual(t._pedidos, {"plegar", "refrescar"})       # el refresco pedido no se pierde
+        self.assertTrue(t._evento.is_set())                         # y la vuelta siguiente empieza ya
+
+
 if __name__ == "__main__":
     unittest.main()
