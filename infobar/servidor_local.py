@@ -12,7 +12,7 @@ cosas a localhost. Por eso:
     otro proceso del Mac. La barra abre el panel con un ticket de un solo uso (en memoria, 60 s) que el servidor
     cambia por una cookie HttpOnly SameSite=Strict; sin la cookie, nada responde. El ticket no toca el disco.
 """
-import hmac, json, os, secrets, subprocess, sys, threading, time
+import hmac, json, os, secrets, socket, subprocess, sys, threading, time
 
 from urllib.parse import parse_qs, urlsplit
 
@@ -490,8 +490,15 @@ def crear_servidor(puerto=PUERTO):
             self._json(200, {"ok": True})
 
     class S(socketserver.ThreadingTCPServer):
-        allow_reuse_address = True
+        # En Windows SO_REUSEADDR deja que un segundo proceso escuche en un puerto ya ocupado y las conexiones se repartan
+        # entre los dos (tickets y sesiones que fallan a ratos): allí el puerto se pide en exclusiva.
+        allow_reuse_address = os.name != "nt"
         daemon_threads = True
+
+        def server_bind(self):
+            if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            super().server_bind()
 
     srv = S(("127.0.0.1", puerto), H)
     srv.tickets, srv.sesiones, srv.cerrojo = {}, {}, threading.Lock()

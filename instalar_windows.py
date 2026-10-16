@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """instalar_windows.py: instala codeia-cost-guard en Windows (bandeja + autoarranque).
 
-Equivalente Windows de install.sh (que hoy solo monta la parte de macOS, LaunchAgent). Copia
-el motor + infobar/ a ~/.cost-guard (mismo destino que macOS/Linux), crea un entorno virtual
-propio con pillow + pystray==0.19.5 (icono de bandeja) + pywebview==6.2.1 + pythonnet==3.2.1 (popover
-nativo del panel, sin navegador), y registra una tarea en el Programador de Tareas de
-Windows (schtasks /sc onlogon) que lanza bandeja_windows.py sin ventana de consola
-(pythonw.exe) en cada inicio de sesion. No requiere permisos de administrador: una tarea
-ONLOGON para el propio usuario en el equipo local se crea con los permisos del usuario actual
-(confirmado en la documentacion oficial de Microsoft, ver informe de investigacion).
+Equivalente Windows de install.sh. Copia el motor, infobar/ y panel_assets/ a ~/.cost-guard (mismo destino
+que macOS/Linux), crea un entorno virtual propio con PAQUETES (icono de bandeja, popover nativo del panel con
+WebView2 y copias cifradas), registra el arranque al iniciar sesion con la clave Run del usuario (sin
+administrador) y arranca la bandeja sin ventana de consola (pythonw.exe). Quita la tarea programada o el .vbs
+de Inicio que dejaban las versiones anteriores de este instalador.
 
 Uso:
     python instalar_windows.py
@@ -114,28 +111,17 @@ def crear_venv_e_instalar(destino):
     return venv_dir
 
 
-def registrar_tarea(destino, venv_dir):
-    """Tarea ONLOGON para el propio usuario: no requiere administrador. Gotcha de quoting: /tr
-    es UNA sola cadena que Windows vuelve a parsear como linea de comandos, asi que el
-    interprete y el script van entre comillas dobles DENTRO de esa cadena -- no basta pasar una
-    lista a subprocess y esperar que Windows la resuelva sola. /f fuerza sobrescritura: reinstalar
-    una segunda vez no falla por "la tarea ya existe" (idempotente).
+RUN = r"Software\Microsoft\Windows\CurrentVersion\Run"
+NOMBRE_RUN = "CostGuard"
 
-    Si el Programador de Tareas rechaza el trigger ONLOGON (visto en la practica: algunas
-    cuentas/politicas devuelven "Acceso denegado" solo para ONLOGON, aunque ONCE/DAILY funcionen
-    con el mismo usuario), cae al fallback ya previsto en el plan: un .vbs en shell:startup.
-    Devuelve "schtasks" o "startup_vbs" segun cual haya quedado activo."""
-    pythonw = os.path.join(venv_dir, "Scripts", "pythonw.exe")
-    script = os.path.join(destino, "bandeja_windows.py")
-    comando_tr = f'"{pythonw}" "{script}"'
-    ok, salida = _correr(
-        ["schtasks", "/create", "/tn", NOMBRE_TAREA, "/tr", comando_tr, "/sc", "onlogon", "/f"])
-    if ok:
-        return "schtasks"
-    print(f"  aviso: schtasks /create fallo ({salida or 'sin detalle'}); uso el fallback de "
-          "Inicio (carpeta Startup) en su lugar.")
-    _registrar_fallback_startup(pythonw, script)
-    return "startup_vbs"
+
+def registrar_arranque(pythonw, script):
+    """Arranque al iniciar sesion con la clave Run del propio usuario (HKCU): no pide administrador y, a diferencia de una
+    tarea de `schtasks /sc onlogon`, no hereda condiciones que la impiden con bateria o la matan a las 72 h. El valor es
+    una linea de ordenes: el interprete y el script van entre comillas (las rutas de Windows no pueden llevar comillas)."""
+    import winreg
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN) as k:
+        winreg.SetValueEx(k, NOMBRE_RUN, 0, winreg.REG_SZ, f'"{pythonw}" "{script}"')
 
 
 def ruta_vbs_startup():
@@ -144,20 +130,25 @@ def ruta_vbs_startup():
     return os.path.join(carpeta_inicio, f"{NOMBRE_TAREA}.vbs")
 
 
-def _registrar_fallback_startup(pythonw, script):
-    """Equivalente mas directo al LaunchAgent de macOS: Explorer ejecuta siempre este .vbs al
-    iniciar sesion de este usuario, sin privilegios especiales. Chr(34) evita tener que escapar
-    comillas dobles dentro del propio literal de cadena de VBS."""
-    ruta_vbs = ruta_vbs_startup()
-    os.makedirs(os.path.dirname(ruta_vbs), exist_ok=True)
-    contenido = (
-        "' Generado por instalar_windows.py: arranca bandeja_windows.py oculto al iniciar sesion.\n"
-        "' Fallback cuando el Programador de Tareas (schtasks /sc onlogon) no esta disponible.\n"
-        'Set objShell = CreateObject("WScript.Shell")\n'
-        f'objShell.Run Chr(34) & "{pythonw}" & Chr(34) & " " & Chr(34) & "{script}" & Chr(34), 0, False\n'
-    )
-    with open(ruta_vbs, "w", encoding="utf-8") as f:
-        f.write(contenido)
+def quitar_arranques_antiguos():
+    """Las versiones anteriores del instalador usaban una tarea programada o un .vbs en Inicio: si se quedan junto a la
+    clave Run, cada inicio de sesion lanza dos bandejas (la segunda se va sola por el mutex, pero no hace falta)."""
+    _correr(["schtasks", "/delete", "/tn", NOMBRE_TAREA, "/f"])       # si no existe, falla y da igual
+    try:
+        os.remove(ruta_vbs_startup())
+    except OSError:
+        pass
+
+
+def arrancar(pythonw, script):
+    """Arranca la bandeja ya, sin consola y desligada del instalador. Si ya habia una en marcha, la nueva se va sola."""
+    try:
+        subprocess.Popen([pythonw, script], close_fds=True,
+                         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        return True
+    except OSError as e:
+        print(f"  aviso: no se pudo arrancar ahora ({e}); arrancara en el siguiente inicio de sesion.")
+        return False
 
 
 def main():
@@ -167,23 +158,19 @@ def main():
     print("-> Entorno virtual + " + ", ".join(p.split("==")[0] for p in PAQUETES))
     venv_dir = crear_venv_e_instalar(DESTINO)
 
-    print("-> Registrando arranque automatico (Programador de tareas)")
-    metodo = registrar_tarea(DESTINO, venv_dir)
-
     pythonw = os.path.join(venv_dir, "Scripts", "pythonw.exe")
     script = os.path.join(DESTINO, "bandeja_windows.py")
+    print("-> Arranque automatico al iniciar sesion (clave Run de tu usuario)")
+    quitar_arranques_antiguos()
+    registrar_arranque(pythonw, script)
+    arrancada = arrancar(pythonw, script)
+
     print("")
-    print("Listo: en el siguiente inicio de sesion arrancara solo el icono de la bandeja.")
-    if metodo == "schtasks":
-        print(f"  Mecanismo activo: tarea \"{NOMBRE_TAREA}\" en el Programador de tareas.")
-        print(f"  Verificar:     schtasks /query /tn {NOMBRE_TAREA} /v /fo list")
-        print(f"  Desinstalar:   schtasks /delete /tn {NOMBRE_TAREA} /f")
-    else:
-        print("  Mecanismo activo: fallback de Inicio (el Programador de tareas rechazo")
-        print("  el trigger ONLOGON en esta cuenta/maquina).")
-        print(f"  Verificar:     dir \"{ruta_vbs_startup()}\"")
-        print(f"  Desinstalar:   del \"{ruta_vbs_startup()}\"")
-    print(f'  Arrancar ya:   "{pythonw}" "{script}"')
+    print("Listo: mira la bandeja del sistema (icono con un anillo; las cifras, al pasar el raton)."
+          if arrancada else "Listo: el icono aparecera en el siguiente inicio de sesion.")
+    print("  Si ya tenias una version anterior en marcha, sal de ella (clic derecho > Salir) y vuelve a abrirla.")
+    print(f'  Arrancar:      "{pythonw}" "{script}"')
+    print(f'  Desinstalar:   reg delete "HKCU\\{RUN}" /v {NOMBRE_RUN} /f')
     print("")
     print(f"Panel: python \"{os.path.join(DESTINO, 'panel.py')}\"  (genera panel.html)")
 

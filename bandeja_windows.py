@@ -26,6 +26,7 @@ if sys.platform != "win32":
 
 import os           # noqa: E402  (tras la guarda de plataforma, a proposito)
 import subprocess   # noqa: E402
+import ctypes       # noqa: E402
 import threading    # noqa: E402
 import webbrowser   # noqa: E402
 import winreg        # noqa: E402  (solo Windows: ya pasamos la guarda de arriba)
@@ -45,6 +46,10 @@ _usa_popover = False   # True solo si el popover nativo se creo y arranco sin er
 _hilos = []            # los de costbar.arrancar_hilos(): el trabajador recibe "Refrescar ahora" y todos paran al salir
 _agentes = {"cinco_h": 0, "hoy": 0, "turnos": 0, "pct_5h": 0, "ritmo": 0, "limite_5h": 0, "limite_hora": 0}
 _lock_icono = threading.Lock()   # _entregar (hilo trabajador) y las acciones (hilo de pystray) repintan el icono
+_textos_menu = None              # el menu solo se rehace si cambia algun texto: rehacerlo destruye el que este abierto
+_MUTEX = "Local\\CostGuardBandeja"
+_ERROR_ALREADY_EXISTS = 183
+_mutex = None                    # handle del mutex: se guarda para que no se cierre mientras viva el proceso
 
 
 def _construir_menu(a):
@@ -67,8 +72,12 @@ def _construir_menu(a):
 def _pinta():
     with _lock_icono:
         if _icon is not None:
+            global _textos_menu
             _icon.icon = bwm.imagen_icono_windows(*bwm.fraccion_e_icono(_agentes))
-            _icon.menu = _construir_menu(_agentes)
+            textos = (bwm.texto_5h(_agentes), bwm.texto_hoy(_agentes), bwm.texto_ritmo(_agentes))
+            if textos != _textos_menu:
+                _textos_menu = textos
+                _icon.menu = _construir_menu(_agentes)
             _icon.title = bwm.texto_tooltip(_agentes)
 
 
@@ -132,7 +141,7 @@ def _accion_abrir_panel_navegador(url):
 
 def _accion_panel(icon):
     if _usa_popover:
-        popover.alternar(costbar.url_panel(), costbar.log)
+        popover.alternar(costbar.url_panel, costbar.log)      # la funcion: el ticket solo se pide al mostrar
     else:
         _accion_abrir_panel_navegador(costbar.url_panel())
 
@@ -156,8 +165,22 @@ def _accion_salir(icon):
         popover.cerrar(costbar.log)
 
 
+def _soy_la_unica():
+    """Mutex con nombre de la sesion: una segunda bandeja (doble clic, arranque repetido) se va sin tocar nada. Con dos,
+    habria dos escritores de servidores.sqlite y de los avisos, y el doble de conexiones SSH. El mutex vive con el proceso."""
+    k = ctypes.windll.kernel32
+    k.CreateMutexW.restype = ctypes.c_void_p
+    k.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+    global _mutex
+    _mutex = k.CreateMutexW(None, False, _MUTEX)
+    return bool(_mutex) and k.GetLastError() != _ERROR_ALREADY_EXISTS
+
+
 def main():
     global _icon, _usa_popover
+    if not _soy_la_unica():
+        costbar.log("bandeja: ya hay una en marcha en esta sesion; esta se va")
+        return
     costbar.endurecer()       # umask / permisos de lo que ya hubiera: todo esto es sensible
     _icon = pystray.Icon("CostGuard", bwm.imagen_icono_windows(*bwm.fraccion_e_icono(_agentes)),
                          bwm.texto_tooltip(_agentes), _construir_menu(_agentes))
@@ -165,7 +188,7 @@ def main():
 
     if popover.TIENE_WEBVIEW:
         try:
-            popover.crear(costbar.url_panel())
+            popover.crear()
             _usa_popover = True
         except Exception as e:
             # el paquete pywebview importa bien pero el runtime de WebView2 puede faltar o estar
@@ -183,6 +206,9 @@ def main():
         try:
             import webview
             webview.start()       # bloqueante en el hilo principal (lo exige pywebview)
+            if not popover.saliendo():
+                _usa_popover = False   # la ventana se cerro por otra via: el icono sigue y Abrir panel cae al navegador
+                costbar.log("bandeja: el popover se cerro; Abrir panel cae al navegador")
         except Exception as e:
             _usa_popover = False   # el bucle de webview ya no esta vivo: de aqui en mas, navegador
             costbar.log(f"bandeja: ERROR webview.start() {type(e).__name__}: {e}; "

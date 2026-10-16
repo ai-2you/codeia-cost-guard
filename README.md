@@ -82,15 +82,16 @@ Para el icono de bandeja y el arranque automático (equivalente Windows de `inst
 python instalar_windows.py
 ```
 
-Copia el proyecto a `~/.cost-guard` con su propio entorno virtual (`pillow` + `pystray==0.19.5`) y
-registra el arranque al iniciar sesión: primero intenta una tarea en el **Programador de tareas**
-(`schtasks /sc onlogon`, sin privilegios de administrador); si esa cuenta o política lo bloquea, cae
-automáticamente a un `.vbs` en la carpeta de Inicio (`shell:startup`). El propio script indica al
-final cuál de los dos mecanismos quedó activo y cómo desinstalarlo
-(`schtasks /delete /tn CostGuardTray /f`, o borrar el `.vbs`).
+Copia el proyecto a `~/.cost-guard` con su propio entorno virtual (`pillow`, `cryptography`, `pystray`,
+`pywebview` y `pythonnet`), registra el arranque al iniciar sesión con la clave `Run` de tu usuario
+(sin administrador) y arranca la bandeja. El propio script indica al final cómo quitar el arranque
+(`reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v CostGuard /f`).
 
-El icono (`bandeja_windows.py`) muestra la cifra de la ventana de 5 h y, al pulsarlo, un menú de texto
-plano con hoy/ritmo/5h, "Abrir panel", "Refrescar ahora" y "Salir"; se refresca solo cada 60 s.
+La bandeja (`bandeja_windows.py`) hace lo mismo que la barra de macOS salvo el desplegable con imágenes:
+ingesta, copias, servidores, presupuestos y panel local. El icono es un anillo con la parte consumida de
+las 5 h (las cifras salen al pasar el ratón); el clic izquierdo abre el panel en una ventana nativa junto
+al icono y el derecho, un menú con hoy, ritmo, 5 h, «Abrir panel», «Refrescar ahora» y «Salir». Solo
+puede haber una en marcha por sesión.
 
 Guardar claves de API desde el panel (**Ajustes**) también funciona ya en Windows: se guardan en el
 **Credential Manager** del sistema (antes esto solo estaba soportado en macOS, vía Keychain).
@@ -107,7 +108,7 @@ lee ahí — Claude Code y Codex sí se detectan igual en los tres sistemas.
 | `panel.py` (panel HTML) | ✅ | ✅ | ✅ |
 | `precio_astra.py` (calculadora de precios) | ✅ | ✅ | ✅ |
 | Icono de bandeja/barra de menús + desplegable (`install.sh`+`barra.py` en macOS; `instalar_windows.py`+`bandeja_windows.py` en Windows) | ✅ | ❌ (no hay barra de menús equivalente) | ✅ [¹] |
-| Arranque automático al iniciar sesión | ✅ (LaunchAgent) | — | ✅ (Programador de tareas, con fallback a la carpeta de Inicio) |
+| Arranque automático al iniciar sesión | ✅ (LaunchAgent) | — | ✅ (clave `Run` del usuario) |
 | Lectura de logs de Claude Code / Codex | ✅ | ✅ | ✅ |
 | Lectura de consumo de OpenCode | ✅ | ✅ | ⚠️ ruta de datos distinta, no detectado todavía |
 | **Modo sin interfaz** `python3 costbar.py --demonio` (ingesta, copias cifradas, ciclo de servidores, presupuestos y panel local, sin icono ni Chrome) | ✅ | ✅ | ✅ (código portable; **pendiente de probar en un Windows real**: ponlo en una tarea programada «al iniciar sesión») |
@@ -133,9 +134,8 @@ repo y el estilo de commits y de PRs que se usa aquí.
   de la última hora, ayer, 7 días y el desglose por modelo y por proyecto. Avisa por notificación si el
   ritmo pasa de un límite (`config.json`).
 - **`bandeja_windows.py`** / **`instalar_windows.py`** — equivalentes en Windows: icono de bandeja con
-  menú de texto plano (hoy/ritmo/5h, abrir panel, refrescar, salir) y un instalador que crea un entorno
-  virtual propio y registra el arranque automático (Programador de tareas, con fallback a la carpeta
-  de Inicio).
+  el panel en una ventana nativa y un menú de texto (hoy/ritmo/5h, abrir panel, refrescar, salir), y un
+  instalador que crea un entorno virtual propio y registra el arranque automático (clave `Run` del usuario).
 - **`panel.py`** — el panel visual: `panel.html` con barras por día, modelo y proyecto. Se refresca
   solo cada minuto.
 - **`analizar_gasto.py`** — el informe de texto, para terminal o para cron.

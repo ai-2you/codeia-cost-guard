@@ -21,24 +21,17 @@ TITULO_VENTANA = "CostGuard"
 
 _ventana = None
 _visible = False
+_saliendo = False   # solo "Salir" destruye la ventana; cualquier otro cierre (Alt+F4) la oculta
 _hwnd = None   # HWND real de la ventana, resuelto tras el primer show() (no cambia: no se destruye
                # entre show/hide, solo con "Salir" -- por eso basta con resolverlo una vez)
 _lock = threading.Lock()   # mostrar/ocultar/cerrar: protege _visible y _hwnd entre el hilo de
                             # pystray (clics) y el hilo del hook de foco (cierre automatico)
 
 # No se usa easy_drag=True de pywebview a proposito: en Windows arrastra desde CUALQUIER punto
-# de la pagina sin excepcion, y el panel ya tiene su propio arrastre con el raton para seleccionar
-# un rango de fechas en el grafico (app.js, arrastreDesde) -- con easy_drag ambos se pisarian. En
-# su lugar se marca SOLO el titulo como zona de arrastre (igual que agarrar una barra de titulo),
-# via la clase "pywebview-drag-region" que pywebview ya reconoce de forma nativa para esto.
-_JS_ZONA_ARRASTRE = """
-(function(){
-  var t = document.querySelector('.cab h1'), s = document.getElementById('sub');
-  [t, s].forEach(function(el){
-    if (el) { el.classList.add('pywebview-drag-region'); el.style.cursor = 'move'; }
-  });
-})();
-"""
+# de la pagina, y el panel ya tiene su propio arrastre con el raton para seleccionar un rango de
+# fechas en el grafico (app.js, arrastreDesde). Solo el titulo es zona de arrastre, con el selector
+# que pywebview aplica en cada carga de pagina (el panel se recarga solo cada 60 s).
+SELECTOR_ARRASTRE = ".cab h1, #sub"
 
 _EVENT_SYSTEM_FOREGROUND = 0x0003
 _WINEVENT_OUTOFCONTEXT = 0x0000
@@ -46,22 +39,36 @@ _WINEVENTPROC = ctypes.WINFUNCTYPE(
     None, wintypes.HANDLE, wintypes.DWORD, wintypes.HWND,
     wintypes.LONG, wintypes.LONG, wintypes.DWORD, wintypes.DWORD)
 
-# Sin esto, ctypes asume que FindWindowW/SetWinEventHook devuelven "int" (32 bits con signo) en
+# Sin esto, ctypes asume que GetAncestor/SetWinEventHook devuelven "int" (32 bits con signo) en
 # vez de un handle de 64 bits: en Windows de 64 bits un HWND/HWINEVENTHOOK por encima de 0x7fffffff
 # saldria truncado o en negativo, rompiendo toda comparacion "hwnd != _hwnd" de mas abajo (mismo
-# tipo de bug que el de use_last_error en infobar/credenciales_windows.py).
-ctypes.windll.user32.FindWindowW.restype = wintypes.HWND
-ctypes.windll.user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+# tipo de fallo que el de los handles en infobar/claves.py).
+ctypes.windll.user32.GetAncestor.restype = wintypes.HWND
+ctypes.windll.user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
 ctypes.windll.user32.SetWinEventHook.restype = wintypes.HANDLE
 ctypes.windll.user32.SetWinEventHook.argtypes = [
     wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE, _WINEVENTPROC,
     wintypes.DWORD, wintypes.DWORD, wintypes.DWORD]
 
 
+_GA_ROOTOWNER = 3
+
+
+def _escala():
+    """Factor de escala de la pantalla (1.0 al 100 %, 1.5 al 150 %). pywebview marca el proceso como consciente de DPI,
+    así que el cursor y el área de trabajo llegan en píxeles físicos, mientras que create_window()/move() esperan
+    píxeles lógicos y los vuelven a multiplicar por la escala: sin dividir, el popover sale fuera de la pantalla."""
+    try:
+        return max(1.0, ctypes.windll.user32.GetDpiForSystem() / 96.0)
+    except (AttributeError, OSError):           # Windows anterior a 10 (1607)
+        return 1.0
+
+
 def _posicion_cursor():
     pt = wintypes.POINT()
     ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-    return pt.x, pt.y
+    e = _escala()
+    return pt.x / e, pt.y / e
 
 
 def area_trabajo():
@@ -70,7 +77,8 @@ def area_trabajo():
     SPI_GETWORKAREA = 0x0030
     r = wintypes.RECT()
     ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(r), 0)
-    return r.left, r.top, r.right, r.bottom
+    e = _escala()
+    return r.left / e, r.top / e, r.right / e, r.bottom / e       # en píxeles lógicos, como ANCHO y ALTO
 
 
 def _posicion():
@@ -80,20 +88,34 @@ def _posicion():
     izq, arriba, derecha, abajo = area_trabajo()
     x = min(max(cx - ANCHO, izq), derecha - ANCHO)
     y = min(max(cy - ALTO, arriba), abajo - ALTO)
-    return x, y
+    return int(x), int(y)
+
+
+def _es_del_popover(hwnd):
+    """La ventana es el popover o un diálogo suyo (alert, guardar el CSV, un desplegable nativo): esas no lo cierran."""
+    if hwnd == _hwnd:
+        return True
+    return bool(hwnd) and ctypes.windll.user32.GetAncestor(hwnd, _GA_ROOTOWNER) == _hwnd
+
+
+def _ocultar():
+    """Oculta y deja la página en blanco: oculto, el panel seguiría recargándose cada 60 s (y regenerándose en el servidor)
+    sin que nadie lo mire. Cada apertura carga una URL nueva con su ticket. Llamar con _lock tomado."""
+    global _visible
+    _visible = False
+    _ventana.hide()
+    _ventana.load_url("about:blank")
 
 
 def _al_cambiar_primer_plano(hook, evento, hwnd, id_objeto, id_hijo, id_hilo_evento, tiempo_ms):
     """Se dispara con CUALQUIER cambio de ventana en primer plano del sistema (no solo de este
     proceso): si el popover esta visible y la nueva ventana en primer plano no es el, se oculta --
     el "clic fuera cierra" de un popover nativo, pedido explicitamente."""
-    global _visible
-    if _hwnd and _visible and hwnd != _hwnd:
+    if _hwnd and _visible and not _es_del_popover(hwnd):
         with _lock:
             if _visible:
-                _visible = False
                 try:
-                    _ventana.hide()
+                    _ocultar()
                 except Exception:
                     pass   # nada que loguear aqui: no hay `log` a mano en el callback de ctypes
 
@@ -124,17 +146,38 @@ def _hilo_vigilar_foco(log):
         ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
 
 
-def crear(url_inicial):
-    """Crea la ventana oculta (requiere TIENE_WEBVIEW) y arranca el hilo que la cierra sola al
-    clicar fuera. Llamar una vez, desde main()."""
+def crear():
+    """Crea la ventana oculta y en blanco (requiere TIENE_WEBVIEW): oculta con el panel cargado se recargaria cada 60 s
+    sin que nadie la mire. El panel se carga al mostrarla. Llamar una vez, desde main()."""
     global _ventana
     izq, arriba, derecha, abajo = area_trabajo()
+    webview.settings["DRAG_REGION_SELECTOR"] = SELECTOR_ARRASTRE
     _ventana = webview.create_window(
-        TITULO_VENTANA, url=url_inicial, width=ANCHO, height=ALTO,
-        x=derecha - ANCHO, y=max(arriba, abajo - ALTO),
+        TITULO_VENTANA, url="about:blank", width=ANCHO, height=ALTO,
+        x=int(derecha - ANCHO), y=int(max(arriba, abajo - ALTO)),
         hidden=True, frameless=True, on_top=True, resizable=False, easy_drag=False,
         background_color="#212124")
+    _ventana.events.closing += _al_cerrar
     return _ventana
+
+
+def _al_cerrar():
+    """Alt+F4 sobre el popover cerraría la única ventana y webview.start() volvería: el icono seguiría vivo sin poder
+    abrir nada. Salvo al salir, se cancela el cierre y se oculta."""
+    global _visible
+    if _saliendo:
+        return True
+    # sin _lock: este evento llega en el hilo de la interfaz, y alternar() puede tener el cerrojo esperando a ese mismo hilo
+    _visible = False
+    try:
+        _ventana.hide()
+    except Exception:
+        pass
+    return False
+
+
+def saliendo():
+    return _saliendo
 
 
 def iniciar_vigilancia_foco(log):
@@ -143,40 +186,33 @@ def iniciar_vigilancia_foco(log):
 
 def alternar(url_fresca, log):
     """Toggle mostrar/ocultar. Si ya esta visible, lo oculta; si no, carga el panel fresco y lo
-    muestra junto al cursor.
+    muestra junto al cursor. `url_fresca` es una funcion (costbar.url_panel): el ticket solo se pide al mostrar.
 
-    Orden importante dentro de la rama de mostrar: show() -> _visible=True -> move() ->
-    evaluate_js(), en ese orden exacto.
+    Orden importante dentro de la rama de mostrar: show() -> _visible=True -> move(), en ese orden exacto.
     - show() antes que move(): move() espera a que el evento "shown" se haya disparado ALGUNA VEZ
       (API de pywebview); en el primerisimo click hay que mostrar primero (en la posicion inicial
       de create_window, ya razonable) y solo entonces reposicionar. En el resto de clicks "shown"
       ya esta disparado y move() no espera nada.
-    - _visible=True justo tras show(), ANTES de move()/resolver el hwnd/evaluate_js: si cualquiera
-      de esos pasos lanza una excepcion, la ventana ya esta fisicamente visible en pantalla: que
-      _visible siga en False dejaria el popover visible pero "atascado" (ni el toggle de clic ni
-      el cierre automatico al clicar fuera funcionarian, los dos dependen de este flag).
-    - evaluate_js() la ULTIMA: espera a que la pagina este lista (puede tardar 1-2 s en cargar el
-      panel entero); si move() fuera despues de evaluate_js, el popover se veria aparecer en la
-      posicion vieja (la del click anterior) y "saltar" a la correcta 1-2 s mas tarde -- el bug
-      original reportado en pruebas reales."""
+    - _visible=True justo tras show(), ANTES de move()/resolver el hwnd: si cualquiera de esos pasos
+      lanza una excepcion, la ventana ya esta fisicamente visible en pantalla: que _visible siga en
+      False dejaria el popover visible pero "atascado" (ni el toggle de clic ni el cierre automatico
+      al clicar fuera funcionarian, los dos dependen de este flag)."""
     global _visible, _hwnd
     with _lock:
         if _visible:
-            _visible = False
             try:
-                _ventana.hide()
+                _ocultar()
             except Exception as e:
                 log(f"bandeja: ERROR popover (ocultar) {type(e).__name__}: {e}")
             return
         try:
-            _ventana.load_url(url_fresca)
+            _ventana.load_url(url_fresca())
             _ventana.show()
             _visible = True
             x, y = _posicion()
             _ventana.move(x, y)
-            if not _hwnd:   # no "is None": 0 (no encontrado aun) debe reintentarse tambien
-                _hwnd = ctypes.windll.user32.FindWindowW(None, TITULO_VENTANA)
-            _ventana.evaluate_js(_JS_ZONA_ARRASTRE)
+            if not _hwnd:   # el de esta ventana, no el primero que se llame "CostGuard"
+                _hwnd = _ventana.native.Handle.ToInt64()
         except Exception as e:
             log(f"bandeja: ERROR popover {type(e).__name__}: {e}")
 
@@ -185,6 +221,8 @@ def cerrar(log):
     """Para _accion_salir: destruye la ventana (termina webview.start(), bloqueante en el hilo
     principal). Protegido por el mismo lock que mostrar/ocultar para no pisarse con un cierre
     automatico en curso."""
+    global _saliendo
+    _saliendo = True
     with _lock:
         if _ventana is None:
             return

@@ -98,10 +98,19 @@ def avisar(titulo, texto):
 
 # ---------------------------------------------------------------- procesos y cerrojos portables
 
-def grupo_nuevo_kwargs():
-    """Argumentos de Popen para que el proceso hijo y sus hijos se puedan matar juntos: sesión nueva en POSIX, grupo nuevo en Windows."""
+def sin_ventana_kwargs():
+    """Argumentos de subprocess para que un programa de consola (ssh, taskkill) no abra su propia ventana en Windows: la bandeja
+    corre con pythonw.exe, sin consola, y cada hijo sin esta marca haría parpadear una ventana negra en cada ciclo."""
     if os.name == "nt":
-        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    return {}
+
+
+def grupo_nuevo_kwargs():
+    """Argumentos de Popen para que el proceso hijo y sus hijos se puedan matar juntos: sesión nueva en POSIX, grupo nuevo en Windows
+    (y sin ventana de consola)."""
+    if os.name == "nt":
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)}
     return {"start_new_session": True}
 
 
@@ -109,7 +118,7 @@ def matar_arbol(proc):
     """Mata a `proc` y a todo lo que haya lanzado. No falla si ya terminó."""
     if os.name == "nt":
         try:
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=10)
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=10, **sin_ventana_kwargs())
         except (OSError, subprocess.SubprocessError):
             pass
         try:

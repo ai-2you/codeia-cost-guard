@@ -32,12 +32,12 @@ venv/bin/python barra.py --abre
 # infobar/bandeja_windows_menu.py): necesita pystray==0.19.5 (ya en requirements.txt con el
 # marker sys_platform == "win32") ademas de pillow.
 python -m venv venv
-venv\Scripts\pip install pillow pystray==0.19.5
+venv\Scripts\pip install -r requirements.txt
 venv\Scripts\python bandeja_windows.py
 ```
 
-Si en cambio tocas `infobar/credenciales_windows.py` (Credential Manager de Windows), no hace falta
-instalar nada extra: usa solo `ctypes`/`ctypes.wintypes` de la biblioteca estandar.
+El Administrador de credenciales de Windows (`infobar/claves.py`) no necesita nada extra: usa solo
+`ctypes` de la biblioteca estándar.
 
 Hay suite de tests con `unittest` (sin dependencias, salvo `tzdata` en Windows para los tests de
 zona horaria; ver la sección Tests de `README.md`):

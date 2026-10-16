@@ -310,5 +310,40 @@ class RutasMezcladasTest(unittest.TestCase):
         self.assertEqual(lectores_logs._posix(None), "")
 
 
+
+class ProcesosSinVentanaTest(unittest.TestCase):
+    """La bandeja corre con pythonw.exe: cada hijo de consola sin CREATE_NO_WINDOW abriría su propia ventana."""
+
+    def test_en_windows_los_hijos_no_abren_consola_y_siguen_en_grupo_propio(self):
+        with mock.patch.object(plataforma.os, "name", "nt"), \
+             mock.patch.object(plataforma.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True), \
+             mock.patch.object(plataforma.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200, create=True):
+            self.assertEqual(plataforma.sin_ventana_kwargs(), {"creationflags": 0x08000000})
+            self.assertEqual(plataforma.grupo_nuevo_kwargs(), {"creationflags": 0x08000200})
+
+    def test_fuera_de_windows_no_cambia_nada(self):
+        if os.name == "nt":
+            self.skipTest("solo POSIX")
+        self.assertEqual(plataforma.sin_ventana_kwargs(), {})
+        self.assertEqual(plataforma.grupo_nuevo_kwargs(), {"start_new_session": True})
+
+    def test_ssh_y_alta_lanzan_sin_ventana(self):
+        for rel in ("infobar/servidores_externo.py", "infobar/servidores_alta.py"):
+            with open(os.path.join(RAIZ, rel), encoding="utf-8") as f:
+                self.assertIn("sin_ventana_kwargs()", f.read(), rel)
+
+
+class PuertoExclusivoTest(unittest.TestCase):
+    def test_un_segundo_servidor_no_comparte_el_puerto(self):
+        from infobar import servidor_local
+        uno = servidor_local.crear_servidor(0)
+        try:
+            puerto = uno.server_address[1]
+            with self.assertRaises(OSError):
+                servidor_local.crear_servidor(puerto).server_close()
+        finally:
+            uno.server_close()
+
+
 if __name__ == "__main__":
     unittest.main()
