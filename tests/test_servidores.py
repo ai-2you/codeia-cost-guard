@@ -158,8 +158,10 @@ class RevisionCodigoTest(unittest.TestCase):
         self.assertTrue(errores_servidores([dict(base, correo="no")]))
 
     def test_paquetes_en_espera_no_son_pendientes(self):
-        d = servidores_ssh.interpretar(servidores_ssh.secciones("### actualizaciones\n0\nsin-reinicio\nen_espera 3\n"))
+        d = servidores_ssh.interpretar(servidores_ssh.secciones("### actualizaciones\n3\nsin-reinicio\n### espera\ninstalables 0\n"))
         self.assertEqual(d["actualizaciones"], {"pendientes": 0, "reinicio": False, "en_espera": 3})
+        d = servidores_ssh.interpretar(servidores_ssh.secciones("### actualizaciones\n24\nsin-reinicio\n### espera\ninstalables 21\n"))
+        self.assertEqual(d["actualizaciones"], {"pendientes": 21, "reinicio": False, "en_espera": 3})
         d = servidores_ssh.interpretar(servidores_ssh.secciones("### actualizaciones\n3\nsin-reinicio\n"))     # script antiguo
         self.assertEqual(d["actualizaciones"], {"pendientes": 3, "reinicio": False})
 

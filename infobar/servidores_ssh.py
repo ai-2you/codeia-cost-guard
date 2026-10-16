@@ -13,7 +13,7 @@ CLAVE = os.path.expanduser("~/.ssh/infobar_ed25519")
 TOPE_S = 20                 # segundos por servidor, conexion incluida
 TOPE_BYTES = 128 * 1024     # lo que se pasa de aqui se corta (las secciones de v1 van primero y caben): no se tira la lectura entera
 SECCIONES = {"version", "sistema", "memoria", "disco", "sesiones", "puertos", "intentos",
-             "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban", "version_root", "fin_root", "inventario", "webs", "correo"}
+             "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban", "version_root", "fin_root", "inventario", "webs", "correo", "espera"}
 SECCIONES_ROOT = ("servicios", "contenedores", "bastionado_root", "fail2ban", "inventario", "webs")     # las que escribe recoger-root
 MARCADAS = ("intentos", "inventario", "webs")    # secciones de v2 con marco: "n <lineas>" al principio y "fin <lineas> <codigo>" al final
 _MARCO_N = re.compile(r"n ([0-9]{1,6})")
@@ -250,10 +250,13 @@ def interpretar(sec, marcadas=frozenset(), ahora=None):
     a = sec.get("actualizaciones") or []
     if a:
         d["actualizaciones"] = {"pendientes": int(_num(a[0])), "reinicio": len(a) > 1 and a[1] == "reinicio"}
-        # script nuevo: «en_espera N» = paquetes que apt no instala aún (fases de Ubuntu, retenidos): no son pendientes
-        espera = [l.split()[1] for l in a[2:] if len(l.split()) == 2 and l.split()[0] == "en_espera"]
-        if espera:
-            d["actualizaciones"]["en_espera"] = int(_num(espera[0]))
+        # «### espera» (si al script le sobró tiempo): lo que `apt upgrade` instalaría de verdad. El resto está en espera
+        # (actualizaciones por fases de Ubuntu, paquetes retenidos): no son pendientes
+        e = (sec.get("espera") or [""])[0].split()
+        if len(e) == 2 and e[0] == "instalables" and e[1].isdecimal():
+            todos = d["actualizaciones"]["pendientes"]
+            d["actualizaciones"]["pendientes"] = min(todos, int(e[1]))
+            d["actualizaciones"]["en_espera"] = todos - d["actualizaciones"]["pendientes"]
     if "servicios" in sec or "contenedores" in sec:
         d["servicios"] = _servicios(sec.get("servicios") or [], sec.get("contenedores") or [])
     correo = _correo(sec.get("servicios") or [], sec.get("contenedores") or [], sec.get("correo") or [])
