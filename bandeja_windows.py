@@ -207,8 +207,10 @@ def main():
         try:
             import webview
             webview.start()       # bloqueante en el hilo principal (lo exige pywebview)
-            if not popover.saliendo():
-                _usa_popover = False   # la ventana se cerro por otra via: el icono sigue y Abrir panel cae al navegador
+            if not popover.salida_pedida():
+                # la ventana se cerro por otra via (p. ej. un cierre de sesion que otra aplicacion cancelo):
+                # el icono sigue vivo y Abrir panel cae al navegador
+                _usa_popover = False
                 costbar.log("bandeja: el popover se cerro; Abrir panel cae al navegador")
         except Exception as e:
             _usa_popover = False   # el bucle de webview ya no esta vivo: de aqui en mas, navegador

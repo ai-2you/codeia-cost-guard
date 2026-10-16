@@ -21,7 +21,8 @@ TITULO_VENTANA = "CostGuard"
 
 _ventana = None
 _visible = False
-_saliendo = False   # solo "Salir" destruye la ventana; cualquier otro cierre (Alt+F4) la oculta
+_saliendo = False        # la ventana se esta cerrando de verdad (Salir, cierre de sesion, apagado): no se cancela
+_salida_pedida = False   # solo "Salir": distingue el cierre pedido del que hace el sistema
 _hwnd = None   # HWND real de la ventana, resuelto tras el primer show() (no cambia: no se destruye
                # entre show/hide, solo con "Salir" -- por eso basta con resolverlo una vez)
 _lock = threading.Lock()   # mostrar/ocultar/cerrar: protege _visible y _hwnd entre el hilo de
@@ -161,13 +162,22 @@ def crear():
         x=int(derecha - ANCHO), y=int(max(arriba, abajo - ALTO)),
         hidden=True, frameless=True, on_top=True, resizable=False, easy_drag=False,
         background_color="#212124")
-    _ventana.events.shown += _engancha_cierre
+    _ventana.events.before_show += _engancha_cierre
     return _ventana
 
 
 def _engancha_cierre():
-    """El aviso `closing` de pywebview no dice por qué se cierra la ventana: se escucha el FormClosing nativo, que sí."""
+    """El aviso `closing` de pywebview no dice por qué se cierra la ventana: se escucha el FormClosing nativo, que sí.
+    before_show corre en el hilo de la interfaz, con la ventana ya creada (shown llegaria en otro hilo)."""
     _ventana.native.FormClosing += _al_cerrar
+
+
+def _cierra_el_usuario(args):
+    try:
+        from System.Windows.Forms import CloseReason      # pythonnet: el enum de .NET, ya cargado por pywebview
+        return args.CloseReason == CloseReason.UserClosing
+    except Exception:
+        return str(args.CloseReason) == "UserClosing"
 
 
 def _al_cerrar(_emisor, args):
@@ -175,7 +185,7 @@ def _al_cerrar(_emisor, args):
     abrir nada. Si lo cierra el usuario, se cancela y se oculta (en blanco). Cualquier otro motivo (cierre de sesión,
     apagado, el propio Salir) se deja pasar: cancelarlo haría que Windows dijera «CostGuard impide cerrar sesión»."""
     global _visible, _saliendo
-    if _saliendo or str(args.CloseReason) != "UserClosing":
+    if _saliendo or not _cierra_el_usuario(args):
         _saliendo = True
         return
     args.Cancel = True
@@ -188,8 +198,8 @@ def _al_cerrar(_emisor, args):
         pass
 
 
-def saliendo():
-    return _saliendo
+def salida_pedida():
+    return _salida_pedida
 
 
 def iniciar_vigilancia_foco(log):
@@ -236,8 +246,8 @@ def cerrar(log):
     """Para _accion_salir: destruye la ventana (termina webview.start(), bloqueante en el hilo
     principal). Protegido por el mismo lock que mostrar/ocultar para no pisarse con un cierre
     automatico en curso."""
-    global _saliendo
-    _saliendo = True
+    global _saliendo, _salida_pedida
+    _saliendo = _salida_pedida = True
     with _lock:
         if _ventana is None:
             return
