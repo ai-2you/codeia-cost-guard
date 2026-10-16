@@ -400,14 +400,16 @@
   function leer(){
     const c = A.config, raiz = $("vista-ajustes");
     // un plan renombrado arrastra los orígenes y presupuestos que lo nombraban (se leen después del DOM con el nombre viejo)
-    const renombres = {};
+    const renombres = {}, avisos = [];
     raiz.querySelectorAll(".prov").forEach(div => {
       const p = c.proveedores.find(x => x.nombre === div.dataset.nombre); if (!p) return;
       div.querySelectorAll("[data-k]").forEach(i => {
         const k = i.dataset.k;
         if (k === "nombre") {
           const nuevo = i.value.trim();
-          if (nuevo && nuevo !== p.nombre && !c.proveedores.some(x => x !== p && x.nombre === nuevo)) {
+          if (nuevo && nuevo !== p.nombre && c.proveedores.some(x => x !== p && x.nombre === nuevo))
+            avisos.push(`Ya hay un plan llamado «${nuevo}»: elige otro nombre para «${p.nombre}».`);
+          else if (nuevo && nuevo !== p.nombre) {
             renombres[p.nombre] = nuevo;
             const info = A.proveedores.find(x => x.nombre === p.nombre); if (info) info.nombre = nuevo;
             p.nombre = nuevo; div.dataset.nombre = nuevo;
@@ -453,10 +455,12 @@
       [["g-int-n", "intervalo_normal_s"], ["g-int-i", "intervalo_incidencia_s"]].forEach(([id, k]) => { const v = entero($(id).value); if (v) c[k] = v; else delete c[k]; });
     }
     if ($("g-hora")) { c.limite_hora_tokens = entero($("g-hora").value); c.ignorar = lista($("g-ignorar").value); }
+    return avisos;
   }
 
   function guardar(){
-    const m = $("msg-guardar"); leer();
+    const m = $("msg-guardar"), avisos = leer();
+    if (avisos.length) { m.className = "msg err"; m.textContent = avisos.join(" "); return; }
     const envio = Object.assign({}, A.config);
     if (envio.servidores) envio.servidores = envio.servidores.filter(s => s.id || s.nombre || s.ssh);       // una ficha nueva que se dejó en blanco no bloquea el guardado
     if (envio.presupuestos) envio.presupuestos = envio.presupuestos.filter(f => f.nombre && f.tokens > 0);

@@ -356,7 +356,7 @@ def crear_servidor(puerto=PUERTO):
                 try:
                     r = informe()
                     c = con_revision(sin_secretos(cfg()))
-                    provs = [{"nombre": p["nombre"], "clave_guardada": bool(claves.leer_clave(ajustes.cuenta_de(p["nombre"]))),
+                    provs = [{"nombre": p["nombre"], "clave_guardada": bool(claves.leer_clave(ajustes.cuenta_de(p["nombre"], p.get("uso_api")))),
                               "api_soportada": ajustes.api_soportada(p)} for p in (c.get("proveedores") or [])]
                     # claves de los paneles (Dokploy/Easypanel) de cada servidor, por host
                     paneles = {}
@@ -475,9 +475,11 @@ def crear_servidor(puerto=PUERTO):
             if not isinstance(cuerpo, dict):
                 return self._json(400, {"ok": False, "error": "no es un objeto"})
             c = cfg()
-            conocidas = {ajustes.cuenta_de(p["nombre"]): p["nombre"] for p in c.get("proveedores") or []}
+            provs = {p["nombre"]: p for p in c.get("proveedores") or []}
+            conocidas = {ajustes.cuenta_de(n, p.get("uso_api")): n for n, p in provs.items()}
             conocidas.update({_cuenta_panel(s): s["nombre"] for s in c.get("servidores") or [] if _cuenta_panel(s)})
-            cuenta = cuerpo.get("cuenta") or ajustes.cuenta_de(str(cuerpo.get("proveedor") or ""))
+            nombre = str(cuerpo.get("proveedor") or "")
+            cuenta = cuerpo.get("cuenta") or ajustes.cuenta_de(nombre, (provs.get(nombre) or {}).get("uso_api"))
             if cuenta not in conocidas or not claves.cuenta_valida(cuenta):
                 return self._json(400, {"ok": False, "error": "cuenta desconocida: añade antes el proveedor o servidor"})
             if cuerpo.get("borrar"):
