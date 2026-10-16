@@ -2,6 +2,20 @@
 
 Las versiones anteriores a la 0.3.0 están en las etiquetas de git (`v0.1.1`, `v0.1.2`, `v0.2.0`).
 
+## 0.5.1 — 2026-10-16
+
+La ventana del panel en Windows pasa a ser una ventana normal, a partir de la contribución de @ai-2you (PR #7).
+
+### Windows
+- **Ventana con marco nativo:** se minimiza, se maximiza y se redimensiona, y ya no se cierra sola al pulsar fuera. La X la oculta
+  (la bandeja sigue en marcha) y solo «Salir» cierra la aplicación; el cierre de sesión y el apagado se dejan pasar siempre.
+- **El clic en el icono siempre la trae al frente:** la restaura si estaba minimizada (maximizada incluida) y ya no la oculta sin que
+  se note cuando está tapada por otras ventanas. Al reabrirla se coloca junto al icono con el tamaño que tenga.
+- Desaparecen el gancho de foco del sistema y la zona de arrastre del popover, que con el marco nativo ya no hacen falta.
+
+### Límites conocidos
+- Sigue sin probarse en un Windows real tras la integración; el diseño con marco nativo sí lo probó quien lo propuso.
+
 ## 0.5.0 — 2026-10-16
 
 Esta versión añade la bandeja de Windows, a partir de la contribución de @ai-2you (PR #6), integrada con el motor actual.
