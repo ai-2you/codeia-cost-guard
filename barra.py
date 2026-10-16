@@ -68,6 +68,12 @@ def tema_activo():
     return tema_del_sistema() if pref == "sistema" else pref
 
 
+def tema_para_trabajador():
+    """tema_activo() desde el hilo trabajador, que no tiene bucle de Cocoa: con su propio pool para no acumular objetos."""
+    with objc.autorelease_pool():
+        return tema_activo()
+
+
 def barra_oscura(boton):
     """Apariencia REAL de la barra de menús (depende del fondo de pantalla, no del tema elegido para el desplegable)."""
     try:
@@ -128,7 +134,7 @@ class Barra(NSObject):
         self.punto = None
         from infobar import permisos
         permisos.excluir_datos_sensibles()                  # base y logs fuera de Time Machine
-        self.trabajador = Trabajador(self.entregar)
+        self.trabajador = Trabajador(self.entregar, tema=tema_para_trabajador)
         self.trabajador.start()
         self.ingesta = None
         if str(costbar.cfg().get("almacen") or "sombra").lower() != "desactivado":
@@ -261,9 +267,19 @@ class Barra(NSObject):
             return None
         tema = tema_activo()
         if self.pestana() == "servidores":
-            img = (self.conjunto.get("servidores", {}).get(self.servidor_activo()) or {}).get(tema)
+            imgs = self.conjunto.get("servidores", {}).get(self.servidor_activo()) or {}
         else:
-            img = (self.conjunto.get("agentes") or {}).get(tema)
+            imgs = self.conjunto.get("agentes") or {}
+        img = imgs.get(tema)
+        if img:
+            self._tema_avisado = None
+        else:
+            # solo se pinta el tema que se ve: si acaba de cambiar, se enseña el otro mientras el trabajador repinta
+            # (se le avisa una vez por tema: si Chrome falla, el trabajador lo reintenta a su ritmo, no a cada repintado)
+            if getattr(self, "_tema_avisado", None) != tema:
+                self._tema_avisado = tema
+                self.trabajador.pide("tema")
+            img = next(iter(imgs.values()), None)
         return img if img and os.path.exists(img[0]) else None
 
     @objc.python_method
@@ -449,7 +465,7 @@ class Barra(NSObject):
 
     def tema_(self, it):
         costbar.guardar_ui({"tema": str(it.representedObject())})
-        self.muestra()              # instantaneo: los dos temas ya estan pintados
+        self.muestra()              # con el tema anterior hasta que el trabajador pinte el nuevo (unos segundos)
 
     def refrescarAhora_(self, _):
         self.refresca_ya()

@@ -97,11 +97,16 @@ def html_a_png(html_txt, destino, chrome):
         shutil.rmtree(trabajo, ignore_errors=True)
 
 
-def renderizar(r, cache, servidores_cfg, solo_servidor=None, previo=None):
-    """Pinta la pestana Agentes (si hay `r`) y la de cada servidor, en claro y oscuro.
+TEMAS = ("claro", "oscuro")
 
-    Devuelve el conjunto {"gen", "agentes": {tema: (ruta, ancho, alto)}, "servidores": {nombre: {...}}}.
-    Con `solo_servidor` repinta solo ese (modo incidencia) y reutiliza el resto de `previo`."""
+
+def renderizar(r, cache, servidores_cfg, solo_servidor=None, previo=None, temas=TEMAS, parar=None):
+    """Pinta la pestana Agentes (si hay `r`) y la de cada servidor en los `temas` pedidos (cada PNG es un Chrome: ~1 s).
+
+    Devuelve el conjunto {"gen", "agentes": {tema: (ruta, ancho, alto)}, "servidores": {nombre: {...}}}, solo con los `temas`
+    pedidos en lo que se repinta (lo que no se repinta conserva su imagen de reserva, aunque sea del otro tema). Con `solo_servidor`
+    repinta solo ese (modo incidencia) y reutiliza el resto de `previo`. `parar()` se mira antes
+    de cada PNG: si devuelve True la tanda se corta (un clic espera como mucho al PNG en curso) y se entrega lo ya pintado."""
     chrome = navegador()
     if chrome is None:
         log("render: no hay Chrome, Chromium, Brave ni Edge instalado")
@@ -109,31 +114,53 @@ def renderizar(r, cache, servidores_cfg, solo_servidor=None, previo=None):
     os.makedirs(carpeta(), exist_ok=True)
     gen = int(time.time() * 1000)
     ahora = time.time()
-    nuevas = 0
     out = {"gen": gen, "agentes": dict((previo or {}).get("agentes") or {}),
            "servidores": dict((previo or {}).get("servidores") or {})}
-    for oscuro, tema in ((False, "claro"), (True, "oscuro")):
+    def pinta(html, ruta):
+        if parar is not None and parar():
+            raise _Cortado
+        return html_a_png(html, ruta, chrome)
+    try:
+        _pinta_temas(r, cache, servidores_cfg, solo_servidor, temas, out, gen, ahora, pinta)
+    except _Cortado:
+        pass
+    nuevas, repintados = out.pop("_nuevas"), out.pop("_repintados")
+    if "agentes" in repintados:
+        out["agentes"] = {t: v for t, v in out["agentes"].items() if t in temas}
+    out["servidores"] = {n: ({t: v for t, v in v.items() if t in temas} if n in repintados else v)
+                         for n, v in out["servidores"].items()
+                         if n in {s["nombre"] for s in servidores_cfg} or (not servidores_cfg and n == "")}
+    permisos.purgar_render()
+    return out if nuevas else previo        # si Chrome no pinto nada, el trabajador lo reintentara
+
+
+class _Cortado(Exception):
+    """La tanda se corta porque hay un clic esperando."""
+
+
+def _pinta_temas(r, cache, servidores_cfg, solo_servidor, temas, out, gen, ahora, pinta):
+    out["_nuevas"], out["_repintados"] = 0, set()
+    for tema in temas:
+        oscuro = tema == "oscuro"
         if r is not None:
             ruta = os.path.join(carpeta(), f"{gen}-agentes-{tema}.png")
-            tam = html_a_png(desplegable_agentes.documento(r, oscuro, ahora), ruta, chrome)
+            tam = pinta(desplegable_agentes.documento(r, oscuro, ahora), ruta)
             if tam:
                 out["agentes"][tema] = (ruta, tam[0], tam[1], len(desplegable_agentes.BOTONES), False, [])
-                nuevas += 1
+                out["_nuevas"] += 1
+                out["_repintados"].add("agentes")
         nombres = [s["nombre"] for s in servidores_cfg] or [""]
         for i, nombre in enumerate(nombres):
             if solo_servidor and nombre != solo_servidor:
                 continue
             ruta = os.path.join(carpeta(), f"{gen}-servidor{i}-{tema}.png")
-            tam = html_a_png(desplegable_servidores.documento(nombre, cache, servidores_cfg, oscuro, ahora), ruta, chrome)
+            tam = pinta(desplegable_servidores.documento(nombre, cache, servidores_cfg, oscuro, ahora), ruta)
             if tam:
                 # con la imagen va la forma de sus zonas de clic (botones y selector de ESA imagen)
                 botones = len(desplegable_servidores.BOTONES) if servidores_cfg else 0
-                out["servidores"].setdefault(nombre, {})[tema] = (ruta, tam[0], tam[1], botones, bool(servidores_cfg), tam[2])
-                nuevas += 1
-    out["servidores"] = {n: v for n, v in out["servidores"].items()
-                         if n in {s["nombre"] for s in servidores_cfg} or (not servidores_cfg and n == "")}
-    permisos.purgar_render()
-    return out if nuevas else previo        # si Chrome no pinto nada, el trabajador lo reintentara
+                out["servidores"][nombre] = dict(out["servidores"].get(nombre) or {}, **{tema: (ruta, tam[0], tam[1], botones, bool(servidores_cfg), tam[2])})
+                out["_nuevas"] += 1
+                out["_repintados"].add(nombre)
 
 
 VIDA_PNG = 600               # s: un PNG que ya no usa nadie se borra pasado este tiempo
