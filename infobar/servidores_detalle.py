@@ -11,7 +11,7 @@ import time
 
 import urllib.parse
 
-from . import servidores_ciclo, servidores_copias, servidores_historico as sh, servidores_seguimiento as sg
+from . import servidores_ciclo, servidores_copias, servidores_historico as sh, servidores_panel, servidores_seguimiento as sg
 from .config_y_estado import cfg, log
 from .servidores import servidores_validos
 from .servidores_registro import webs_vigentes
@@ -67,13 +67,13 @@ def _eventos(con, sid, desde):
     return todos[:MAX_EVENTOS], truncado
 
 
-def _panel(con, sid, nombre, webs_vigiladas, ahora):
+def _panel(con, sid, s, webs_vigiladas, ahora):
     """Lo que dice el panel (Dokploy) de este servidor: árbol de servicios con sus dominios, y las copias con su evaluación. None si no hay panel configurado o aún no se ha leído.
     Un dominio solo se marca como «vigilado» si el dueño ya vigila una web de ese nombre: el panel nunca añade webs."""
-    entrada = (servidores_ciclo.leer_cache().get("servidores") or {}).get(nombre)
+    entrada = (servidores_ciclo.leer_cache().get("servidores") or {}).get(s["nombre"])
     p = entrada.get("panel") if isinstance(entrada, dict) and isinstance(entrada.get("panel"), dict) else None
-    if p is None:
-        return None
+    if p is None or not servidores_panel.cuenta(s) or p.get("cuenta") != servidores_panel.cuenta(s):
+        return None                                                  # sin panel, o lo guardado es de otro panel
     hosts = {urllib.parse.urlsplit(u).hostname for u in webs_vigiladas}
     por_dueno = {}
     for d in p.get("dominios") or []:
@@ -83,7 +83,7 @@ def _panel(con, sid, nombre, webs_vigiladas, ahora):
                  for sv in (p.get("servicios") or []) if isinstance(sv, dict)]
     copias = [{k: c[k] for k in ("tipo", "etiqueta", "ultima_ok", "previa_ok", "intervalo_s", "ultimo_estado", "ultimo_ts", "evaluacion")} for c in servidores_copias.lista(con, sid, ahora)]
     return {"ok_en": p.get("ok_en"), "intento_en": p.get("intento_en"), "error": p.get("error") or "", "version": p.get("version"), "version_no_probada": bool(p.get("version_no_probada")),
-            "truncadas": bool(p.get("truncadas")), "n_servicios": p.get("n_servicios"), "servicios": servicios, "copias": copias}
+            "truncadas": bool(p.get("truncadas")), "ventana_s": servidores_panel.VENTANA_S, "n_servicios": p.get("n_servicios"), "servicios": servicios, "copias": copias}
 
 
 def atiende(q, ahora=None, conf=None):
@@ -122,7 +122,7 @@ def atiende(q, ahora=None, conf=None):
                                "intento_en": fila["intento_en"] or None, "vigilado_desde": fila["creado_en"]},
                   "webs": _webs(con, sid, webs_vigentes(conf).get(sid, set()), ahora), "recursos": recursos,
                   "eventos": eventos, "truncado": truncado, "recursos_truncado": len(recursos) >= MAX_RECURSOS,
-                  "panel": _panel(con, sid, s["nombre"], webs_vigentes(conf).get(sid, set()), ahora), "horas": {"con_datos": horas, "total": total_horas}}
+                  "panel": _panel(con, sid, s, webs_vigentes(conf).get(sid, set()), ahora), "horas": {"con_datos": horas, "total": total_horas}}
         con.execute("COMMIT")
         return 200, salida
     except sqlite3.DatabaseError as e:                     # base dañada, ocupada, sin tablas: nunca se cita el texto del error

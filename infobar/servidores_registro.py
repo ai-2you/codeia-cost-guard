@@ -87,7 +87,7 @@ class Historial:
     def __init__(self, reloj=time.time):
         self.reloj = reloj
         self.no_antes = 0
-        self.no_antes_panel = 0
+        self.no_antes_panel = {}                # por servidor: el fallo de las copias de uno no congela las de los demás
         self.no_antes_webs = 0                 # el retroceso del seguimiento de webs es aparte: sus fallos no frenan el historial SSH
         self.ultimo_mantenimiento = 0
         self.firma = None
@@ -136,7 +136,7 @@ class Historial:
 
     def registrar_panel(self, servidor, r, ahora):
         """Anota las copias de una lectura buena del panel y devuelve {n, antiguas, sin_buena} de ese servidor (None si no se pudo). Nunca lanza."""
-        if self.reloj() < self.no_antes_panel or not servidor.get("id"):
+        if not servidor.get("id") or self.reloj() < self.no_antes_panel.get(servidor["id"], 0):
             return None
         try:
             from . import servidores_copias as sc
@@ -147,7 +147,10 @@ class Historial:
                     con.execute("BEGIN IMMEDIATE")
                     try:
                         sh._alta_servidor(con, sid, servidor["nombre"], ahora)
-                        sc.sincronizar(con, sid, {x["id"] for x in r["servicios"]})
+                        sc.sincronizar(con, sid, {x["id"] for x in r["servicios"]} | {"panel"})            # la copia del propio Dokploy no es un servicio
+                        for motivo, veces in (r.get("descartes") or {}).items():
+                            if veces:
+                                sh._descartar(con, motivo, sid)
                         sc.anota(con, sid, r["copias"], ahora)
                         filas = sc.lista(con, sid, ahora)
                         con.execute("COMMIT")
@@ -158,7 +161,7 @@ class Historial:
                     con.close()
             return {"n": len(filas), "antiguas": sum(1 for f in filas if f["evaluacion"] == "antigua"), "sin_buena": sum(1 for f in filas if f["evaluacion"] == "sin_buena")}
         except Exception as e:
-            self.no_antes_panel = self.reloj() + RETROCESO_S
+            self.no_antes_panel[servidor["id"]] = self.reloj() + RETROCESO_S
             log(f"copias del panel: {type(e).__name__}; no se reintenta hasta dentro de una hora")
             return None
 

@@ -17,7 +17,7 @@ import tempfile
 import threading
 import time
 
-from . import plataforma, rutas, servidores_copias, servidores_historico as sh, servidores_ciclo, webs_sondeo
+from . import plataforma, rutas, servidores_copias, servidores_historico as sh, servidores_ciclo, servidores_panel, webs_sondeo
 from .config_y_estado import cfg, log
 from .servidores import servidores_validos
 from .servidores_datos import FueraDeRango, porcentaje
@@ -38,7 +38,7 @@ TEXTO = {"web_caida": "Una web de uno de tus servidores no responde correctament
          "despliegue_fallido": "El último despliegue de una aplicación de uno de tus servidores ha fallado.",
          "panel_sin_lectura": "CostGuard no puede leer el panel de uno de tus servidores."}
 PANEL_REGLAS = frozenset({"copia_antigua", "despliegue_fallido"})
-VENTANA_PANEL_S = 960              # 3 lecturas de 5 minutos y un minuto de margen
+VENTANA_PANEL_S = servidores_panel.VENTANA_S
 DESPLIEGUE_MIN_S, DESPLIEGUE_MAX_S = 600, 7 * 86400
 BANDA = "banda"             # entre el umbral de aviso y el de rearme: antes de avisar vale «no», después «no sé»
 DISCO_ALTO, DISCO_BAJO = 90, 85
@@ -193,12 +193,14 @@ def _clave_despliegue(sid, servicio):
 
 
 def _desde_panel(servidores, entradas_cache, ahora):
-    """Frescos {id de servidor: panel} y las condiciones que salen de la caché del panel: despliegue fallido y panel sin lectura."""
-    frescos, out = {}, {}
+    """(frescos, con copias al día, condiciones): paneles con lectura buena reciente, paneles cuyas copias también se anotaron, y las condiciones que salen de la caché del
+    panel (despliegue fallido y panel sin lectura). Un panel de otra cuenta (se quitó o cambió de dirección) no cuenta."""
+    frescos, copias_al_dia, out = {}, {}, {}
     for s in servidores:
         e = entradas_cache.get(s["nombre"])
         p = e.get("panel") if isinstance(e, dict) and isinstance(e.get("panel"), dict) else None
-        if p is None:
+        cta = servidores_panel.cuenta(s)
+        if p is None or not cta or p.get("cuenta") != cta:
             continue
         ok_en = p.get("ok_en") if isinstance(p.get("ok_en"), (int, float)) and not isinstance(p.get("ok_en"), bool) else None
         empezo = p.get("empezo_en") if isinstance(p.get("empezo_en"), (int, float)) and not isinstance(p.get("empezo_en"), bool) else None
@@ -208,6 +210,8 @@ def _desde_panel(servidores, entradas_cache, ahora):
         if not fresco:
             continue
         frescos[s["id"]] = p
+        if _fresco(p.get("copias_en"), ahora, VENTANA_PANEL_S):
+            copias_al_dia[s["id"]] = p
         for sv in (p.get("servicios") or [])[:2000]:
             if not isinstance(sv, dict) or not isinstance(sv.get("id"), str) or sv.get("tipo") not in ("application", "compose"):
                 continue
@@ -220,7 +224,7 @@ def _desde_panel(servidores, entradas_cache, ahora):
             else:
                 v = None                                  # un error de hace menos de 10 minutos o de hace meses no avisa: lo viejo es informativo en la pestaña
             out[("despliegue_fallido", s["id"], _clave_despliegue(s["id"], sv["id"]))] = v
-    return frescos, out
+    return frescos, copias_al_dia, out
 
 
 def _desde_base(servidores, ahora, frescos=()):
@@ -349,9 +353,9 @@ class Vigilante:
                 red["v"] = bool(self.sin_red())
             return red["v"]
         conds = _desde_cache(servidores, entradas_cache, ahora, ventana, sin_red)
-        frescos, de_panel = _desde_panel(servidores, entradas_cache, ahora)
+        frescos, copias_al_dia, de_panel = _desde_panel(servidores, entradas_cache, ahora)
         conds.update(de_panel)
-        base = _desde_base(servidores, ahora, frescos)
+        base = _desde_base(servidores, ahora, copias_al_dia)
         if base:
             conds.update(base)
         estado, existia = leer(ahora)
@@ -375,11 +379,11 @@ class Vigilante:
             for k, v in conds.items():
                 if v is True:
                     entradas["|".join(k)].update(avisado=ahora, ultimo=ahora)       # línea base: lo que ya está pasando al arrancar no avisa
-        nuevos_paneles = {sid for sid in frescos if sid not in estado["paneles"]}
+        nuevos_paneles = {sid for sid in copias_al_dia if sid not in estado["paneles"]}         # la línea base de un panel espera a que sus copias también estén anotadas
         for k, v in conds.items():
             if v is True and k[0] in PANEL_REGLAS and k[1] in nuevos_paneles:
                 entradas["|".join(k)].update(avisado=ahora, ultimo=ahora)          # línea base de cada panel: lo que ya estaba mal en su primera lectura no avisa
-        estado["paneles"] = sorted(set(estado["paneles"]) | set(frescos))[:200]
+        estado["paneles"] = sorted(set(estado["paneles"]) | set(copias_al_dia))[:200]
         silencio = apagado_global or not estado["base"]
         enviar = []
         for clave, regla, sid in debidas:

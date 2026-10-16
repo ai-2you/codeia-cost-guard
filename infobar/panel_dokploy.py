@@ -20,6 +20,7 @@ import math
 import re
 import socket
 import ssl
+import threading
 import time
 import unicodedata
 import urllib.parse
@@ -85,14 +86,41 @@ def _decimal(texto):
     return v
 
 
-def _get(c, ruta, clave, limite, fin):
+def _get(c, ruta, clave, limite, fin, reloj=time.monotonic):
     """LA única llamada HTTP del módulo. Devuelve (JSON ya analizado, cabecera Date de la respuesta). Lanza ErrorPanel."""
     if ruta not in RUTAS:
         raise ErrorPanel("contrato")
     cabeceras = {"Accept": "application/json", "User-Agent": "infobar/1.0"}
     if ruta != RUTAS[0]:
         cabeceras["x-api-key"] = clave            # la ruta de salud es pública: no se le manda la clave
+    vigilante = threading.Timer(max(0.1, fin - reloj()), _cortar, args=(c,))          # al llegar el plazo total se cierra el socket aunque el panel gotee
+    vigilante.daemon = True
+    vigilante.start()
+    try:
+        return _get_con_plazo(c, ruta, cabeceras, limite, fin, reloj)
+    except (OSError, http.client.HTTPException, ValueError):
+        if reloj() >= fin - 0.01:
+            raise ErrorPanel("plazo")                  # el socket lo cerró el vigilante porque se acabó el plazo total
+        raise
+    finally:
+        vigilante.cancel()
+
+
+def _cortar(c):
+    try:
+        c.close()
+    except Exception:
+        pass
+
+
+def _plazo_de_operacion(c, fin, reloj):
+    if hasattr(c, "sock") and c.sock is not None:
+        c.sock.settimeout(max(0.1, min(PLAZO_PETICION_S, fin - reloj())))
+
+
+def _get_con_plazo(c, ruta, cabeceras, limite, fin, reloj):
     c.request("GET", ruta, headers=cabeceras)
+    _plazo_de_operacion(c, fin, reloj)
     r = c.getresponse()
     if r.status == 401:
         raise ErrorPanel("clave_rechazada")
@@ -106,19 +134,21 @@ def _get(c, ruta, clave, limite, fin):
         raise ErrorPanel("no_json")
     if not (r.getheader("Content-Type") or "").lower().startswith("application/json"):
         raise ErrorPanel("no_json")                # un login HTML de un proxy delante del panel no es «clave rechazada»
-    trozos, total = [], 0
+    datos, total = bytearray(), 0
+    leer_trozo = r.read1 if hasattr(r, "read1") else r.read       # una sola lectura de red por vuelta: el plazo se comprueba entre una y otra
     while True:
-        if time.monotonic() > fin:
+        if reloj() > fin:
             raise ErrorPanel("plazo")
-        trozo = r.read(65536)
+        _plazo_de_operacion(c, fin, reloj)
+        trozo = leer_trozo(65536)
         if not trozo:
             break
         total += len(trozo)
         if total > limite:
             raise ErrorPanel("demasiado_grande")
-        trozos.append(trozo)
+        datos += trozo
     try:
-        return json.loads(b"".join(trozos).decode("utf-8"), parse_constant=_no_finito, parse_float=_decimal), r.getheader("Date")
+        return json.loads(datos.decode("utf-8"), parse_constant=_no_finito, parse_float=_decimal), r.getheader("Date")
     except (ValueError, UnicodeDecodeError, RecursionError):
         raise ErrorPanel("no_json")
 
@@ -203,7 +233,8 @@ def _dominio(f, descartes):
 def _copia(desfase, ahora):
     def normaliza(f, descartes):
         tipo = f.get("kind")
-        dueno, destino = _id(f.get("serviceOwnerId")), _id(f.get("destinationId"))
+        propio = f.get("serviceOwnerId") is None and f.get("serviceOwnerType") == "web-server"          # la copia de la base de datos del propio Dokploy
+        dueno, destino = ("panel" if propio else _id(f.get("serviceOwnerId"))), _id(f.get("destinationId"))
         if tipo not in TIPOS_COPIA:
             return None
         if dueno is None or destino is None:
@@ -218,8 +249,8 @@ def _copia(desfase, ahora):
             descartes["panel_reloj"] = descartes.get("panel_reloj", 0) + 1
             return None
         bd, cop = f.get("databaseType"), f.get("backupType")
-        return {"dueno": dueno, "tipo": tipo, "destino": destino, "bd": _id(bd) if bd is not None else "", "variante": _id(cop) if cop is not None else "", "estado": estado,
-                "ts": ts, "nombre": _texto(f.get("serviceName")), "tipo_servicio": f.get("serviceType") if f.get("serviceType") in TIPOS_SERVICIO else None}
+        return {"dueno": dueno, "tipo": tipo, "destino": destino, "bd": _id(bd) or "", "variante": _id(cop) or "", "estado": estado,         # un valor raro no rompe la identidad: queda vacío
+                "ts": ts, "nombre": "panel-dokploy" if propio else _texto(f.get("serviceName")), "tipo_servicio": f.get("serviceType") if f.get("serviceType") in TIPOS_SERVICIO else None}
     return normaliza
 
 
@@ -271,16 +302,16 @@ def _leer(panel_url, clave, ahora, conectar, reloj):
     ip = ip_publica(u.hostname, puerto)
     c = conectar(u.hostname, ip, puerto, PLAZO_PETICION_S)
     try:
-        salud, _ = _get(c, RUTAS[0], clave, MAX_BYTES, fin)
+        salud, _ = _get(c, RUTAS[0], clave, MAX_BYTES, fin, reloj)
         if not (isinstance(salud, dict) and salud.get("status") == "ok"):
             raise ErrorPanel("contrato")
-        version_texto, _ = _get(c, RUTAS[1], clave, MAX_BYTES, fin)
+        version_texto, _ = _get(c, RUTAS[1], clave, MAX_BYTES, fin, reloj)
         version = _version(version_texto)
         if version < VERSION_MINIMA:
             raise ErrorPanel("version_antigua")
-        servicios, fecha_servicios = _get(c, RUTAS[2], clave, MAX_BYTES_SERVICIOS, fin)
-        dominios, _ = _get(c, RUTAS[3], clave, MAX_BYTES, fin)
-        copias, fecha_copias = _get(c, RUTAS[4], clave, MAX_BYTES, fin)
+        servicios, fecha_servicios = _get(c, RUTAS[2], clave, MAX_BYTES_SERVICIOS, fin, reloj)
+        dominios, _ = _get(c, RUTAS[3], clave, MAX_BYTES, fin, reloj)
+        copias, fecha_copias = _get(c, RUTAS[4], clave, MAX_BYTES, fin, reloj)
     finally:
         try:
             c.close()

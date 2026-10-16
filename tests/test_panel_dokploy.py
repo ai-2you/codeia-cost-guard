@@ -118,6 +118,22 @@ class GarantiaSoloLecturaTest(Base):
         for metodo in ("POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE"):
             self.assertNotIn(metodo, cadenas)
 
+    def test_no_hay_formas_de_escribir_por_la_puerta_de_atras(self):
+        ruta = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "infobar", "panel_dokploy.py")
+        with open(ruta, encoding="utf-8") as f:
+            arbol = ast.parse(f.read())
+        atributos = {n.attr for n in ast.walk(arbol) if isinstance(n, ast.Attribute)}
+        nombres = {n.id for n in ast.walk(arbol) if isinstance(n, ast.Name)}
+        for prohibido in ("putrequest", "putheader", "endheaders", "send", "sendall", "sendfile", "makefile", "urlopen", "Request", "post", "put", "delete", "patch"):
+            self.assertNotIn(prohibido, atributos | nombres, prohibido)
+        for prohibido in ("getattr", "setattr", "eval", "exec", "compile", "__import__"):
+            self.assertNotIn(prohibido, nombres)
+        constantes = [n.value for n in ast.walk(arbol) if isinstance(n, ast.Constant)]
+        self.assertFalse([c for c in constantes if isinstance(c, bytes)])
+        for c in constantes:
+            if isinstance(c, str):
+                self.assertNotIn(c.upper(), {"POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE"})
+
     def test_una_ruta_fuera_de_la_lista_no_sale(self):
         with self.assertRaises(pd.ErrorPanel):
             pd._get(Falso({}), "/api/project.all", CLAVE, 100, 10 ** 12)
@@ -208,6 +224,41 @@ class RespuestasHostilesTest(Base):
         servicios_grandes = [servicio(f"s{i}") for i in range(900)]              # ~ 4,5 MB con icono: cabe en el tope de servicios
         self.assertTrue(self.malo(pd.RUTAS[2], json_resp(servicios_grandes))["ok"])
 
+    def test_un_panel_real_que_gotea_se_corta_a_tiempo(self):
+        import http.client
+        import socket
+        import threading
+        import time
+        servidor = socket.socket()
+        servidor.bind(("127.0.0.1", 0))
+        servidor.listen(1)
+        puerto = servidor.getsockname()[1]
+        parar = threading.Event()
+
+        def gotea():
+            c, _ = servidor.accept()
+            c.recv(4096)
+            c.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\n[")
+            while not parar.is_set():
+                try:
+                    c.sendall(b" ")
+                except OSError:
+                    break
+                parar.wait(0.4)
+            c.close()
+        hilo = threading.Thread(target=gotea, daemon=True)
+        hilo.start()
+        conexion = http.client.HTTPConnection("127.0.0.1", puerto, timeout=1)
+        t0 = time.monotonic()
+        try:
+            with self.assertRaises(pd.ErrorPanel) as cm:
+                pd._get(conexion, pd.RUTAS[2], CLAVE, pd.MAX_BYTES, time.monotonic() + 1.5)
+        finally:
+            parar.set()
+            servidor.close()
+        self.assertEqual(cm.exception.codigo, "plazo")
+        self.assertLess(time.monotonic() - t0, 4.0)                                                  # no esperó a que el panel terminara de gotear
+
     def test_un_panel_que_gotea_se_corta_por_plazo_total(self):
         reloj = iter([0.0, 0.0, 1.0, 2.0, 40.0] + [99.0] * 50)
         lento = Resp(cuerpo=b"[" + b" " * 100000)
@@ -275,6 +326,17 @@ class ListaBlancaTest(Base):
     def test_se_guardan_como_mucho_200_dominios(self):
         r = self.lee(sano(**{pd.RUTAS[3]: json_resp([dominio(host=f"h{i}.ejemplo.com") for i in range(500)])}))
         self.assertEqual(len(r["dominios"]), pd.MAX_DOMINIOS_GUARDADOS)
+
+    def test_la_copia_del_propio_dokploy_es_una_copia_mas_y_no_rompe_la_lectura(self):
+        propia = [copia(i, serviceOwnerId=None, serviceOwnerType="web-server", serviceName=None, deploymentId=f"w{i}") for i in range(10)]
+        r = self.lee(sano(**{pd.RUTAS[4]: json_resp([copia(i, deploymentId=f"y{i}") for i in range(10)] + propia)}))
+        self.assertTrue(r["ok"], r)
+        self.assertEqual({c["dueno"] for c in r["copias"]}, {"bd1", "panel"})
+        self.assertEqual({c["nombre"] for c in r["copias"] if c["dueno"] == "panel"}, {"panel-dokploy"})
+
+    def test_un_tipo_de_base_con_caracteres_raros_no_rompe_la_identidad(self):
+        r = self.lee(sano(**{pd.RUTAS[4]: json_resp([copia(i, databaseType="post gres", backupType="a\nb") for i in range(10)])}))
+        self.assertTrue(all(c["bd"] == "" and c["variante"] == "" for c in r["copias"]))
 
     def test_copia_sin_identidad_se_descarta_y_no_se_junta_con_otras(self):
         r = self.lee(sano(**{pd.RUTAS[4]: json_resp([copia(0, destinationId=None), copia(1, serviceOwnerId=None), copia(2)] + [copia(i + 3) for i in range(8)])}))

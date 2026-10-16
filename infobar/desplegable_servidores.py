@@ -8,6 +8,7 @@ import time
 from .config_y_estado import leer_ui
 from .desplegable_comun import cabecera, esc, icono, pagina, pestanas, pie, tarjeta
 from .servidores_ciclo import estado_visible, intervalos, peor_estado
+from .servidores_panel import VENTANA_S as VENTANA_PANEL_S
 
 MAX_WEBS = 14
 MAX_CAIDOS = 6
@@ -105,10 +106,11 @@ def _motivos(t, res, d, webs, panel=None, ahora=None):
         if mal(clave):
             out.append((color(clave), texto))
     p = panel if isinstance(panel, dict) else {}
-    antiguas = ((p.get("copias_resumen") or {}).get("antiguas") or 0) if p.get("ok_en") else 0
+    vigente = bool(p.get("ok_en")) and isinstance(ahora, (int, float)) and 0 <= ahora - p["ok_en"] <= VENTANA_PANEL_S          # una lectura vieja no se enseña como actual
+    antiguas = ((p.get("copias_resumen") or {}).get("antiguas") or 0) if vigente else 0
     if antiguas:
         out.append(("ambar", f"{antiguas} copia{'s' if antiguas > 1 else ''} de seguridad sin hacer desde hace más de lo normal"))
-    if ahora and p.get("ok_en"):
+    if vigente:
         fallidos = sum(1 for sv in (p.get("servicios") or []) if isinstance(sv, dict) and sv.get("estado") == "error" and sv.get("tipo") in ("application", "compose")
                        and isinstance(sv.get("despliegue"), (int, float)) and 600 < ahora - sv["despliegue"] <= 7 * 86400)
         if fallidos:

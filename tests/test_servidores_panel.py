@@ -52,6 +52,11 @@ class Base(unittest.TestCase):
         self.peticiones = []
         self.historial = reg.Historial(reloj=lambda: float(T0))
 
+    def config(self, servidores):
+        """Cambia la configuración SIN borrar la caché de servidores (limpia_config sí la borra)."""
+        config_y_estado._ULTIMO_CFG = {}
+        config_y_estado.guardar_config({"servidores": servidores})
+
     def escribe_cache(self, servidores):
         config_y_estado._escribe_json(rutas.SERVIDORES, {"generado_en": T0, "servidores": servidores})
 
@@ -179,8 +184,8 @@ class PasadaTest(Base):
         with mock.patch.object(sh, "abrir", side_effect=sh.ErrorAlmacen("x")), mock.patch.object(reg, "log"):
             self.assertTrue(self.pasada(lectura()))
         p = self.cache()["panel"]
-        self.assertEqual((p["error"], p["n_servicios"], p["copias_resumen"]), ("", 6, None))
-        self.assertGreater(self.historial.no_antes_panel, T0)
+        self.assertEqual((p["error"], p["n_servicios"], p["copias_resumen"], p["copias_en"]), ("", 6, None, None))            # las copias NO se dan por al día
+        self.assertGreater(self.historial.no_antes_panel[ID], T0)
 
     def test_podar_nombres_vacia_el_arbol_del_panel(self):
         self.pasada(lectura())
@@ -189,12 +194,96 @@ class PasadaTest(Base):
         self.assertEqual(e["panel"]["version"], "0.30.8")
 
 
+    def test_quitar_el_panel_o_cambiarlo_borra_lo_que_habia(self):
+        self.pasada(lectura())
+        self.config([{k: v for k, v in SERVIDOR.items() if k not in ("panel", "panel_url")}])
+        self.pasada(lectura(), ahora=T0 + sp.CADA_S)
+        self.assertNotIn("panel", self.cache())
+        self.config([dict(SERVIDOR)])
+        self.pasada(lectura(), ahora=T0 + 2 * sp.CADA_S)
+        self.assertEqual(self.cache()["panel"]["cuenta"], "dokploy:panel.ejemplo.com")
+        self.config([dict(SERVIDOR, panel_url="https://otro.ejemplo.com")])
+        self.pasada(lectura(servicios=[srv("z")] * 0 + [srv(f"n{i}") for i in range(2)]), ahora=T0 + 3 * sp.CADA_S)
+        p = self.cache()["panel"]
+        self.assertEqual((p["cuenta"], p["n_servicios"], p["error"]), ("dokploy:otro.ejemplo.com", 2, ""))           # no hereda el alcance del panel anterior
+
+    def test_un_alcance_nuevo_que_se_repite_pasa_a_ser_el_normal(self):
+        self.pasada(lectura())
+        pocos = lectura(servicios=[srv("a"), srv("b")])
+        for i in range(1, sp.LECTURAS_PARA_NUEVO_ALCANCE):
+            self.pasada(pocos, ahora=T0 + i * sp.CADA_S)
+            self.assertEqual(self.cache()["panel"]["error"], "alcance")
+        self.pasada(pocos, ahora=T0 + sp.LECTURAS_PARA_NUEVO_ALCANCE * sp.CADA_S)
+        p = self.cache()["panel"]
+        self.assertEqual((p["error"], p["n_servicios"]), ("", 2))
+
+    def test_un_alcance_nuevo_que_cambia_cada_vez_no_se_acepta(self):
+        self.pasada(lectura())
+        for i, n in enumerate((2, 1, 2, 1, 2), start=1):
+            self.pasada(lectura(servicios=[srv(f"q{j}") for j in range(n)]), ahora=T0 + i * sp.CADA_S)
+        self.assertEqual(self.cache()["panel"]["error"], "alcance")
+
+    def test_con_pocos_servicios_previos_quedarse_en_cero_tambien_es_alcance(self):
+        self.pasada(lectura(servicios=[srv("a"), srv("b")]))
+        self.pasada(lectura(servicios=[]), ahora=T0 + sp.CADA_S)
+        self.assertEqual(self.cache()["panel"]["error"], "alcance")
+
+    def test_la_copia_del_propio_panel_conserva_su_ultima_buena_entre_lecturas(self):
+        propia = lambda ts, estado: cop(ts, estado, dueno="panel", nombre="panel-dokploy")  # noqa: E731
+        self.pasada(lectura(copias=[propia(T0 - 3600, "done")] + [cop(T0 - i * DIA) for i in range(4)]))
+        self.pasada(lectura(copias=[propia(T0 + sp.CADA_S, "error")] + [cop(T0 - i * DIA) for i in range(4)]), ahora=T0 + sp.CADA_S)
+        con = sh.abrir(solo_lectura=True)
+        try:
+            filas = {f["etiqueta"]: f for f in sc.lista(con, ID, T0 + sp.CADA_S)}
+        finally:
+            con.close()
+        self.assertEqual(filas["panel-dokploy"]["ultima_ok"], T0 - 3600)                                 # no se pierde al sincronizar con la lista de servicios
+
+    def test_una_lista_de_copias_que_se_queda_vacia_es_alcance_cambiado(self):
+        self.pasada(lectura(copias=[cop(T0 - i * DIA, dueno=f"bd{i}") for i in range(6)]))
+        self.pasada(lectura(copias=[]), ahora=T0 + sp.CADA_S)
+        self.assertEqual(self.cache()["panel"]["error"], "alcance")
+
+    def test_los_nombres_del_panel_no_viven_mas_de_48_horas_sin_una_lectura_buena(self):
+        self.pasada(lectura())
+        self.pasada({"ok": False, "error": "timeout"}, ahora=T0 + sp.CADA_S)
+        self.assertEqual(len(self.cache()["panel"]["servicios"]), 6)
+        self.pasada({"ok": False, "error": "timeout"}, ahora=T0 + 49 * 3600)
+        p = self.cache()["panel"]
+        self.assertEqual((p["servicios"], p["dominios"]), ([], []))
+        self.assertEqual(p["version"], "0.30.8")
+
+    def test_la_poda_tambien_corre_sin_nada_que_leer(self):
+        self.pasada(lectura())
+        self.config([dict(SERVIDOR)])
+        self.pasada(lectura(), ahora=T0 + 10, clave="")                                                       # sin clave: ni petición ni cambios
+        self.assertEqual(len(self.cache()["panel"]["servicios"]), 6)
+        self.pasada(lectura(), ahora=T0 + 50 * 3600, clave="")
+        self.assertEqual(self.cache()["panel"]["servicios"], [])
+
+    def test_el_retroceso_de_las_copias_es_por_servidor(self):
+        with mock.patch.object(sh, "abrir", side_effect=sh.ErrorAlmacen("x")), mock.patch.object(reg, "log"):
+            self.historial.registrar_panel(dict(SERVIDOR), lectura(), T0)
+        self.assertIn(ID, self.historial.no_antes_panel)
+        self.assertIsNone(self.historial.registrar_panel(dict(SERVIDOR), lectura(), T0))
+        self.assertIsNotNone(self.historial.registrar_panel(dict(SERVIDOR, id=OTRO, nombre="otro"), lectura(), T0))
+
+    def test_los_descartes_del_panel_se_cuentan_con_motivos_cerrados(self):
+        self.pasada(lectura(descartes={"panel_estado": 3, "panel_campo": 1, "panel_reloj": 0}))
+        con = sh.abrir(solo_lectura=True)
+        try:
+            claves = {r[0] for r in con.execute("SELECT clave FROM meta WHERE clave LIKE 'descartes:panel_%'")}
+        finally:
+            con.close()
+        self.assertEqual({c.split(":")[1] for c in claves}, {"panel_estado", "panel_campo"})
+
+
 class CopiasDelPanelTest(Base):
     def test_resumen_con_copia_antigua_y_servicio_desaparecido(self):
         self.pasada(lectura(copias=[cop(T0 - 20 * DIA - i * DIA) for i in range(4)]))
         self.assertEqual(self.cache()["panel"]["copias_resumen"], {"n": 1, "antiguas": 1, "sin_buena": 0})
-        self.pasada(lectura(servicios=[srv(f"x{i}") for i in range(6)], copias=[]), ahora=T0 + sp.CADA_S)       # bd1 ya no está en el panel
-        self.assertEqual(self.cache()["panel"]["copias_resumen"], {"n": 0, "antiguas": 0, "sin_buena": 0})
+        self.pasada(lectura(servicios=[srv(f"x{i}") for i in range(6)], copias=[cop(T0 - i * DIA, dueno="x0") for i in range(4)]), ahora=T0 + sp.CADA_S)       # bd1 ya no está en el panel
+        self.assertEqual(self.cache()["panel"]["copias_resumen"], {"n": 1, "antiguas": 0, "sin_buena": 0})
 
 
 class AvisosPanelTest(Base):
@@ -206,7 +295,8 @@ class AvisosPanelTest(Base):
         self.conf = {"servidores": [dict(SERVIDOR)], "intervalo_normal_s": 300}
 
     def panel_en_cache(self, ahora, **panel):
-        p = {"ok_en": ahora, "intento_en": ahora, "empezo_en": ahora - 3600, "error": "", "servicios": [srv("a")] + [srv(f"s{i}") for i in range(5)], **panel}
+        p = {"ok_en": ahora, "intento_en": ahora, "empezo_en": ahora - 3600, "error": "", "cuenta": sp.cuenta(SERVIDOR), "copias_en": ahora,
+             "servicios": [srv("a")] + [srv(f"s{i}") for i in range(5)], **panel}
         return {"servidores": {NOMBRE: {"estado": "verde", "ok_en": ahora, "intento_en": ahora, "error": "", "panel": p}}}
 
     def pasa(self, segundos, cache):
@@ -279,9 +369,35 @@ class AvisosPanelTest(Base):
         self.assertEqual(self.enviados, [sa.TEXTO["panel_sin_lectura"]])
 
     def test_con_el_alcance_cambiado_no_se_evaluan_copias(self):
+        self.inserta_copia(int(self.t) - 3600)
+        self.pasa(0, lambda: self.panel_en_cache(int(self.t)))                                       # línea base con el panel bien
         self.inserta_copia(int(self.t) - 30 * DIA)
-        self.pasa(0, lambda: self.panel_en_cache(int(self.t), error="alcance"))
+        self.pasa(60, lambda: self.panel_en_cache(int(self.t), error="alcance"))
         self.pasa(3700, lambda: self.panel_en_cache(int(self.t), error="alcance"))
+        self.assertEqual(self.enviados, [])
+        self.pasa(3700, lambda: self.panel_en_cache(int(self.t)))
+        self.pasa(3700, lambda: self.panel_en_cache(int(self.t)))
+        self.assertEqual(self.enviados, [sa.TEXTO["copia_antigua"]])                                 # cuando el alcance vuelve, la copia sí se evalúa
+
+    def test_un_panel_de_otra_cuenta_en_la_cache_no_cuenta(self):
+        self.pasa(0, lambda: self.panel_en_cache(int(self.t)))
+        for _ in range(3):
+            self.pasa(3 * 3600, lambda: self.panel_en_cache(int(self.t) - 4 * 3600, cuenta="dokploy:otro.ejemplo.com"))
+        self.assertEqual(self.enviados, [])
+
+    def test_sin_panel_configurado_no_hay_avisos_de_panel_aunque_quede_cache_vieja(self):
+        self.pasa(0, lambda: self.panel_en_cache(int(self.t)))
+        self.conf = {"servidores": [{k: v for k, v in SERVIDOR.items() if k not in ("panel", "panel_url")}], "intervalo_normal_s": 300}
+        for _ in range(4):
+            self.pasa(3 * 3600, lambda: self.panel_en_cache(int(self.t) - 4 * 3600))
+        self.assertEqual(self.enviados, [])
+
+    def test_si_las_copias_no_se_anotaron_no_hay_copia_antigua_falsa(self):
+        self.inserta_copia(int(self.t) - 3600)
+        self.pasa(0, lambda: self.panel_en_cache(int(self.t)))                                       # línea base con todo en orden
+        self.inserta_copia(int(self.t) - 30 * DIA)
+        for _ in range(4):
+            self.pasa(3700, lambda: self.panel_en_cache(int(self.t), copias_en=None))                              # el panel responde pero la tabla de copias no se actualiza
         self.assertEqual(self.enviados, [])
 
     def test_el_texto_no_lleva_nombres(self):
@@ -371,6 +487,18 @@ class DetalleYDesplegableTest(Base):
         self.assertEqual([c["evaluacion"] for c in p["copias"]], ["al_dia"])
         self.assertNotIn("clave", json.dumps(d).lower().replace("clave_", ""))
 
+    def test_un_panel_guardado_de_otra_cuenta_no_se_enseña(self):
+        from infobar import servidores_detalle as sd
+        self.pasada(lectura())
+        conf = {"servidores": [dict(SERVIDOR, panel_url="https://otro.ejemplo.com")], "intervalo_normal_s": 300}
+        self.assertIsNone(sd.atiende({"servidor": [ID]}, T0 + 60, conf)[1]["panel"])
+
+    def test_la_ventana_de_frescura_viaja_con_el_detalle(self):
+        from infobar import servidores_detalle as sd
+        self.pasada(lectura())
+        conf = {"servidores": [dict(SERVIDOR)], "intervalo_normal_s": 300}
+        self.assertEqual(sd.atiende({"servidor": [ID]}, T0 + 60, conf)[1]["panel"]["ventana_s"], sp.VENTANA_S)
+
     def test_sin_panel_el_bloque_es_nulo(self):
         from infobar import servidores_detalle as sd
         con = sh.abrir()
@@ -388,6 +516,8 @@ class DetalleYDesplegableTest(Base):
         self.assertIn("2 copias de seguridad sin hacer desde hace más de lo normal", textos)
         self.assertIn("1 aplicación con el último despliegue fallido", textos)                    # solo el de hace una hora: el de hace 30 días y el de hace un minuto no
         self.assertEqual(ds._motivos({}, {}, {}, [], {"ok_en": None, "copias_resumen": {"antiguas": 5}}, T0), [])      # sin lectura buena no se dice nada
+        viejo = dict(panel, ok_en=T0 - 3 * 3600)
+        self.assertEqual(ds._motivos({}, {}, {}, [], viejo, T0), [])                                                  # una lectura vieja no se enseña como actual
         self.assertEqual(ds._motivos({}, {}, {}, [], None, T0), [])
 
 
@@ -442,7 +572,7 @@ class ClaveHuerfanaTest(unittest.TestCase):
             self.assertEqual(self.guarda([])[0], 200)
             borrar.assert_called_once_with("dokploy:otro.ejemplo.com")                                   # sin servidores: se borra la que quedaba
 
-    def test_si_dos_servidores_comparten_cuenta_no_se_borra_mientras_quede_uno(self):
+    def test_dos_servidores_con_el_mismo_panel_se_rechazan_y_no_se_borra_nada(self):
         a = dict(SERVIDOR, nombre="a")
         b = dict(SERVIDOR, nombre="b", id=OTRO, ssh="infobar@b.example.com", panel_url="https://PANEL.ejemplo.com:443")
         limpia_config([a])
@@ -451,3 +581,7 @@ class ClaveHuerfanaTest(unittest.TestCase):
         with mock.patch.object(self.sl.claves, "borrar_clave") as borrar:
             self.assertEqual(self.guarda([a, b])[0], 400)
             borrar.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

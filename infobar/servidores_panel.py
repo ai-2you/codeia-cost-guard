@@ -20,6 +20,9 @@ CADA_S = 300
 ESPERA_RECHAZO_S = 1800
 MAX_SERVICIOS_CACHE = 300
 MIN_PREVIOS_PARA_ALCANCE = 4
+LECTURAS_PARA_NUEVO_ALCANCE = 3
+RETENCION_NOMBRES_S = 48 * 3600
+VENTANA_S = 3 * CADA_S + 60                # una lectura vale mientras no tenga más de tres turnos y un minuto
 PANELES = ("dokploy",)
 ESPERA_PRUEBA_S, MAX_PRUEBAS_HORA = 30, 10
 _PRUEBA = threading.Lock()
@@ -45,17 +48,42 @@ def cuenta(s):
     return c if claves.cuenta_valida(c) else ""
 
 
+def _alcance_cambiado(previo, n_servicios, n_copias):
+    """True si lo leído se ha encogido de golpe respecto a la última lectura buena (a menos de la mitad o a cero). Un miembro al que le quitan servicios o el permiso de copias
+    recibe listas válidas pero vacías, y «no hay nada» no puede parecer buena noticia."""
+    for previos, ahora_n in ((previo.get("n_servicios") or 0, n_servicios), (previo.get("n_copias") or 0, n_copias)):
+        if previos >= MIN_PREVIOS_PARA_ALCANCE and ahora_n < previos * 0.5 or (previos and ahora_n == 0):
+            return True
+    return False
+
+
+def _vigente(ts, ahora):
+    return isinstance(ts, (int, float)) and not isinstance(ts, bool) and 0 <= ahora - ts <= RETENCION_NOMBRES_S
+
+
+def _sin_nombres_viejos(p, ahora):
+    """Lo que sale del panel (nombres de proyectos, servicios y dominios) no vive en la caché más de 48 h sin una lectura buena, aunque el SSH vaya bien."""
+    if p.get("servicios") or p.get("dominios"):
+        if not _vigente(p.get("ok_en"), ahora):
+            p = {**p, "servicios": [], "dominios": []}
+    return p
+
+
 def _resumen_de(previo, base, r, ahora, historial, s):
     if not r["ok"]:
         espera = ESPERA_RECHAZO_S if r["error"] in ("clave_rechazada", "clave_invalida", "url_invalida", "version_antigua", "sin_clave") else CADA_S
-        return {**previo, **base, "error": r["error"], "proximo_en": ahora + espera}
-    n, previos = len(r["servicios"]), previo.get("n_servicios") or 0
-    if previos >= MIN_PREVIOS_PARA_ALCANCE and n < previos * 0.5 or (previos and n == 0):
-        return {**previo, **base, "error": "alcance", "proximo_en": ahora + CADA_S}
+        return _sin_nombres_viejos({**previo, **base, "error": r["error"], "proximo_en": ahora + espera}, ahora)
+    n, n_copias = len(r["servicios"]), len(r["copias"])
+    if _alcance_cambiado(previo, n, n_copias):
+        # un tamaño nuevo que se repite en lecturas seguidas pasa a ser el normal (se quitaron proyectos a propósito); hasta entonces se conserva lo anterior
+        pend = previo.get("alcance_nuevo") if isinstance(previo.get("alcance_nuevo"), dict) else {}
+        veces = (pend.get("veces") or 0) + 1 if (pend.get("n"), pend.get("c")) == (n, n_copias) else 1
+        if veces < LECTURAS_PARA_NUEVO_ALCANCE:
+            return _sin_nombres_viejos({**previo, **base, "error": "alcance", "alcance_nuevo": {"n": n, "c": n_copias, "veces": veces}, "proximo_en": ahora + CADA_S}, ahora)
     copias = historial.registrar_panel(s, r, ahora) if historial is not None else None
     return {**base, "ok_en": ahora, "error": "", "proximo_en": ahora + CADA_S, "version": r["version"], "version_no_probada": r["version_no_probada"], "n_servicios": n,
-            "servicios": r["servicios"][:MAX_SERVICIOS_CACHE], "dominios": r["dominios"], "truncadas": r["copias_truncadas"],
-            "copias_resumen": copias if copias is not None else previo.get("copias_resumen")}
+            "n_copias": n_copias, "servicios": r["servicios"][:MAX_SERVICIOS_CACHE], "dominios": r["dominios"], "truncadas": r["copias_truncadas"],
+            "copias_resumen": copias if copias is not None else previo.get("copias_resumen"), "copias_en": ahora if copias is not None else previo.get("copias_en")}
 
 
 def pasada(historial=None, ahora=None, leer=panel_dokploy.leer, clave_de=claves.leer_clave, conf=None):
@@ -66,12 +94,19 @@ def pasada(historial=None, ahora=None, leer=panel_dokploy.leer, clave_de=claves.
         ahora = time.time() if ahora is None else ahora
         conf = conf if conf is not None else cfg()
         entradas = servidores_ciclo.leer_cache().get("servidores") or {}
-        nuevos = {}
+        nuevos, limpiar = {}, []
         for s in servidores_validos(conf.get("servidores")):
             cta = cuenta(s)
-            if not cta or not isinstance(entradas.get(s["nombre"]), dict):
-                continue                                    # sin panel configurado, o aún sin la primera lectura SSH de ese servidor
-            previo = entradas[s["nombre"]].get("panel") if isinstance(entradas[s["nombre"]].get("panel"), dict) else {}
+            entrada = entradas.get(s["nombre"])
+            if not isinstance(entrada, dict):
+                continue                                    # aún sin la primera lectura SSH de ese servidor
+            panel_guardado = entrada.get("panel") if isinstance(entrada.get("panel"), dict) else None
+            if panel_guardado is not None and panel_guardado.get("cuenta") != cta:
+                limpiar.append(s["nombre"])                 # el panel se quitó o cambió de dirección: lo que había de otro panel no se queda como si fuera de este
+                panel_guardado = None
+            if not cta:
+                continue                                    # sin panel configurado
+            previo = panel_guardado or {}
             proximo = previo.get("proximo_en") or 0
             if ahora < proximo <= ahora + ESPERA_RECHAZO_S:
                 continue
@@ -82,13 +117,21 @@ def pasada(historial=None, ahora=None, leer=panel_dokploy.leer, clave_de=claves.
                 r = leer(s["panel_url"], clave, ahora)
             finally:
                 clave = None
-            base = {"intento_en": ahora, "empezo_en": previo.get("empezo_en") or ahora}
+            base = {"intento_en": ahora, "empezo_en": previo.get("empezo_en") or ahora, "cuenta": cta}
             nuevos[s["nombre"]] = _resumen_de(previo, base, r, ahora, historial, s)
-        if not nuevos:
+        # lo que queda en la caché de un panel que no se pudo leer pierde sus nombres a las 48 h aunque el SSH funcione
+        for nombre, e in entradas.items():
+            p = e.get("panel") if isinstance(e, dict) else None
+            if isinstance(p, dict) and nombre not in nuevos and nombre not in limpiar and (p.get("servicios") or p.get("dominios")) and not _vigente(p.get("ok_en"), ahora):
+                nuevos[nombre] = _sin_nombres_viejos(p, ahora)
+        if not nuevos and not limpiar:
             return False
         with _bloqueo(rutas.SERVIDORES):
             cache = servidores_ciclo.leer_cache()
             vivas = cache.get("servidores") if isinstance(cache.get("servidores"), dict) else {}
+            for nombre in limpiar:
+                if isinstance(vivas.get(nombre), dict):
+                    vivas[nombre].pop("panel", None)
             for nombre, p in nuevos.items():
                 if isinstance(vivas.get(nombre), dict):
                     vivas[nombre]["panel"] = p

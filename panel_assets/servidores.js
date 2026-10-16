@@ -219,7 +219,7 @@
     const raiz = $("vista-servidores");
     const fresco = ts => ts != null && d.generado_en - ts <= d.ventana_s && d.generado_en - ts >= -60;
     if (!d.disponible) { raiz.replaceChildren(h("section", {}, h("h2", {}, "Servidores"), barra(), h("p", {class: "vacio"}, d.motivo || "Sin datos todavía."))); return; }
-    const p = d.panel, frescoPanel = !!p && fresco(p.ok_en) && p.error !== "alcance";
+    const p = d.panel, frescoPanel = !!p && p.ok_en != null && d.generado_en - p.ok_en <= p.ventana_s && d.generado_en - p.ok_en >= -60 && p.error !== "alcance";
     raiz.replaceChildren(...[h("section", {}, h("h2", {}, "Servidores"), barra(), cabecera(d, fresco)),
       h("section", {}, h("h2", {}, "Webs"), tablaWebs(d, fresco)),
       p ? h("section", {}, h("h2", {}, "Copias de seguridad"), cabeceraPanel(d, p, frescoPanel), tablaCopias(d, p, frescoPanel)) : null,
