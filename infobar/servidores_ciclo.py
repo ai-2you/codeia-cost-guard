@@ -14,7 +14,7 @@ from . import rutas
 from .config_y_estado import _bloqueo, _escribe_json, _lee_json, cfg, leer_ui, log
 from .servidores import errores_ips, servidores_validos
 from .servidores_estado import bastionado, peor, resumen_bastionado, tarjetas
-from .servidores_externo import host_de_ssh, puertos_expuestos
+from .servidores_externo import PUERTOS_CORREO, host_de_ssh, puertos_expuestos
 from . import webs_sondeo
 from .servidores_ssh import leer
 
@@ -84,8 +84,12 @@ def recoger_uno(servidor, conocidas):
     if error:
         return {"error": error, "duracion": dur, "webs": webs, "host": host, "estado": "rojo", "estado_vivo": "rojo"}
     permitidos = {int(servidor.get("puerto") or 22)}       # el ssh en otro puerto no es "raro"
-    t = tarjetas(datos, webs, expuestos, conocidas, permitidos)
-    checks = bastionado(datos, expuestos, permitidos)
+    # con un servidor de correo en marcha, sus puertos son legítimos (salvo que en Ajustes se desmarque)
+    correo = datos.get("correo", "") if servidor.get("correo") is not False else ""
+    if correo:
+        permitidos |= PUERTOS_CORREO
+    t = tarjetas(datos, webs, expuestos, conocidas, permitidos, correo)
+    checks = bastionado(datos, expuestos, permitidos, correo)
     res = resumen_bastionado(checks)
     vivo, estado = estados(t, res)
     return {"error": "", "duracion": dur, "datos": datos, "webs": webs, "expuestos": expuestos, "host": host,
@@ -99,8 +103,9 @@ NO_VIVAS = ("mantenimiento", "certificado", "webs")
 
 def estados(t, resumen_bastionado_):
     """(estado vivo, estado global) a partir de las tarjetas y del resumen de bastionado."""
-    vivo = peor(*[x["estado"] for k, x in t.items() if k not in NO_VIVAS])
-    return vivo, peor(vivo, _estado_t(t, "mantenimiento"), _estado_t(t, "certificado"), _estado_t(t, "webs"), (resumen_bastionado_ or {}).get("estado"))
+    # un servicio PARADO a mano (ámbar) se ve, pero no justifica leer cada minuto: solo los caídos (rojo) son salud viva
+    vivo = peor(*[x["estado"] for k, x in t.items() if k not in NO_VIVAS and not (k == "servicios" and x.get("estado") == "ambar")])
+    return vivo, peor(vivo, _estado_t(t, "servicios"), _estado_t(t, "mantenimiento"), _estado_t(t, "certificado"), _estado_t(t, "webs"), (resumen_bastionado_ or {}).get("estado"))
 
 
 def reaplicar_webs(estado_webs=None):

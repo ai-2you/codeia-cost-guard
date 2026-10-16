@@ -8,6 +8,7 @@ import time
 from .config_y_estado import leer_ui
 from .desplegable_comun import cabecera, esc, icono, pagina, pestanas, pie, tarjeta
 from .servidores_ciclo import estado_visible, intervalos, peor_estado
+from .servidores_externo import PUERTOS_CORREO
 from .servidores_panel import VENTANA_S as VENTANA_PANEL_S
 
 MAX_WEBS = 14
@@ -117,9 +118,30 @@ def _motivos(t, res, d, webs, panel=None, ahora=None):
             out.append(("ambar", f"{fallidos} aplicación{'es' if fallidos > 1 else ''} con el último despliegue fallido"))
     n_caidos = len((t.get("servicios") or {}).get("caidos") or [])
     if mal("servicios") and n_caidos:
-        out.append((color("servicios"), f"{n_caidos} servicio{'s' if n_caidos > 1 else ''} caído{'s' if n_caidos > 1 else ''}"))
+        out.append(("rojo", f"{n_caidos} servicio{'s' if n_caidos > 1 else ''} caído{'s' if n_caidos > 1 else ''}"))
+    n_parados = len((t.get("servicios") or {}).get("parados") or [])
+    if n_parados:
+        out.append(("ambar", f"{n_parados} servicio{'s' if n_parados > 1 else ''} parado{'s' if n_parados > 1 else ''} a mano (0/0)"))
     out.sort(key=lambda x: 0 if x[0] == "rojo" else 1)
     return out
+
+
+MAX_PUERTOS_GRANDES = 4             # en la cifra grande de la tarjeta caben 4 puertos; más se salen de la tarjeta
+
+
+def _puertas(exp, tp):
+    """(cifra, texto) de la tarjeta de puertos. Con un servidor de correo aceptado, sus puertos van al texto pequeño, no a la cifra."""
+    if not exp:
+        return "—", "abiertas a Internet"
+    correo, raros = tp.get("correo"), tp.get("raros") or []
+    grandes = [p for p in exp if not (correo and p in PUERTOS_CORREO)]
+    de_correo = [p for p in exp if correo and p in PUERTOS_CORREO]
+    cifra = ("·".join(map(str, grandes)) or "—") if len(grandes) <= MAX_PUERTOS_GRANDES else f"{len(exp)} abiertas"
+    if raros:
+        return cifra, f'¡{", ".join(map(str, raros))} expuesto!'
+    if de_correo:
+        return cifra, f'+ correo ({correo})'
+    return cifra, "abiertas a Internet" if len(grandes) <= MAX_PUERTOS_GRANDES else "·".join(map(str, exp))
 
 
 def _cpu_texto(pct):
@@ -164,11 +186,15 @@ def cuerpo_servidor(nombre, e, servidor_cfg, ahora, abiertas=frozenset()):
     h.append(f'<div class="rejilla" style="margin-top:8px">{"".join(hw)}</div>')
 
     h.append(_seccion_webs(webs))
-    caidos = [s for s in (d.get("servicios") or []) if not s["ok"]]
-    if caidos:                      # los servicios sanos no se enseñan (estorban); solo los caídos, que sí piden acción
-        pild = "".join(f'<div class="pil"><i class="p rojo"></i><span>{esc(_corto(s["nombre"]))}</span></div>' for s in caidos[:MAX_CAIDOS])
+    # los servicios sanos no se enseñan (estorban); solo los caídos (rojo) y los parados a mano (gris), primero los caídos
+    caidos = [s for s in (d.get("servicios") or []) if not s["ok"]] + [s for s in (d.get("servicios") or []) if s["ok"] and s.get("parado")]
+    if caidos:
+        n_rojos = sum(1 for s in caidos if not s["ok"])
+        pild = "".join(f'<div class="pil"><i class="p {"rojo" if not s["ok"] else "gris"}"></i><span>{esc(_corto(s["nombre"]))}</span></div>'
+                       for s in caidos[:MAX_CAIDOS])
         mas = f'<div class="nota" style="padding:4px 0">+{len(caidos) - MAX_CAIDOS} más</div>' if len(caidos) > MAX_CAIDOS else ""
-        h.append(_plegable("caidos", "Servicios caídos", f'<div class="pildoras">{pild}</div>{mas}', abiertas, len(caidos), "rojo"))
+        titulo = "Servicios caídos" if n_rojos == len(caidos) else ("Servicios parados" if not n_rojos else "Servicios caídos o parados")
+        h.append(_plegable("caidos", titulo, f'<div class="pildoras">{pild}</div>{mas}', abiertas, len(caidos), "rojo" if n_rojos else "ambar"))
 
     ses = d.get("sesiones") or []
     it = d.get("intentos") or {}
@@ -185,14 +211,14 @@ def cuerpo_servidor(nombre, e, servidor_cfg, ahora, abiertas=frozenset()):
            tarjeta("prohibido", "Bloqueadas", str(f2b.get("ahora", "—")) if f2b.get("instalado") else "—",
                    f'{f2b.get("total", 0)} en total (fail2ban)' if f2b.get("instalado") else "sin fail2ban",
                    _estado(t, "bloqueadas")),
-           tarjeta("puerta", "Puertas abiertas", "·".join(map(str, exp)) if exp else "—",
-                   "abiertas a Internet" if not (t.get("puertos") or {}).get("raros") else
-                   f'¡{", ".join(map(str, t["puertos"]["raros"]))} expuesto!', _estado(t, "puertos")),
+           tarjeta("puerta", "Puertas abiertas", *_puertas(exp, t.get("puertos") or {}), _estado(t, "puertos")),
            tarjeta("candado", "Protección", f'{res.get("hechos", 0)} de {res.get("total", 0)}' if res.get("total") else "—",
                    "ajustes de seguridad" if res.get("estado") != "verde" else "todo en su sitio", res.get("estado") or "gris")]
     a = d.get("actualizaciones") or {}
     seg.append(tarjeta("llave", "Mantenimiento", "Al día" if not a.get("pendientes") else f'{a["pendientes"]} paquetes',
-                       "reinicio pendiente" if a.get("reinicio") else "Paquetes del sistema", _estado(t, "mantenimiento")))
+                       "reinicio pendiente" if a.get("reinicio") else
+                       (f'{a["en_espera"]} en espera' if a.get("en_espera") else "Paquetes del sistema"),
+                       _estado(t, "mantenimiento")))
     h.append(f'<div class="sec"><span>Seguridad</span></div><div class="rejilla">{"".join(seg)}</div>')
 
     falta = [c for c in (e.get("bastionado") or []) if c["ok"] is False]

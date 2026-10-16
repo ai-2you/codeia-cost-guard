@@ -13,7 +13,7 @@ CLAVE = os.path.expanduser("~/.ssh/infobar_ed25519")
 TOPE_S = 20                 # segundos por servidor, conexion incluida
 TOPE_BYTES = 128 * 1024     # lo que se pasa de aqui se corta (las secciones de v1 van primero y caben): no se tira la lectura entera
 SECCIONES = {"version", "sistema", "memoria", "disco", "sesiones", "puertos", "intentos",
-             "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban", "version_root", "fin_root", "inventario", "webs"}
+             "actualizaciones", "bastionado", "servicios", "contenedores", "bastionado_root", "fail2ban", "version_root", "fin_root", "inventario", "webs", "correo", "espera"}
 SECCIONES_ROOT = ("servicios", "contenedores", "bastionado_root", "fail2ban", "inventario", "webs")     # las que escribe recoger-root
 MARCADAS = ("intentos", "inventario", "webs")    # secciones de v2 con marco: "n <lineas>" al principio y "fin <lineas> <codigo>" al final
 _MARCO_N = re.compile(r"n ([0-9]{1,6})")
@@ -250,8 +250,18 @@ def interpretar(sec, marcadas=frozenset(), ahora=None):
     a = sec.get("actualizaciones") or []
     if a:
         d["actualizaciones"] = {"pendientes": int(_num(a[0])), "reinicio": len(a) > 1 and a[1] == "reinicio"}
+        # «### espera» (si al script le sobró tiempo): lo que `apt upgrade` instalaría de verdad. El resto está en espera
+        # (actualizaciones por fases de Ubuntu, paquetes retenidos): no son pendientes
+        e = (sec.get("espera") or [""])[0].split()
+        if len(e) == 2 and e[0] == "instalables" and e[1].isdecimal():
+            todos = d["actualizaciones"]["pendientes"]
+            d["actualizaciones"]["pendientes"] = min(todos, int(e[1]))
+            d["actualizaciones"]["en_espera"] = todos - d["actualizaciones"]["pendientes"]
     if "servicios" in sec or "contenedores" in sec:
         d["servicios"] = _servicios(sec.get("servicios") or [], sec.get("contenedores") or [])
+    correo = _correo(sec.get("servicios") or [], sec.get("contenedores") or [], sec.get("correo") or [])
+    if correo:
+        d["correo"] = correo
     if "servicios" in sec:
         # nombres de los servicios de Swarm (con su estado): la identidad de un servicio solo vale si aparece aquí
         d["swarm_servicios"] = {n: ok for n, ok in ((s_["nombre"], s_["ok"]) for s_ in _servicios(sec["servicios"], [])) if servidores_inventario.NOMBRE.fullmatch(n)}
@@ -282,9 +292,11 @@ def _servicios(servicios, contenedores):
         nombre, _, rep = l.partition("\t")
         r = re.match(r"(\d+)/(\d+)", rep.strip())
         if nombre and r:
-            # n/n bien; 0/0 es escalado a cero a proposito; "(1/1 completed)" es una tarea terminada
+            # n/n bien; "(1/1 completed)" es una tarea terminada. 0/0 es PARADO: lo que dejan Dokploy y Easypanel al pulsar
+            # «stop» (escalan a cero). No está caído (ok), pero no es verde: se marca aparte para que se vea
             ok = r.group(1) == r.group(2) or "completed" in rep
-            out.append({"nombre": nombre[:64], "ok": ok, "detalle": rep.strip()[:16]})
+            out.append({"nombre": nombre[:64], "ok": ok, "detalle": rep.strip()[:16],
+                        "parado": r.group(2) == "0" and "completed" not in rep})
     if out:
         return out
     for l in contenedores:
@@ -295,6 +307,22 @@ def _servicios(servicios, contenedores):
             out.append({"nombre": partes[0][:64], "ok": partes[1] == "running" or termino_bien,
                         "detalle": partes[1][:16]})
     return out
+
+
+# servidores de correo conocidos, por el nombre del servicio/contenedor (Dokploy y Easypanel ponen el de la plantilla) o por el servicio del sistema
+_CORREO = (("mailu", "Mailu"), ("mailcow", "mailcow"), ("docker-mailserver", "docker-mailserver"), ("poste", "Poste.io"),
+           ("stalwart", "Stalwart"), ("iredmail", "iRedMail"), ("mailinabox", "Mail-in-a-Box"), ("mail-in-a-box", "Mail-in-a-Box"),
+           ("postfix", "Postfix"), ("dovecot", "Dovecot"), ("exim", "Exim"), ("opensmtpd", "OpenSMTPD"))
+
+
+def _correo(servicios, contenedores, sistema):
+    """Nombre del servidor de correo EN MARCHA ("" si no hay): con él, sus puertos (25, 465...) son legítimos."""
+    en_marcha = [l.split("\t")[0] for l in servicios if re.match(r"(\d+)/\1(\s|$)", (l.split("\t") + [""])[1].strip()) and "\t0/0" not in l]
+    en_marcha += [p[0] for p in (l.split("\t") for l in contenedores) if len(p) >= 2 and p[1] == "running"]
+    en_marcha += [l.strip() for l in sistema]
+    texto = " ".join(en_marcha).lower()
+    # como palabra entera (separada por -, _, punto o espacio): «mailu-front» es Mailu, «emailupdater» no
+    return next((nombre for clave, nombre in _CORREO if re.search(rf"(?<![a-z0-9]){re.escape(clave)}(?![a-z0-9])", texto)), "")
 
 
 def leer(servidor):

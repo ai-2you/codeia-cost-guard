@@ -14,6 +14,8 @@ TIMEOUT_WEB = 5
 TIMEOUT_PUERTO = 1.5
 # puertos que se esperan abiertos al publico; el resto, si responde desde fuera, es un aviso
 PUERTOS_PUBLICOS = {22, 80, 443}
+# los de un servidor de correo (SMTP, SMTPS, envío, IMAPS, POP3S): se aceptan solo si hay uno en marcha
+PUERTOS_CORREO = {25, 465, 587, 993, 995}
 
 
 def ip_publica(host, puerto):

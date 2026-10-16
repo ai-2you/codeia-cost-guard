@@ -121,4 +121,21 @@ if [ -x /usr/local/lib/infobar/recoger-root ]; then
   [ "$restante" -ge 4 ] && timeout -k 1 "$restante" sudo -n /usr/local/lib/infobar/recoger-root </dev/null 2>/dev/null
 fi
 
+# Lo opcional va al FINAL, con el tiempo que sobre, para no quitarselo a ninguna comprobacion de arriba:
+# - correo: servidor de correo instalado en el sistema (no en docker); sus puertos 25/465/587/993 son legitimos.
+# - espera: cuantos paquetes instalaria `apt upgrade` de verdad (simulado, sin root; tarda 1-2 s). El resto de los
+#   «upgradable» estan en espera: actualizaciones por fases de Ubuntu o retenidos (p. ej. un salto de version de docker).
+# Sin tiempo, la seccion no sale y el Mac se queda con lo de siempre.
+if [ "$(resta 12)" -ge 1 ]; then
+  echo "### correo"
+  for u in postfix dovecot exim4 opensmtpd; do
+    [ "$(timeout 1 systemctl is-active "$u" </dev/null 2>/dev/null)" = active ] && echo "$u"
+  done
+fi
+lim=$(resta 12)
+if [ "$lim" -ge 3 ] && sim=$(timeout "$lim" apt-get -s -o Debug::NoLocking=1 upgrade </dev/null 2>/dev/null); then
+  echo "### espera"
+  echo "instalables $(printf '%s\n' "$sim" | grep -c '^Inst ')"
+fi
+
 echo "### fin"

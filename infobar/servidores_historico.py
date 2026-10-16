@@ -219,7 +219,7 @@ def _migrar(con, ruta_base):
 
 def copia_sin_ips(con, directorio):
     """Copia consistente previa a migrar, SIN las IPs (son datos personales y las copias no se purgan por retención). La copia se hace en
-    MEMORIA, se vacía `ips_atacantes` y solo entonces se escribe a disco (`VACUUM INTO` sobre un fichero 0600 ya creado): ningún byte de IP
+    MEMORIA, se vacía `ips_atacantes` y solo entonces se escribe a disco (compactada y con la API de copia sobre un fichero 0600 ya creado): ningún byte de IP
     toca el disco ni siquiera en un temporal. Caduca a los 30 días (ver `caducar_copias`)."""
     os.makedirs(directorio, mode=0o700, exist_ok=True)
     caducar_copias(directorio)
@@ -235,8 +235,15 @@ def copia_sin_ips(con, directorio):
         for tabla in ("ips_atacantes", "recursos", "eventos", "webs", "eventos_web", "horas_web", "dias_web", "copias"):          # datos personales: ni IPs ni nombres de recursos en una copia que no caduca por retención
             if tabla in _tablas(memoria):
                 memoria.execute(f"DELETE FROM {tabla}")
+        # VACUUM en memoria rehace la base sin las páginas libres (ahí quedaría lo borrado) y la API de copia la escribe en el fichero 0600 ya
+        # creado. No `VACUUM INTO` sobre ese fichero: el SQLite del Python de macOS (3.9) rechaza que el destino exista aunque esté vacío
+        memoria.execute("VACUUM")
         os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-        memoria.execute("VACUUM INTO ?", (tmp,))
+        disco = sqlite3.connect(tmp)
+        try:
+            memoria.backup(disco)
+        finally:
+            disco.close()
     except Exception:
         if os.path.exists(tmp):
             os.remove(tmp)
