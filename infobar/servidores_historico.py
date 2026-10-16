@@ -14,7 +14,7 @@ import time
 
 from . import plataforma, rutas
 from .servidores_datos import ESTADOS, FueraDeRango, conjunto_canonico, horas_de, muestra_de
-from . import servidores_recursos, servidores_seguimiento
+from . import servidores_copias, servidores_recursos, servidores_seguimiento
 from .servidores_recursos import descartar as _descartar
 from .sqlite_base import ErrorAlmacen, abrir_base, _rollback, _sentencias, _tablas, _version
 
@@ -139,7 +139,19 @@ CREATE TABLE dias_web(
     ok INTEGER NOT NULL DEFAULT 0, mal INTEGER NOT NULL DEFAULT 0, caidas INTEGER NOT NULL DEFAULT 0, ms_max INTEGER CHECK(ms_max BETWEEN 0 AND 100000000),
     PRIMARY KEY(servidor_id, clave, dia)) STRICT, WITHOUT ROWID;
 """
-MIGRACIONES = {1: ESQUEMA_V1, 2: ESQUEMA_V2, 3: ESQUEMA_V3, 4: ESQUEMA_V4, 5: ESQUEMA_V5}
+ESQUEMA_V6 = """
+CREATE TABLE copias(
+    servidor_id TEXT NOT NULL REFERENCES servidores(id) ON DELETE CASCADE,
+    clave TEXT NOT NULL CHECK(length(clave) = 32),
+    dueno TEXT NOT NULL CHECK(length(dueno) BETWEEN 1 AND 64),
+    tipo TEXT NOT NULL CHECK(tipo IN ('backup','volumeBackup')),
+    etiqueta TEXT NOT NULL CHECK(length(etiqueta) BETWEEN 1 AND 130 AND etiqueta NOT GLOB '*[^A-Za-z0-9_./-]*'),
+    primera INTEGER NOT NULL, vista INTEGER NOT NULL,
+    ultima_ok INTEGER, previa_ok INTEGER, intervalo_s INTEGER CHECK(intervalo_s BETWEEN 60 AND 31622400),
+    ultimo_estado TEXT CHECK(ultimo_estado IN ('running','done','error','cancelled')), ultimo_ts INTEGER,
+    PRIMARY KEY(servidor_id, clave)) STRICT, WITHOUT ROWID;
+"""
+MIGRACIONES = {1: ESQUEMA_V1, 2: ESQUEMA_V2, 3: ESQUEMA_V3, 4: ESQUEMA_V4, 5: ESQUEMA_V5, 6: ESQUEMA_V6}
 # Un solo escritor a la vez DENTRO del proceso: el hilo del ciclo SSH, el sondeador de webs y las operaciones del panel (olvidar, sincronizar) abren su propia conexión
 # y se turnan con este cerrojo (SQLite ya serializa, pero así no se pelean por `busy_timeout`).
 ESCRITOR = threading.RLock()       # versión -> script que lleva de la anterior a esa
@@ -165,6 +177,8 @@ CLASES_SERVIDORES = {
     "eventos_web": {c: _I for c in ("servidor_id", "ts", "clave", "evento", "codigo")},
     "horas_web": {c: _I for c in ("servidor_id", "clave", "hora", "ok", "mal", "caidas", "ms_max")},
     "dias_web": {c: _I for c in ("servidor_id", "clave", "dia", "ok", "mal", "caidas", "ms_max")},
+    # el nombre del servicio de una copia puede ser el de un cliente: dato personal
+    "copias": {**{c: _I for c in ("servidor_id", "clave", "dueno", "tipo", "primera", "vista", "ultima_ok", "previa_ok", "intervalo_s", "ultimo_estado", "ultimo_ts")}, "etiqueta": "personal"},
 }
 
 
@@ -218,7 +232,7 @@ def copia_sin_ips(con, directorio):
     memoria = sqlite3.connect(":memory:", isolation_level=None)
     try:
         con.backup(memoria)
-        for tabla in ("ips_atacantes", "recursos", "eventos", "webs", "eventos_web", "horas_web", "dias_web"):          # datos personales: ni IPs ni nombres de recursos en una copia que no caduca por retención
+        for tabla in ("ips_atacantes", "recursos", "eventos", "webs", "eventos_web", "horas_web", "dias_web", "copias"):          # datos personales: ni IPs ni nombres de recursos en una copia que no caduca por retención
             if tabla in _tablas(memoria):
                 memoria.execute(f"DELETE FROM {tabla}")
         os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
@@ -439,6 +453,7 @@ def mantener(con, politicas, ahora, vacuum=True, webs_vigentes=None):
         for sid in retirados:
             borrados += servidores_seguimiento.olvidar(con, sid)           # los dominios de un servidor retirado también se olvidan
         borrados += servidores_seguimiento.purgar(con, ahora)
+        borrados += servidores_copias.purgar(con, ahora, retirados)
         if webs_vigentes is not None:
             borrados += servidores_seguimiento.sincronizar(con, webs_vigentes)
         caducar_copias(os.path.join(os.path.dirname(ruta()), "copias"), ahora)
@@ -487,7 +502,7 @@ def olvidar_recursos(con, servidor_id=None, ahora=None):
     con.execute("BEGIN IMMEDIATE")
     try:
         n = servidores_recursos.olvidar(con, servidor_id)
-        n = (n[0] + servidores_seguimiento.olvidar(con, servidor_id), n[1])      # los dominios vigilados también son nombres: se cuentan con los recursos
+        n = (n[0] + servidores_seguimiento.olvidar(con, servidor_id) + servidores_copias.olvidar(con, servidor_id), n[1])      # los dominios vigilados también son nombres: se cuentan con los recursos
         con.execute("COMMIT")
     except Exception:
         _rollback(con)

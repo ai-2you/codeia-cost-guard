@@ -252,7 +252,7 @@ class AlmacenCertificadosTest(Base):
         self.reg(entrada(T0))
         self.con.close()
         c = sqlite3.connect(sh.ruta(), isolation_level=None)
-        for tabla in ("webs", "eventos_web", "horas_web", "dias_web"):
+        for tabla in ("webs", "eventos_web", "horas_web", "dias_web", "copias"):
             c.execute(f"DROP TABLE {tabla}")
         for tabla, col in (("muestras", "cert_dias_min"), ("muestras", "webs_cert_mal"), ("horas_servidor", "cert_dias_min"), ("horas_servidor", "webs_cert_mal_max")):
             c.execute(f"ALTER TABLE {tabla} DROP COLUMN {col}")

@@ -41,7 +41,7 @@ class SeguimientoBase(Base):
 
 class EsquemaV5Test(SeguimientoBase):
     def test_version_y_clases(self):
-        self.assertEqual(max(sh.MIGRACIONES), 5)
+        self.assertGreaterEqual(max(sh.MIGRACIONES), 5)
         for t in ("webs", "eventos_web", "horas_web", "dias_web"):
             self.assertIn(t, sh.CLASES_SERVIDORES)
         self.assertEqual(sh.CLASES_SERVIDORES["webs"]["etiqueta"], "personal")
@@ -51,12 +51,12 @@ class EsquemaV5Test(SeguimientoBase):
         self.anota(OK, T0)
         self.con.close()
         c = sqlite3.connect(sh.ruta(), isolation_level=None)
-        for t in ("webs", "eventos_web", "horas_web", "dias_web"):
+        for t in ("webs", "eventos_web", "horas_web", "dias_web", "copias"):
             c.execute(f"DROP TABLE {t}")
         c.execute("PRAGMA user_version=4")
         c.close()
         self.con = sh.abrir()
-        self.assertEqual(self.uno("PRAGMA user_version"), 5)
+        self.assertEqual(self.uno("PRAGMA user_version"), max(sh.MIGRACIONES))
         self.assertEqual(self.uno("SELECT COUNT(*) FROM muestras"), 1)
         self.assertEqual(self.uno("SELECT COUNT(*) FROM webs"), 0)
 
