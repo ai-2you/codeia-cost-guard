@@ -62,9 +62,9 @@ ahorro en `~/.codex/AGENTS.md` y `~/.claude/CLAUDE.md`: `./install.sh --reglas`.
 
 ### Windows
 
-`install.sh` no corre en Windows (es un script de shell que instala un icono de barra de menús y un
-LaunchAgent, ambos exclusivos de macOS). Lo que sí funciona igual que en macOS y Linux es el motor de
-medición, con Python 3.9+ desde `cmd.exe`, PowerShell o la terminal de Git Bash:
+`install.sh` sigue siendo un script de shell exclusivo de macOS (LaunchAgent). El motor
+(`analizar_gasto.py`, `panel.py`, `precio_astra.py`) funciona igual que en macOS y Linux, con
+Python 3.9+ desde `cmd.exe`, PowerShell o la terminal de Git Bash:
 
 ```powershell
 git clone https://github.com/yosnap/codeia-cost-guard.git
@@ -74,8 +74,26 @@ python panel.py
 ```
 
 `panel.py` genera `panel.html` en la carpeta del proyecto; ábrelo haciendo doble clic o con
-`start panel.html`. Si quieres el informe cada día sin lanzarlo a mano, prográmalo con el
-**Programador de tareas** de Windows apuntando a `python.exe` con el script como argumento.
+`start panel.html`.
+
+Para el icono de bandeja y el arranque automático (equivalente Windows de `install.sh`):
+
+```powershell
+python instalar_windows.py
+```
+
+Copia el proyecto a `~/.cost-guard` con su propio entorno virtual (`pillow` + `pystray==0.19.5`) y
+registra el arranque al iniciar sesión: primero intenta una tarea en el **Programador de tareas**
+(`schtasks /sc onlogon`, sin privilegios de administrador); si esa cuenta o política lo bloquea, cae
+automáticamente a un `.vbs` en la carpeta de Inicio (`shell:startup`). El propio script indica al
+final cuál de los dos mecanismos quedó activo y cómo desinstalarlo
+(`schtasks /delete /tn CostGuardTray /f`, o borrar el `.vbs`).
+
+El icono (`bandeja_windows.py`) muestra la cifra de la ventana de 5 h y, al pulsarlo, un menú de texto
+plano con hoy/ritmo/5h, "Abrir panel", "Refrescar ahora" y "Salir"; se refresca solo cada 60 s.
+
+Guardar claves de API desde el panel (**Ajustes**) también funciona ya en Windows: se guardan en el
+**Credential Manager** del sistema (antes esto solo estaba soportado en macOS, vía Keychain).
 
 Nota: si usas OpenCode en Windows, esta herramienta busca su base de datos en la ruta de Linux/macOS
 (`~/.local/share/opencode/`). En Windows, OpenCode guarda sus datos en otra carpeta y de momento no se
@@ -88,8 +106,8 @@ lee ahí — Claude Code y Codex sí se detectan igual en los tres sistemas.
 | `analizar_gasto.py` (informe en terminal) | ✅ | ✅ | ✅ |
 | `panel.py` (panel HTML) | ✅ | ✅ | ✅ |
 | `precio_astra.py` (calculadora de precios) | ✅ | ✅ | ✅ |
-| Icono de barra de menús + desplegable (`install.sh`, `barra.py`) | ✅ | ❌ (no hay barra de menús equivalente) | ❌ |
-| Arranque automático al iniciar sesión | ✅ (LaunchAgent) | — | — (usa el Programador de tareas si quieres algo similar) |
+| Icono de bandeja/barra de menús + desplegable (`install.sh`+`barra.py` en macOS; `instalar_windows.py`+`bandeja_windows.py` en Windows) | ✅ | ❌ (no hay barra de menús equivalente) | ✅ [¹] |
+| Arranque automático al iniciar sesión | ✅ (LaunchAgent) | — | ✅ (Programador de tareas, con fallback a la carpeta de Inicio) |
 | Lectura de logs de Claude Code / Codex | ✅ | ✅ | ✅ |
 | Lectura de consumo de OpenCode | ✅ | ✅ | ⚠️ ruta de datos distinta, no detectado todavía |
 | **Modo sin interfaz** `python3 costbar.py --demonio` (ingesta, copias cifradas, ciclo de servidores, presupuestos y panel local, sin icono ni Chrome) | ✅ | ✅ | ✅ (código portable; **pendiente de probar en un Windows real**: ponlo en una tarea programada «al iniciar sesión») |
@@ -97,6 +115,10 @@ lee ahí — Claude Code y Codex sí se detectan igual en los tres sistemas.
 | Secretos (claves de proveedores y paneles) | ✅ Llavero | ❌ | ⚠️ Administrador de credenciales (probado con simulación, sin Windows real) |
 
 Las IPs de intentos de acceso y de sesiones de la caché de servidores se borran a las 48 h y las imágenes del desplegable cada hora.
+
+[¹] En Windows el icono de la bandeja lleva un menú de texto (5 h, hoy, ritmo) y abre el panel en una ventana
+nativa (WebView2) junto al icono, sin el desplegable con imágenes de macOS.
+
 Verificado ejecutando el medidor con `$HOME` vacío (instalación limpia, sin historial previo) además
 de con historial real.
 
@@ -110,6 +132,10 @@ repo y el estilo de commits y de PRs que se usa aquí.
 - **`costbar.py`** — la app de barra de menús (macOS). Muestra el gasto de hoy y, al clicarla, el ritmo
   de la última hora, ayer, 7 días y el desglose por modelo y por proyecto. Avisa por notificación si el
   ritmo pasa de un límite (`config.json`).
+- **`bandeja_windows.py`** / **`instalar_windows.py`** — equivalentes en Windows: icono de bandeja con
+  menú de texto plano (hoy/ritmo/5h, abrir panel, refrescar, salir) y un instalador que crea un entorno
+  virtual propio y registra el arranque automático (Programador de tareas, con fallback a la carpeta
+  de Inicio).
 - **`panel.py`** — el panel visual: `panel.html` con barras por día, modelo y proyecto. Se refresca
   solo cada minuto.
 - **`analizar_gasto.py`** — el informe de texto, para terminal o para cron.
@@ -164,7 +190,8 @@ Desde el icono de la barra abre el panel y pulsa **Ajustes**: ahí editas sin to
 proveedores (modelos que cuentan, cuotas de 5 h, semana y mes), a qué plan va cada origen del log, los
 proyectos (renombrar, ocultar de las listas, presupuesto mensual), los servidores VPS que monitoriza por SSH
 (`docs/guia-servidores.md`) y la alerta de ritmo. Las **claves de API** se
-guardan en el Keychain de macOS, nunca en `config.json` ni en git; de momento solo NaN tiene lector de
+guardan en el almacén de credenciales del sistema (Keychain en macOS, Credential Manager en Windows),
+nunca en `config.json` ni en git; de momento solo NaN tiene lector de
 consumo por API, para el resto la clave se guarda pero el consumo sigue saliendo de los logs. Solo
 funciona abriendo el panel desde la barra, no como fichero suelto ni con la URL escrita a mano: el panel
 pide una **sesión** (la barra abre un enlace de un solo uso que el servidor local cambia por una cookie), así
@@ -357,8 +384,15 @@ python3 -m unittest discover tests   # sin dependencias: unittest de la libreria
 
 Cubren `a_local()` (UTC con Z a hora local, verano/invierno, offsets, cadenas rotas), la
 conversion de horas/dias a local en `parsear()`, el doble registro de Codex (mismo segundo,
-un turno) y el lector de pi (reasoning, dedup, claves locales). Se fija `TZ=Europe/Madrid`
-para que los resultados sean deterministas en cualquier maquina.
+un turno) y el lector de pi (reasoning, dedup, claves locales). Se fija la zona a
+Europe/Madrid (via `zoneinfo`, inyectada en `infobar.lectores_logs`, no con `TZ`+`time.tzset()`:
+eso es POSIX y `time.tzset` ni existe en Windows) para que los resultados sean deterministas en
+cualquier maquina.
+
+En Windows, `zoneinfo` no trae la base de datos IANA (al reves que macOS/Linux, que la toman del
+sistema): instala `pip install tzdata` para que esos tests corran; sin el paquete se saltan solos
+con aviso, en vez de fallar. Los tests de permisos (`test_permisos.py`) y el del Llavero se saltan
+en Windows a proposito: NTFS no tiene bits `chmod` y no hay Llavero de macOS.
 
 ## Licencia
 

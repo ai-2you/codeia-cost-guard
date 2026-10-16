@@ -52,7 +52,8 @@ class GuardarConfigTest(LimpiaConfig):
         self.assertEqual(d["aliases"], {"x": "y"})
         self.assertEqual(d["servidores"], CONFIG_BASE["servidores"])
         self.assertEqual(d["nan_api_key"], "sk-no-debe-salir")
-        self.assertEqual(oct(os.stat(rutas.CONFIG).st_mode & 0o777), "0o600")
+        if os.name != "nt":                    # NTFS no tiene bits de permiso POSIX
+            self.assertEqual(oct(os.stat(rutas.CONFIG).st_mode & 0o777), "0o600")
 
     def test_copias_rotativas(self):
         config_y_estado.guardar_config({"a": 1})
@@ -129,7 +130,8 @@ class ServidoresAparteTest(LimpiaConfig):
         self.assertNotIn("intervalo_normal_s", d)
         self.assertEqual(config_y_estado.cfg()["servidores"], nuevos)
         self.assertEqual(config_y_estado.cfg()["intervalo_normal_s"], 120)
-        self.assertEqual(oct(os.stat(rutas.CONFIG_SERVIDORES).st_mode & 0o777), "0o600")
+        if os.name != "nt":                    # NTFS no tiene bits de permiso POSIX
+            self.assertEqual(oct(os.stat(rutas.CONFIG_SERVIDORES).st_mode & 0o777), "0o600")
 
 
 class EstadoUITest(LimpiaConfig):

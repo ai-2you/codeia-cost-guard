@@ -149,7 +149,10 @@ class SshTest(unittest.TestCase):
         self.assertEqual(c(255, "ssh: Could not resolve hostname h"), "red")
 
     def test_salida_enorme_se_corta_mientras_se_lee(self):
-        with mock.patch.object(servidores_ssh, "orden_ssh", return_value=["sh", "-c", "yes ABCDEFGHIJ | head -c 50000000"]):
+        # python en vez de "sh -c yes | head": sh/yes/head no existen en Windows; el propio
+        # interprete (sys.executable) si esta disponible en los tres sistemas.
+        orden = [sys.executable, "-c", "import sys\nd = b'A' * 65536\nwhile True:\n sys.stdout.buffer.write(d)"]
+        with mock.patch.object(servidores_ssh, "orden_ssh", return_value=orden):
             t0 = time.time()
             salida, error = servidores_ssh.ejecutar({"nombre": "a", "ssh": "h"})
         self.assertEqual(error, "")
@@ -158,7 +161,8 @@ class SshTest(unittest.TestCase):
         self.assertLess(time.time() - t0, 5)
 
     def test_servidor_colgado_respeta_el_tope(self):
-        with mock.patch.object(servidores_ssh, "orden_ssh", return_value=["sleep", "30"]), \
+        orden = [sys.executable, "-c", "import time; time.sleep(30)"]      # "sleep 30" no existe en Windows
+        with mock.patch.object(servidores_ssh, "orden_ssh", return_value=orden), \
              mock.patch.object(servidores_ssh, "TOPE_S", 1):
             t0 = time.time()
             salida, error = servidores_ssh.ejecutar({"nombre": "a", "ssh": "h"})

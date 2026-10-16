@@ -3,8 +3,12 @@
 Arrancar con:  python3 -m unittest discover tests
 
 Foco en el bug de zona horaria (#1): los logs de Claude Code/Codex traen timestamps
-UTC con Z y las claves de dia/hora han de salir en hora LOCAL. Se fija TZ a
-Europe/Madrid para que los resultados sean deterministas en cualquier maquina.
+UTC con Z y las claves de dia/hora han de salir en hora LOCAL. Se fija la zona a
+Europe/Madrid (via zoneinfo, inyectada en lectores_logs) para que los resultados
+sean deterministas en cualquier maquina, Windows incluido: `TZ` + `time.tzset()`
+solo funciona en POSIX, `time.tzset` ni siquiera existe en Windows. En Windows
+hace falta el paquete `tzdata` (zoneinfo no trae la base de datos IANA ahi); con
+`pip install tzdata` estos tests pasan igual, sin el se saltan con aviso.
 """
 import json
 import os
@@ -16,6 +20,15 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aislamiento  # noqa: E402,F401  (HOME y rutas temporales: antes que costbar)
 import costbar  # noqa: E402
+from infobar import lectores_logs  # noqa: E402
+
+try:
+    from zoneinfo import ZoneInfo
+    _MADRID = ZoneInfo("Europe/Madrid")
+    _SIN_TZDATA = ""
+except Exception as e:                 # falta tzdata (tipico en Windows sin el paquete)
+    _MADRID = None
+    _SIN_TZDATA = str(e)
 
 
 def _escribir(d, nombre, regs):
@@ -30,18 +43,15 @@ class TZFix(unittest.TestCase):
     """Fija la zona horaria a Madrid (UTC+2 verano, UTC+1 invierno)."""
 
     def setUp(self):
-        self._tz = os.environ.get("TZ")
-        os.environ["TZ"] = "Europe/Madrid"
-        time.tzset()
+        if _MADRID is None:
+            self.skipTest(f"falta tzdata para zoneinfo ({_SIN_TZDATA}); instala con: pip install tzdata")
+        self._previa = lectores_logs._ZONA_PRUEBA
+        lectores_logs._ZONA_PRUEBA = _MADRID
         self._tmp = tempfile.TemporaryDirectory()
 
     def tearDown(self):
         self._tmp.cleanup()
-        if self._tz is None:
-            os.environ.pop("TZ", None)
-        else:
-            os.environ["TZ"] = self._tz
-        time.tzset()
+        lectores_logs._ZONA_PRUEBA = self._previa
 
     def _carpeta(self, *trozos):
         d = os.path.join(self._tmp.name, *trozos)
