@@ -28,14 +28,15 @@ NOMBRE_TAREA = "CostGuardTray"
 # barra.py/popover.py son exclusivos de macOS (AppKit): aqui no pintan nada, el equivalente es
 # bandeja_windows.py (pystray) + infobar/bandeja_windows_menu.py, que se copian via infobar/*.py
 FICHEROS_RAIZ = ("costbar.py", "bandeja_windows.py", "analizar_gasto.py", "panel.py",
-                  "precio_astra.py", "GUIA.md")
+                  "precio_astra.py", "instalar_reglas_globales.py", "GUIA.md", "AGENTS-snippet.md")
+PAQUETES = ("pillow", "cryptography==46.0.7", "pystray==0.19.5", "pywebview==6.2.1", "pythonnet==3.2.1")
 
 
 def copiar_ficheros(destino):
-    """Copia el motor + infobar/ a destino. config.json no se pisa si ya existe (igual que
-    install.sh): trae tus cuotas y notas por proveedor; servidores.json tampoco se copia nunca
-    (es solo tuyo, fuera de git)."""
-    os.makedirs(destino, exist_ok=True)
+    """Copia lo mismo que install.sh: el motor, infobar/ (con los scripts de infobar/remoto que el alta
+    instala en los servidores) y panel_assets/. config.json no se pisa si ya existe (trae tus cuotas y notas
+    por proveedor); servidores.json tampoco se copia nunca (es solo tuyo, fuera de git)."""
+    os.makedirs(os.path.join(destino, "logs"), exist_ok=True)
     for nombre in FICHEROS_RAIZ:
         origen = os.path.join(AQUI, nombre)
         if os.path.isfile(origen):
@@ -48,10 +49,19 @@ def copiar_ficheros(destino):
         if nombre.endswith(".py"):
             shutil.copy2(os.path.join(origen_infobar, nombre), os.path.join(destino_infobar, nombre))
 
+    destino_remoto = os.path.join(destino_infobar, "remoto")
+    os.makedirs(destino_remoto, exist_ok=True)
+    for nombre in os.listdir(os.path.join(origen_infobar, "remoto")):
+        if nombre.endswith(".sh"):
+            shutil.copy2(os.path.join(origen_infobar, "remoto", nombre), os.path.join(destino_remoto, nombre))
+
     # panel.py lee sus plantillas de aqui (plantilla.html/estilos.css/app.js/graficos.js/ajustes.js);
     # sin esto, abrir el panel desde la bandeja fallaba con FileNotFoundError (500 silencioso).
-    shutil.copytree(os.path.join(AQUI, "panel_assets"), os.path.join(destino, "panel_assets"),
-                     dirs_exist_ok=True)
+    destino_assets = os.path.join(destino, "panel_assets")
+    os.makedirs(destino_assets, exist_ok=True)
+    for nombre in os.listdir(os.path.join(AQUI, "panel_assets")):
+        if nombre.endswith((".css", ".js", ".html")):
+            shutil.copy2(os.path.join(AQUI, "panel_assets", nombre), os.path.join(destino_assets, nombre))
 
     config_destino = os.path.join(destino, "config.json")
     if not os.path.isfile(config_destino):
@@ -60,6 +70,10 @@ def copiar_ficheros(destino):
             config_origen = os.path.join(AQUI, "config.example.json")
         if os.path.isfile(config_origen):
             shutil.copy2(config_origen, config_destino)
+    estado = os.path.join(destino, "state.json")
+    if not os.path.isfile(estado):
+        with open(estado, "w", encoding="utf-8") as f:
+            f.write("{}")
 
 
 def _correr(cmd):
@@ -84,9 +98,9 @@ def _ejecutar(cmd, error_msg):
 
 
 def crear_venv_e_instalar(destino):
-    """Entorno virtual propio en destino/venv con pillow + pystray==0.19.5 (icono de bandeja;
-    backend Windows 100% ctypes, sin pywin32) + pywebview==6.2.1 + pythonnet==3.2.1 (popover nativo del
-    panel). Reejecutar es idempotente: si el venv ya existe no se recrea, solo se
+    """Entorno virtual propio en destino/venv con PAQUETES: pillow y pystray (icono de bandeja; backend Windows
+    100% ctypes, sin pywin32), pywebview y pythonnet (popover nativo del panel) y cryptography (copias cifradas,
+    la misma versión que install.sh). Reejecutar es idempotente: si el venv ya existe no se recrea, solo se
     reinstalan/confirman los paquetes."""
     venv_dir = os.path.join(destino, "venv")
     python_venv = os.path.join(venv_dir, "Scripts", "python.exe")
@@ -95,9 +109,8 @@ def crear_venv_e_instalar(destino):
                   "No se pudo crear el entorno virtual en " + venv_dir)
     _ejecutar([python_venv, "-m", "pip", "install", "--quiet", "--upgrade", "pip"],
               "No se pudo actualizar pip en el entorno virtual")
-    _ejecutar([python_venv, "-m", "pip", "install", "--quiet",
-               "pillow", "pystray==0.19.5", "pywebview==6.2.1", "pythonnet==3.2.1"],
-              "No se pudo instalar pillow/pystray/pywebview/pythonnet en el entorno virtual")
+    _ejecutar([python_venv, "-m", "pip", "install", "--quiet", *PAQUETES],
+              "No se pudo instalar " + ", ".join(PAQUETES) + " en el entorno virtual")
     return venv_dir
 
 
@@ -151,7 +164,7 @@ def main():
     print(f"-> Copiando a {DESTINO}")
     copiar_ficheros(DESTINO)
 
-    print("-> Entorno virtual + pillow + pystray + pywebview + pythonnet")
+    print("-> Entorno virtual + " + ", ".join(p.split("==")[0] for p in PAQUETES))
     venv_dir = crear_venv_e_instalar(DESTINO)
 
     print("-> Registrando arranque automatico (Programador de tareas)")

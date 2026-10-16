@@ -93,8 +93,11 @@ class Trabajador(threading.Thread):
                         log("presupuestos: " + traceback.format_exc()[-400:])
                     if str(cfg().get("almacen") or "sombra").lower() == "sombra":
                         sombra.registrar_si_toca(ULTIMOS.get("vistos"))
+                    lim = r.get("limites") or {}
                     self.entregar("agentes", {"cinco_h": r["cinco_h"]["tok"], "hoy": r["hoy"]["tok"],
-                                              "turnos": r["hoy"]["turnos"], "pct_5h": r.get("pct_5h", 0)})
+                                              "turnos": r["hoy"]["turnos"], "pct_5h": r.get("pct_5h", 0),
+                                              "ritmo": (r.get("ritmo") or {}).get("tok", 0),      # la bandeja de Windows lo enseña en su menú
+                                              "limite_5h": lim.get("limite_5h_tokens") or 0, "limite_hora": lim.get("limite_hora_tokens") or 0})
                 if self.conjunto is None:
                     # primera imagen cuanto antes, con la ultima cache de servidores; la recogida
                     # (que puede tardar segundos por SSH) repinta despues

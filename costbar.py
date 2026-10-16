@@ -58,22 +58,29 @@ def ingerir_cli():
         ing.cierra()
 
 
-def demonio(esperar=True):
-    """python3 costbar.py --demonio: todo lo que hace la barra, sin icono ni Chrome (ingesta, copias cifradas, ciclo de servidores,
-    presupuestos y panel local). Es la forma de tenerlo en marcha en Windows (tarea programada o servicio), Linux o un servidor.
-    Con `esperar=False` arranca los hilos y los devuelve (los tests)."""
-    import signal
-    import threading
+def arrancar_hilos(entregar=lambda *a: None):
+    """Panel local, trabajador sin Chrome (agentes, servidores, presupuestos, avisos), ingesta y copias: lo que hace la barra de macOS
+    salvo pintar el desplegable. Lo usan el modo demonio y la bandeja de Windows, que recibe con `entregar` lo mismo que la barra."""
     from infobar import permisos, trabajador_barra
     permisos.excluir_datos_sensibles()
     servir()
-    hilos = [trabajador_barra.Trabajador(lambda *a: None, pintar=False)]
+    hilos = [trabajador_barra.Trabajador(entregar, pintar=False)]
     if str(cfg().get("almacen") or "sombra").lower() != "desactivado":
         from infobar.hilo_copias import HiloCopias
         from infobar.ingestor import HiloIngesta
         hilos += [HiloIngesta(), HiloCopias()]
     for h in hilos:
         h.start()
+    return hilos
+
+
+def demonio(esperar=True):
+    """python3 costbar.py --demonio: todo lo que hace la barra, sin icono ni Chrome (ingesta, copias cifradas, ciclo de servidores,
+    presupuestos y panel local). Es la forma de tenerlo en marcha en Windows (tarea programada o servicio), Linux o un servidor.
+    Con `esperar=False` arranca los hilos y los devuelve (los tests)."""
+    import signal
+    import threading
+    hilos = arrancar_hilos()
     log("demonio: trabajador" + (", ingesta y copias" if len(hilos) > 1 else "") + " en marcha")
     if not esperar:
         return hilos

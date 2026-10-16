@@ -1,14 +1,11 @@
-"""Formateo puro del menu de la bandeja de Windows (fase 2), a partir del dict que devuelve
-costbar.escanear().
+"""Formateo puro del menú de la bandeja de Windows, a partir del resumen «agentes» que entrega el hilo
+trabajador (infobar/trabajador_barra.py), el mismo que pinta el icono de macOS.
 
 Separado de bandeja_windows.py (que importa pystray y tiene la guarda de plataforma) para que
 los tests ejerciten este formato en cualquier sistema operativo, sin crear un icono real de
 pystray ni depender de que el modulo raiz pueda importarse.
 
-No se toca costbar.py (regla del plan: lo de macOS queda exactamente igual), asi que el calculo
-de fraccion/alerta/textos de CostBar.refrescar (rumps, macOS) se replica aqui para el subconjunto
-que pide la fase 2 (5 h, hoy, ritmo). fila()/fmt_tok() SI se reusan tal cual: ya son
-cross-platform (infobar/formato_e_icono.py).
+fila() y fmt_tok() se reutilizan de infobar/formato_e_icono.py, que ya es multiplataforma.
 
 El icono en si NO reusa formato_e_icono.icono_png(): esa funcion dibuja una "pildora" de 62x22
 translucida pensada para la barra de menus de macOS (acepta anchos arbitrarios); un icono de
@@ -42,44 +39,42 @@ def imagen_icono_windows(fraccion, alerta=False, tamano=64):
     return im
 
 
-def texto_5h(r):
-    """'Ultimas 5 h        1,2 M  ██░░░░░░░░   24 % del limite', o '... tokens' sin limite declarado."""
-    c5 = r["cinco_h"]
-    lim5 = r["limites"].get("limite_5h_tokens") or 0
-    sufijo = f"{r['pct_5h']:.0f} % del limite" if lim5 else "tokens"
-    return fila("Ultimas 5 h", fmt_tok(c5["tok"]), r["pct_5h"] if lim5 else None) + f"   {sufijo}"
+def texto_5h(a):
+    """'Últimas 5 h        1,2 M  ██░░░░░░░░   24 % del límite', o '... tokens' sin límite declarado."""
+    lim5 = a.get("limite_5h") or 0
+    sufijo = f"{a.get('pct_5h') or 0:.0f} % del límite" if lim5 else "tokens"
+    return fila("Últimas 5 h", fmt_tok(a["cinco_h"]), (a.get("pct_5h") or 0) if lim5 else None) + f"   {sufijo}"
 
 
-def texto_hoy(r):
+def texto_hoy(a):
     """'Hoy                  300,0 K   12 turnos'."""
-    h = r["hoy"]
-    return fila("Hoy", fmt_tok(h["tok"])) + f"   {h['turnos']} turnos"
+    return fila("Hoy", fmt_tok(a["hoy"])) + f"   {a['turnos']} turnos"
 
 
-def texto_ritmo(r):
-    """'Ritmo ultima hora: 50,0 K tokens', con '  ALTO' si supera el limite por hora."""
-    alto = r["ritmo"]["tok"] >= (r["limites"].get("limite_hora_tokens") or 0)
-    return f"Ritmo ultima hora: {fmt_tok(r['ritmo']['tok'])} tokens" + ("  ALTO" if alto else "")
+def _ritmo_alto(a):
+    lim = a.get("limite_hora") or 0
+    return bool(lim) and (a.get("ritmo") or 0) >= lim
 
 
-def fraccion_e_icono(r):
-    """(fraccion 0..1 para la barra de progreso del icono, alerta bool): mismo calculo que
-    CostBar.refrescar en costbar.py (macOS), sin tocar ese fichero."""
-    c5 = r["cinco_h"]
-    lim5 = r["limites"].get("limite_5h_tokens") or 0
-    lim_hora = r["limites"].get("limite_hora_tokens") or 1
-    alerta = r["ritmo"]["tok"] >= (r["limites"].get("limite_hora_tokens") or 0)
-    fraccion = (c5["tok"] / lim5) if lim5 else (r["ritmo"]["tok"] / lim_hora or 0.34)
-    return fraccion, alerta
+def texto_ritmo(a):
+    """'Ritmo última hora: 50,0 K tokens', con '  ALTO' si supera el límite por hora declarado."""
+    return f"Ritmo última hora: {fmt_tok(a.get('ritmo') or 0)} tokens" + ("  ALTO" if _ritmo_alto(a) else "")
 
 
-def titulo_icono(r):
-    """La cifra de referencia de la ventana de 5 h (mismo dato que destacaba el PNG de macOS)."""
-    return fmt_tok(r["cinco_h"]["tok"])
+def fraccion_e_icono(a):
+    """(fracción 0..1 del anillo, alerta): la parte consumida del límite de 5 h; sin límite declarado, el ritmo
+    contra el límite por hora, y sin ninguno de los dos (o sin ritmo), un tercio fijo (el anillo no dice nada que no se sepa)."""
+    lim5, lim_hora = a.get("limite_5h") or 0, a.get("limite_hora") or 0
+    if lim5:
+        fraccion = a["cinco_h"] / lim5
+    elif lim_hora:
+        fraccion = (a.get("ritmo") or 0) / lim_hora or 0.34      # sin ritmo, el mismo tercio: un anillo vacío parece apagado
+    else:
+        fraccion = 0.34
+    return fraccion, _ritmo_alto(a)
 
 
-def texto_tooltip(r):
-    """Texto corto para el tooltip nativo de Windows (pystray Icon.title) al pasar el raton por
-    encima: con el icono reducido a un anillo sin digitos (ver imagen_icono_windows), aqui es
-    donde se leen las cifras exactas sin abrir el menu. Se mantiene corto a proposito."""
-    return f"CostGuard · 5h {titulo_icono(r)} · hoy {fmt_tok(r['hoy']['tok'])}"
+def texto_tooltip(a):
+    """Tooltip del icono (pystray Icon.title): el anillo no lleva cifras, así que se leen aquí sin abrir el menú.
+    Windows corta el tooltip a 127 caracteres: se mantiene corto."""
+    return f"CostGuard · 5 h {fmt_tok(a['cinco_h'])} · hoy {fmt_tok(a['hoy'])}"

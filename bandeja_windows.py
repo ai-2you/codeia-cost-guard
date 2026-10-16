@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """bandeja_windows: icono en la bandeja de sistema de Windows, con la cifra de la ventana de 5 h.
 
-Equivalente Windows de barra.py (macOS, AppKit) / costbar.py -> CostBar (rumps): mismo motor
-(costbar.escanear(), costbar.url_panel(), costbar.servir(), costbar.endurecer()), con pystray
+Equivalente Windows de barra.py (macOS, AppKit): arranca los mismos hilos (costbar.arrancar_hilos():
+panel local, trabajador de agentes y servidores, ingesta y copias) y pinta lo que el trabajador entrega, con pystray
 (ctypes puro en Windows, sin pywin32) para el icono y un popover nativo (infobar/
 bandeja_windows_popover.py, pywebview/WebView2) que carga el panel SIN navegador -- lo mas
 parecido al desplegable "glass" de macOS que se puede conseguir sin ese PNG renderizado por
@@ -14,7 +14,7 @@ navegador Chromium, al navegador por defecto a secas.
 Arquitectura de hilos: pywebview.start() EXIGE correr en el hilo principal (asi lo dice su propia
 documentacion), asi que aqui el hilo principal lo ocupa webview.start() y pystray corre con
 icon.run_detached() (pensado justo para integrarse con el bucle de otra libreria): spawnea su
-propio hilo internamente. El refresco cada 60 s va en un hilo daemon aparte (_bucle_refresco).
+propio hilo internamente. El trabajador escanea cada minuto y llama a _entregar desde su hilo.
 
 Uso:
     python bandeja_windows.py
@@ -27,7 +27,6 @@ if sys.platform != "win32":
 import os           # noqa: E402  (tras la guarda de plataforma, a proposito)
 import subprocess   # noqa: E402
 import threading    # noqa: E402
-import time          # noqa: E402
 import webbrowser   # noqa: E402
 import winreg        # noqa: E402  (solo Windows: ya pasamos la guarda de arriba)
 
@@ -41,32 +40,23 @@ import costbar  # noqa: E402
 from infobar import bandeja_windows_menu as bwm  # noqa: E402
 from infobar import bandeja_windows_popover as popover  # noqa: E402
 
-REFRESCO_S = 60
-
-_icon = None  # referencia global: la necesitan el bucle de refresco y las acciones del menu
+_icon = None  # referencia global: la necesitan _entregar y las acciones del menu
 _usa_popover = False   # True solo si el popover nativo se creo y arranco sin errores (ver main())
-_lock_refresco = threading.Lock()  # _refrescar() la llaman tanto el hilo de refresco cada 60s
-                                    # como el click de "Refrescar ahora" (hilo de pystray): sin
-                                    # esto, los dos podrian reasignar icon.icon/icon.menu a la vez
+_hilos = []            # los de costbar.arrancar_hilos(): el trabajador recibe "Refrescar ahora" y todos paran al salir
+_agentes = {"cinco_h": 0, "hoy": 0, "turnos": 0, "pct_5h": 0, "ritmo": 0, "limite_5h": 0, "limite_hora": 0}
+_lock_icono = threading.Lock()   # _entregar (hilo trabajador) y las acciones (hilo de pystray) repintan el icono
 
 
-def _imagen_para(r):
-    """PIL.Image del icono actual: anillo de progreso neutro (ver infobar/bandeja_windows_menu,
-    imagen_icono_windows) generado en memoria, sin escribir PNG a disco."""
-    fraccion, alerta = bwm.fraccion_e_icono(r)
-    return bwm.imagen_icono_windows(fraccion, alerta)
-
-
-def _construir_menu(r):
+def _construir_menu(a):
     """Texto plano: 5h/hoy/ritmo (solo informativos) + separador + acciones.
 
     "Abrir panel" lleva default=True: pystray en Windows llama al item default con el CLIC
     IZQUIERDO sobre el icono (ver pystray._win32._on_notify), ademas de poder elegirse desde el
-    menu con clic derecho como cualquier otro item -- las dos formas de abrirlo, pedidas."""
+    menu con clic derecho como cualquier otro item."""
     return pystray.Menu(
-        pystray.MenuItem(bwm.texto_5h(r), None, enabled=False),
-        pystray.MenuItem(bwm.texto_hoy(r), None, enabled=False),
-        pystray.MenuItem(bwm.texto_ritmo(r), None, enabled=False),
+        pystray.MenuItem(bwm.texto_5h(a), None, enabled=False),
+        pystray.MenuItem(bwm.texto_hoy(a), None, enabled=False),
+        pystray.MenuItem(bwm.texto_ritmo(a), None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Abrir panel", _accion_panel, default=True),
         pystray.MenuItem("Refrescar ahora", _accion_refrescar),
@@ -74,17 +64,24 @@ def _construir_menu(r):
     )
 
 
-def _refrescar():
-    """Recoge el estado actual y repinta icono + menu + tooltip. Llamable desde cualquier hilo
-    (con lock: el hilo de refresco y el click de "Refrescar ahora" pueden solaparse)."""
-    with _lock_refresco:
-        r = costbar.escanear()
+def _pinta():
+    with _lock_icono:
         if _icon is not None:
-            _icon.icon = _imagen_para(r)
-            _icon.menu = _construir_menu(r)
-            _icon.title = bwm.texto_tooltip(r)
-        costbar.log(f"bandeja: refresco ok, 5h {bwm.titulo_icono(r)} tok, hoy {r['hoy']['turnos']} turnos")
-        return r
+            _icon.icon = bwm.imagen_icono_windows(*bwm.fraccion_e_icono(_agentes))
+            _icon.menu = _construir_menu(_agentes)
+            _icon.title = bwm.texto_tooltip(_agentes)
+
+
+def _entregar(tipo, dato):
+    """Lo llama el hilo trabajador (como en barra.py). Solo interesa el resumen de agentes; una excepcion no debe llegar al trabajador."""
+    global _agentes
+    if tipo != "agentes":
+        return
+    try:
+        _agentes = {**_agentes, **dict(dato)}
+        _pinta()
+    except Exception as e:
+        costbar.log(f"bandeja: ERROR al pintar el icono {type(e).__name__}: {e}")
 
 
 VENTANA_PANEL = "440,760"  # ancho,alto en px del navegador en modo --app (fallback sin popover):
@@ -118,7 +115,11 @@ def _ruta_navegador_app():
 def _accion_abrir_panel_navegador(url):
     """Respaldo cuando no hay popover nativo (pywebview no instalado, o fallo al crearlo/arrancarlo
     -- ver main()): ventana de "aplicacion" de Edge/Chrome (sin pestanas ni barra de direcciones)
-    y, si no hay ninguno de los dos, el navegador por defecto."""
+    y, si no hay ninguno de los dos, el navegador por defecto.
+
+    Aqui el ticket de entrada va en la linea de comandos del navegador (en macOS se evita con NSWorkspace). En Windows esa
+    linea solo la leen los procesos de tu usuario y los administradores, que ya pueden leer tus credenciales; y el ticket
+    es de un solo uso y caduca a los 60 s. El popover nativo no tiene este problema: la URL no sale del proceso."""
     try:
         navegador = _ruta_navegador_app()
         if navegador:
@@ -137,38 +138,30 @@ def _accion_panel(icon):
 
 
 def _accion_refrescar(icon):
-    try:
-        _refrescar()
-    except Exception as e:
-        costbar.log(f"bandeja: ERROR refrescar-ahora {type(e).__name__}: {e}")
+    if _hilos:
+        _hilos[0].pide("refrescar")       # el trabajador recoge todo ya y entrega el resumen nuevo
 
 
 def _accion_salir(icon):
     icon.stop()
+    for h in _hilos:                      # ingesta y copias cierran su base antes de salir
+        if hasattr(h, "parar"):
+            h.parar.set()
+    for h in _hilos:
+        if hasattr(h, "parar"):
+            h.join(timeout=10)
     if _usa_popover:
         # termina webview.start() (hilo principal, bloqueante): sin esto el proceso quedaria
         # vivo en segundo plano aunque el icono ya hubiera desaparecido de la bandeja
         popover.cerrar(costbar.log)
 
 
-def _bucle_refresco():
-    """Cada 60 s, en un hilo daemon aparte: una excepcion no atrapada no debe matar el hilo ni
-    dejar el icono congelado (mismo patron defensivo que CostBar.refrescar en macOS)."""
-    while True:
-        time.sleep(REFRESCO_S)
-        try:
-            _refrescar()
-        except Exception as e:
-            costbar.log(f"bandeja: ERROR bucle de refresco {type(e).__name__}: {e}")
-
-
 def main():
     global _icon, _usa_popover
     costbar.endurecer()       # umask / permisos de lo que ya hubiera: todo esto es sensible
-    costbar.servir()          # panel + configurador, en su propio hilo
-    r = costbar.escanear()
-    _icon = pystray.Icon("CostGuard", _imagen_para(r), bwm.texto_tooltip(r), _construir_menu(r))
-    threading.Thread(target=_bucle_refresco, name="bandeja-refresco", daemon=True).start()
+    _icon = pystray.Icon("CostGuard", bwm.imagen_icono_windows(*bwm.fraccion_e_icono(_agentes)),
+                         bwm.texto_tooltip(_agentes), _construir_menu(_agentes))
+    _hilos.extend(costbar.arrancar_hilos(_entregar))     # panel local, trabajador, ingesta y copias
 
     if popover.TIENE_WEBVIEW:
         try:

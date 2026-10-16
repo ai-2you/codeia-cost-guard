@@ -295,5 +295,20 @@ class TestModoSinInterfaz(unittest.TestCase):
         self.assertEqual((len(hilos), arrancados), (1, [False]))        # sin interfaz: el trabajador no pinta
 
 
+
+class RutasMezcladasTest(unittest.TestCase):
+    """En Windows glob deja "/" en el trozo literal del patrón y "\\" en lo que recorre: la misma ruta trae las dos."""
+
+    def test_sombra_reconoce_el_agente_con_separadores_mezclados(self):
+        from infobar import sombra
+        self.assertEqual(sombra.agente_de("C:/Users/x/.claude/projects\\p\\s.jsonl", {}), "claude")
+        self.assertEqual(sombra.agente_de("C:\\Users\\x\\.codex\\sessions\\s.jsonl", {}), "codex")
+
+    def test_lector_antiguo_normaliza_las_barras_invertidas(self):
+        from infobar import lectores_logs
+        self.assertEqual(lectores_logs._posix("C:\\Users\\x\\proyecto"), "C:/Users/x/proyecto")
+        self.assertEqual(lectores_logs._posix(None), "")
+
+
 if __name__ == "__main__":
     unittest.main()

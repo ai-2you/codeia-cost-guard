@@ -26,9 +26,10 @@ def agente_de(clave, registro):
     if clave.startswith("sqlite:"):
         proyecto = str(registro.get("proyecto") or "")
         return "opencode" if proyecto.startswith("OpenCode") else "hermes" if proyecto.startswith("Hermes") else "otro"
-    if "/.claude/" in clave:
+    plano = clave.replace("\\", "/")         # Windows: glob mezcla "/" y "\\" en la misma ruta
+    if "/.claude/" in plano:
         return "claude"
-    if "/.codex/" in clave:
+    if "/.codex/" in plano:
         return "codex"
     return "otro"
 

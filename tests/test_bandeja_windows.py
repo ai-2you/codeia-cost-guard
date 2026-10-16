@@ -1,13 +1,8 @@
-"""Tests de infobar.bandeja_windows_menu: solo la logica pura de formateo del menu de la
-bandeja de Windows (fase 2), con un dict de ejemplo que imita lo que devuelve
-costbar.escanear(). No crea ningun icono real de pystray ni importa bandeja_windows.py
-(ese fichero tiene una guarda de plataforma que corta en no-Windows).
+"""Tests de infobar.bandeja_windows_menu: el formateo del menú y el icono de la bandeja de Windows a partir del resumen
+«agentes» que entrega el hilo trabajador. No crea ningún icono de pystray ni importa bandeja_windows.py (lleva una guarda
+de plataforma), así que corren en cualquier sistema; los del icono solo necesitan Pillow.
 
 Arrancar con:  python3 -m unittest discover tests
-
-Se salta entera si pystray no esta instalado: esta fase depende de esa aprobacion de
-dependencia (ver plan), asi que el resto de la suite (macOS/Linux/CI sin pystray) no se ve
-afectado por ella.
 """
 import os
 import sys
@@ -16,37 +11,31 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    import pystray  # noqa: F401
-    _TIENE_PYSTRAY = True
+    import PIL  # noqa: F401
+    _TIENE_PIL = True
 except ImportError:
-    _TIENE_PYSTRAY = False
+    _TIENE_PIL = False
 
 from infobar import bandeja_windows_menu as bwm  # noqa: E402
 
 
 def _r_ejemplo(cinco_h_tok=1_200_000, pct_5h=24.0, limite_5h=5_000_000, hoy_tok=300_000,
                hoy_turnos=12, ritmo_tok=50_000, limite_hora=8_000_000):
-    """Subconjunto real de costbar.escanear(): solo las claves que usa bandeja_windows_menu."""
-    return {
-        "cinco_h": {"tok": cinco_h_tok},
-        "pct_5h": pct_5h,
-        "hoy": {"tok": hoy_tok, "turnos": hoy_turnos},
-        "ritmo": {"tok": ritmo_tok},
-        "limites": {"limite_5h_tokens": limite_5h, "limite_hora_tokens": limite_hora},
-    }
+    """El resumen «agentes» tal como lo entrega infobar/trabajador_barra.py."""
+    return {"cinco_h": cinco_h_tok, "pct_5h": pct_5h, "hoy": hoy_tok, "turnos": hoy_turnos,
+            "ritmo": ritmo_tok, "limite_5h": limite_5h, "limite_hora": limite_hora}
 
 
-@unittest.skipUnless(_TIENE_PYSTRAY, "pystray no esta instalado (dependencia de la fase 2)")
 class TextoMenuTest(unittest.TestCase):
     def test_texto_5h_con_limite_declarado(self):
         txt = bwm.texto_5h(_r_ejemplo(cinco_h_tok=1_200_000, pct_5h=24.0, limite_5h=5_000_000))
         self.assertIn("1,2 M", txt)
-        self.assertIn("24 % del limite", txt)
+        self.assertIn("24 % del límite", txt)
 
     def test_texto_5h_sin_limite_declarado(self):
         txt = bwm.texto_5h(_r_ejemplo(limite_5h=0))
         self.assertTrue(txt.endswith("tokens"))
-        self.assertNotIn("% del limite", txt)
+        self.assertNotIn("% del límite", txt)
 
     def test_texto_hoy(self):
         txt = bwm.texto_hoy(_r_ejemplo(hoy_tok=300_000, hoy_turnos=12))
@@ -81,8 +70,19 @@ class TextoMenuTest(unittest.TestCase):
         _, alerta = bwm.fraccion_e_icono(_r_ejemplo(ritmo_tok=9_000_000, limite_hora=8_000_000))
         self.assertTrue(alerta)
 
-    def test_titulo_icono(self):
-        self.assertEqual(bwm.titulo_icono(_r_ejemplo(cinco_h_tok=1_200_000)), "1,2 M")
+    def test_sin_limite_por_hora_el_ritmo_nunca_es_alto(self):
+        a = _r_ejemplo(ritmo_tok=9_000_000, limite_hora=0)
+        self.assertNotIn("ALTO", bwm.texto_ritmo(a))
+        self.assertFalse(bwm.fraccion_e_icono(a)[1])
+
+    def test_sin_ningun_limite_el_anillo_queda_en_un_tercio(self):
+        self.assertAlmostEqual(bwm.fraccion_e_icono(_r_ejemplo(limite_5h=0, limite_hora=0))[0], 0.34)
+
+    def test_resumen_incompleto_no_rompe(self):
+        a = {"cinco_h": 0, "hoy": 0, "turnos": 0}           # un trabajador anterior sin ritmo ni límites
+        self.assertIn("tokens", bwm.texto_5h(a))
+        self.assertIn("0 turnos", bwm.texto_hoy(a))
+        self.assertNotIn("ALTO", bwm.texto_ritmo(a))
 
     def test_tooltip_trae_5h_y_hoy(self):
         txt = bwm.texto_tooltip(_r_ejemplo(cinco_h_tok=1_200_000, hoy_tok=300_000))
@@ -90,10 +90,8 @@ class TextoMenuTest(unittest.TestCase):
         self.assertIn("300,0 K", txt)
 
 
-@unittest.skipUnless(_TIENE_PYSTRAY, "pystray no esta instalado (dependencia de la fase 2)")
+@unittest.skipUnless(_TIENE_PIL, "Pillow no está instalado")
 class ImagenIconoTest(unittest.TestCase):
-    """imagen_icono_windows no usa pystray (solo PIL), pero se agrupa con el resto de la fase 2:
-    si no hay pystray no hay bandeja que pinte el icono, no tiene sentido probarlo aislado."""
 
     def test_devuelve_imagen_cuadrada_rgba(self):
         im = bwm.imagen_icono_windows(0.5, alerta=False, tamano=64)
