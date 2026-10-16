@@ -1,14 +1,38 @@
-<div class="cab"><div><h1>Consumo de tokens</h1><div class="sub" id="sub"></div></div>
-<div class="nav"><button id="nav-panel" class="on" data-a="vista" data-v="panel">Panel</button><button id="nav-historico" data-a="vista" data-v="historico">Histórico</button><button id="nav-servidores" data-a="vista" data-v="servidores">Servidores</button><button id="nav-ajustes" data-a="vista" data-v="ajustes">Ajustes</button><button id="tema" data-a="cambiarTema">Modo oscuro</button></div></div>
+<div class="envoltura">
+<header class="cab">
+  <div class="escudo" id="escudo"></div>
+  <div><h1 id="titulo">Mis agentes</h1><div class="sub" id="sub"></div></div>
+  <div class="cab-der">
+    <button id="tema" class="icono-btn" data-a="cambiarTema" aria-label="Cambiar tema">Tema</button>
+    <button class="icono-btn" data-a="refrescar" aria-label="Actualizar" title="Actualizar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+  </div>
+</header>
+<nav class="nav seg grande vidrio" aria-label="Vistas"><button id="nav-panel" class="on" data-a="vista" data-v="panel">Agentes</button><button id="nav-historico" data-a="vista" data-v="historico">Histórico</button><button id="nav-servidores" data-a="vista" data-v="servidores">Servidores</button><button id="nav-ajustes" data-a="vista" data-v="ajustes">Ajustes</button></nav>
+
 <div id="vista-panel">
-<div class="fila-b" id="f-periodo"></div>
-<div class="fila-b" id="f-plan"></div>
-<div class="rejilla" id="kpis"></div>
-<div class="rejilla" id="detalle"></div>
-<div id="fuentes"></div>
-<div id="tablas"></div>
+  <div class="filtros"><div class="grupo" id="f-periodo"></div><div class="grupo" id="f-plan"></div></div>
+  <div class="rej">
+    <div class="tj c5" id="k-5h"></div><div class="tj c4" id="k-ritmo"></div><div class="tj c3" id="k-cache"></div>
+    <div class="tj c4" id="k-hoy"></div><div class="tj c4" id="k-semana"></div><div class="tj c4" id="k-mes"></div>
+  </div>
+  <div class="col-f" id="sec-dia"></div>
+  <div id="detalle-dia" class="vidrio"></div>
+  <div class="rej">
+    <div class="c7 col-f" id="sec-planes"></div>
+    <div class="c5 col-f" id="sec-cuotas"></div>
+  </div>
+  <div class="rej">
+    <div class="c6 col-f" id="sec-modelos"></div>
+    <div class="c6 col-f" id="sec-proyectos"></div>
+  </div>
+  <div class="col-f" id="sec-matriz"></div>
+  <div class="rej">
+    <div class="c6 col-f" id="sec-hoy"></div>
+    <div class="c6 col-f" id="sec-apps"></div>
+  </div>
 </div>
 <div id="vista-historico" hidden></div>
 <div id="vista-servidores" hidden></div>
 <div id="vista-ajustes" hidden></div>
-<footer id="pie"></footer>
+<footer class="pie-pag" id="pie"></footer>
+</div>

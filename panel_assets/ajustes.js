@@ -3,7 +3,7 @@
 (function(){
   let A = null, enAjustes = false;
   const $ = id => document.getElementById(id);
-  const fmt = v => { v = +v || 0; const u = ["","K","M","B"]; let i = 0; while (v >= 1000 && i < 3) { v /= 1000; i++; } return (i ? v.toFixed(1) : v) + (u[i] ? " " + u[i] : ""); };
+  const fmt = v => { v = +v || 0; const u = ["","K","M","B"]; let i = 0; while (v >= 1000 && i < 3) { v /= 1000; i++; } return (i ? v.toFixed(1).replace(".", ",") : v) + (u[i] ? " " + u[i] : ""); };      // coma decimal, como el resto del panel
   function h(tag, attrs, ...hijos){
     const e = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
@@ -70,13 +70,16 @@
     const api = info.api_soportada
       ? h("label", {style: "flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;color:var(--texto)"},
           h("input", {type: "checkbox", "data-k": "uso_api", checked: !!p.uso_api}), "Leer el consumo real por API (cuota en vivo)")
-      : h("span", {class: "chip aviso"}, "consumo por API aún no soportado: se mide con los logs");
+      : h("span", {class: "chip", title: "Este proveedor aún no tiene lectura por API: su consumo sale de los logs de tus agentes"}, "consumo desde los logs");
     return h("div", {class: "prov", "data-nombre": p.nombre},
-      h("div", {class: "prov-cab"}, h("strong", {}, p.nombre), k.estado, api),
+      h("div", {class: "prov-cab"},
+        h("input", {class: "nombre-prov", "data-k": "nombre", value: p.nombre, maxlength: 40, "aria-label": "Nombre del plan", disabled: !!info.clave_guardada,
+          title: info.clave_guardada ? "Tiene una clave en el Llavero guardada con este nombre: quítala antes de renombrar el plan" : "Nombre del plan: es el que ves en todo el panel"}),
+        k.estado, api),
       h("div", {class: "campos"},
-        campo("Modelos que cuentan (separados por coma)", h("input", {class: "ancho", "data-k": "modelos", value: (p.modelos || []).join(", ")})),
+        h("label", {class: "ancho-total"}, "Modelos que cuentan (separados por coma)", h("input", {class: "ancho", "data-k": "modelos", value: (p.modelos || []).join(", ")})),
         campo("Límite 5 h (tokens)", num("limite_5h_tokens")), campo("Límite semanal", num("limite_semana_tokens")), campo("Límite mensual", num("limite_mes_tokens")),
-        info.api_soportada ? campo("Cuotas mensuales por modelo", cuotas) : null),
+        info.api_soportada ? h("label", {class: "ancho-total"}, "Cuotas mensuales por modelo (modelo = tokens, una por línea)", cuotas) : null),
       k.fila);
   }
 
@@ -315,7 +318,15 @@
         h("label", {style: "margin-left:14px"}, h("input", {type: "checkbox", id: "g-avisos", checked: c.avisos_presupuesto !== false}), " Avisar con una notificación del sistema")));
   }
 
-  function pinta(){
+  /* plan al que va cada origen: un desplegable de verdad con los planes declarados; vacío = el nombre que ya trae el log */
+  function selectorPlan(origen, actual){
+    const nombres = A.config.proveedores.map(p => p.nombre);
+    if (actual && !nombres.includes(actual)) nombres.push(actual);          // un alias antiguo que ya no es un plan se conserva
+    return h("select", {class: "ancho", "data-origen": origen, "aria-label": "Plan de " + origen},
+      h("option", {value: "", selected: !actual}, "Como lo nombra el log"), ...nombres.map(n => h("option", {value: n, selected: n === actual}, n)));
+  }
+
+  function secciones(){
     const c = A.config;
     const orig = Object.entries(A.origenes).sort((a, b) => b[1] - a[1]);
     const proy = Object.entries(A.proyectos).sort((a, b) => b[1] - a[1]);
@@ -335,8 +346,7 @@
         h("p", {class: "ayuda"}, "Lo que dice cada log y a qué plan lo asignas. Se aplica en el siguiente refresco."),
         h("table", {}, h("tr", {}, h("th", {}, "Origen"), h("th", {}, "Tokens 30 d"), h("th", {style: "text-align:left"}, "Plan")),
           ...orig.map(([k, v]) => h("tr", {}, h("td", {}, h("code", {}, k)), h("td", {}, fmt(v)),
-            h("td", {}, h("input", {class: "ancho", "data-origen": k, value: c.aliases[k] || "", list: "planes", placeholder: "p. ej. NaN, OpenCode Go"})))))),
-      h("datalist", {id: "planes"}, ...c.proveedores.map(p => h("option", {value: p.nombre}))),
+            h("td", {}, selectorPlan(k, c.aliases[k] || "")))))),
       h("section", {}, h("h2", {}, "Proyectos"),
         h("p", {class: "ayuda"}, "Renombra o oculta de las listas. Ocultar no cambia los totales. Los presupuestos se ponen en su propia sección."),
         proy.length ? h("table", {}, h("tr", {}, h("th", {}, "Detectado"), h("th", {}, "Tokens 30 d"), h("th", {style: "text-align:left"}, "Nombre a mostrar"), h("th", {}, "Ocultar")),
@@ -367,14 +377,43 @@
     ];
   }
 
+  /* Ajustes en dos columnas: menú de secciones a la izquierda y una sección cada vez a la derecha, con su título fuera
+     de la tarjeta como en el resto del panel. Las secciones ocultas siguen en la página: leer() recoge todos los campos. */
+  let seccionActiva = null;
+  const ICONO_SECCION = {"Proveedores, planes y claves": "moneda", "Origen (según el log) → plan": "ruta", "Proyectos": "carpeta", "Presupuestos": "hucha",
+    "Servidores (VPS)": "servidor", "Copias cifradas": "copia", "General": "ajustes"};
+  const iconoDom = n => new DOMParser().parseFromString(icono(n).replace("<svg ", "<svg xmlns=\"http://www.w3.org/2000/svg\" "), "image/svg+xml").documentElement;
+  function pinta(){
+    const nodos = secciones().filter(Boolean);
+    const secs = nodos.filter(n => n.tagName === "SECTION"), barraGuardar = nodos.find(n => n.classList && n.classList.contains("guardar"));
+    const sueltos = nodos.filter(n => n.tagName !== "SECTION" && n !== barraGuardar);
+    const titulos = secs.map(sec => { const t = sec.querySelector(":scope > h2"), txt = t ? t.textContent : "Ajustes"; if (t) t.remove(); return txt; });
+    if (!titulos.includes(seccionActiva)) seccionActiva = titulos[0];
+    const bloques = secs.map((sec, i) => h("div", {class: "col-f", hidden: titulos[i] !== seccionActiva}, h("div", {class: "sec"}, h("span", {}, titulos[i])), sec));
+    const menu = h("nav", {class: "menu-aj vidrio", "aria-label": "Secciones de ajustes"}, ...titulos.map((t, i) => h("button", {class: t === seccionActiva ? "on" : "", onclick: () => {
+      seccionActiva = t; menu.querySelectorAll("button").forEach((b, j) => b.classList.toggle("on", j === i)); bloques.forEach((b, j) => { b.hidden = j !== i; });
+    }}, iconoDom(ICONO_SECCION[t] || "ajustes"), t)));
+    return [h("div", {class: "ajustes"}, menu, h("div", {class: "aj-cuerpo"}, ...bloques, barraGuardar)), ...sueltos];
+  }
+
   /* vuelca lo escrito en el formulario a A.config */
   function leer(){
     const c = A.config, raiz = $("vista-ajustes");
+    // un plan renombrado arrastra los orígenes y presupuestos que lo nombraban (se leen después del DOM con el nombre viejo)
+    const renombres = {};
     raiz.querySelectorAll(".prov").forEach(div => {
       const p = c.proveedores.find(x => x.nombre === div.dataset.nombre); if (!p) return;
       div.querySelectorAll("[data-k]").forEach(i => {
         const k = i.dataset.k;
-        if (k === "modelos") p.modelos = lista(i.value);
+        if (k === "nombre") {
+          const nuevo = i.value.trim();
+          if (nuevo && nuevo !== p.nombre && !c.proveedores.some(x => x !== p && x.nombre === nuevo)) {
+            renombres[p.nombre] = nuevo;
+            const info = A.proveedores.find(x => x.nombre === p.nombre); if (info) info.nombre = nuevo;
+            p.nombre = nuevo; div.dataset.nombre = nuevo;
+          }
+        }
+        else if (k === "modelos") p.modelos = lista(i.value);
         else if (k === "uso_api") p.uso_api = i.checked ? "nan" : "";
         else if (k === "cuotas_mes") { p.cuotas_mes = {}; i.value.split("\n").forEach(l => { const m = l.split("="); if (m.length === 2 && m[0].trim()) p.cuotas_mes[m[0].trim()] = entero(m[1]); }); }
         else p[k] = entero(i.value);
@@ -382,7 +421,9 @@
     });
     // los alias de orígenes que ya no salen en los logs (no hay fila) se conservan tal cual
     const al = Object.assign({}, c.aliases);
-    raiz.querySelectorAll("[data-origen]").forEach(i => { if (i.value.trim()) al[i.dataset.origen] = i.value.trim(); else delete al[i.dataset.origen]; }); c.aliases = al;
+    const plan = v => renombres[v] || v;
+    for (const k of Object.keys(al)) al[k] = plan(al[k]);
+    raiz.querySelectorAll("[data-origen]").forEach(i => { if (i.value.trim()) al[i.dataset.origen] = plan(i.value.trim()); else delete al[i.dataset.origen]; }); c.aliases = al;
     const py = Object.assign({}, c.proyectos); raiz.querySelectorAll("[data-proy]").forEach(i => { const e = py[i.dataset.proy] = py[i.dataset.proy] || {};
       e[i.dataset.c] = i.dataset.c === "oculto" ? i.checked : (i.dataset.c === "alias" ? i.value.trim() : entero(i.value)); });
     c.proyectos = py;
@@ -392,6 +433,7 @@
         return {ambito: v("ambito"), nombre: v("nombre").trim(), periodo: v("periodo"), tokens: entero(v("tokens"))};
       });
     }
+    if (c.presupuestos) c.presupuestos.forEach(f => { if (f.ambito === "plan") f.nombre = plan(f.nombre); });
     if ($("g-avisos")) c.avisos_presupuesto = $("g-avisos").checked;
     if ($("g-avisos-srv")) c.avisos_servidores = $("g-avisos-srv").checked;
     if (c.servidores) {

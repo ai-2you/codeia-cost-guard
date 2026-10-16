@@ -86,6 +86,32 @@ def _panel(con, sid, s, webs_vigiladas, ahora):
             "truncadas": bool(p.get("truncadas")), "ventana_s": servidores_panel.VENTANA_S, "n_servicios": p.get("n_servicios"), "servicios": servicios, "copias": copias}
 
 
+def _vivo(e, ahora, normal):
+    """La última lectura de la caché del ciclo (la misma que pinta el desplegable), reducida a números y estados para las
+    tarjetas del panel. Sin IPs ni usuarios: de las sesiones y de los intentos solo salen las cuentas."""
+    if not isinstance(e, dict):
+        return None
+    d, t = e.get("datos") or {}, e.get("tarjetas") or {}
+    cpu, mem, disco = d.get("cpu") or {}, d.get("memoria") or {}, d.get("disco") or {}
+    it, f2b, act = d.get("intentos") or {}, d.get("fail2ban") or {}, d.get("actualizaciones") or {}
+    res = e.get("bastionado_resumen") or {}
+    return {"estado": servidores_ciclo.estado_visible(e, ahora, normal), "ok_en": e.get("ok_en"), "error": _texto(e.get("error") or "", 60),
+            "cpu": {"pct": _num(cpu.get("pct")), "nucleos": _num(cpu.get("nucleos"))},
+            "memoria": {"usada": _num(mem.get("usada")), "total": _num(mem.get("total"))},
+            "disco": {"usado": _num(disco.get("usado")), "total": _num(disco.get("total"))},
+            "tarjetas": {k: v.get("estado") for k, v in t.items() if isinstance(v, dict) and isinstance(v.get("estado"), str)},
+            "sesiones": len(d.get("sesiones") or []),
+            "intentos": {"hora": _num(it.get("hora")), "total": _num(it.get("total"))} if it else None,
+            "fail2ban": {"instalado": bool(f2b.get("instalado")), "ahora": _num(f2b.get("ahora")), "total": _num(f2b.get("total"))},
+            "expuestos": [p for p in (e.get("expuestos") or []) if isinstance(p, int)][:30],
+            "raros": [p for p in ((t.get("puertos") or {}).get("raros") or []) if isinstance(p, int)][:30],
+            "bastionado": {"hechos": _num(res.get("hechos")), "total": _num(res.get("total")), "estado": res.get("estado"),
+                           "falta": [{"texto": _texto(c.get("texto")), "arreglo": _texto(c.get("arreglo"), 400)}
+                                     for c in (e.get("bastionado") or []) if isinstance(c, dict) and c.get("ok") is False][:20]},
+            "actualizaciones": {"pendientes": _num(act.get("pendientes")), "reinicio": bool(act.get("reinicio"))},
+            "servicios": [{"nombre": _texto(x.get("nombre")), "ok": bool(x.get("ok"))} for x in (d.get("servicios") or []) if isinstance(x, dict)][:60]}
+
+
 def atiende(q, ahora=None, conf=None):
     """GET /servidores/detalle?servidor=<id> → (código, dict). `q` = {parámetro: [valores]} ya parseado."""
     if set(q) != {"servidor"} or len(q["servidor"]) != 1 or not ID.fullmatch(q["servidor"][0]):
@@ -122,7 +148,8 @@ def atiende(q, ahora=None, conf=None):
                                "intento_en": fila["intento_en"] or None, "vigilado_desde": fila["creado_en"]},
                   "webs": _webs(con, sid, webs_vigentes(conf).get(sid, set()), ahora), "recursos": recursos,
                   "eventos": eventos, "truncado": truncado, "recursos_truncado": len(recursos) >= MAX_RECURSOS,
-                  "panel": _panel(con, sid, s, webs_vigentes(conf).get(sid, set()), ahora), "horas": {"con_datos": horas, "total": total_horas}}
+                  "panel": _panel(con, sid, s, webs_vigentes(conf).get(sid, set()), ahora), "horas": {"con_datos": horas, "total": total_horas},
+                  "vivo": _vivo((servidores_ciclo.leer_cache().get("servidores") or {}).get(s["nombre"]), ahora, normal)}
         con.execute("COMMIT")
         return 200, salida
     except sqlite3.DatabaseError as e:                     # base dañada, ocupada, sin tablas: nunca se cita el texto del error

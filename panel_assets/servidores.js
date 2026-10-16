@@ -183,12 +183,80 @@
     return h("div", {}, control, ...piezas, cobertura);
   }
 
+  // iconos del kit (cadenas fijas de graficos.js, nunca datos) convertidos en nodos sin interpretar HTML
+  const iconoDom = n => new DOMParser().parseFromString(icono(n).replace("<svg ", "<svg xmlns=\"http://www.w3.org/2000/svg\" "), "image/svg+xml").documentElement;
+  const COLOR = {verde: "--verde", ambar: "--ambar", rojo: "--rojo"};
+  const punto = est => h("i", {class: "p", style: "background:var(" + (COLOR[est] || "--gris") + ")"});
+  const gb = b => b == null ? "—" : (b / 1e9).toFixed(1).replace(".", ",");
+  const titulo = (t, nota) => h("div", {class: "sec"}, h("span", {}, t), nota != null ? h("span", {class: "nota"}, nota) : null);
+  const bloque = (t, nota, ...cuerpo) => h("div", {class: "col-f"}, titulo(t, nota), h("div", {class: "tj"}, ...cuerpo));
+  function tarjeta(ic, rot, valor, sub, est, pct, clase_){
+    return h("div", {class: "tj " + (clase_ || "c3")}, h("div", {class: "et"}, iconoDom(ic), rot, h("span", {class: "der"}, punto(est))),
+      h("div", {class: "v"}, ...[].concat(valor)), h("div", {class: "s"}, sub),
+      pct != null ? h("div", {class: "prog abajo"}, h("i", {class: est === "rojo" ? "rojo" : est === "ambar" ? "ambar" : "", style: "width:" + Math.max(0, Math.min(100, pct)).toFixed(1) + "%"})) : null);
+  }
+
+  // la última lectura del ciclo (la misma del desplegable): procesador, memoria, disco, webs y seguridad
+  function tarjetasVivo(d, fresco){
+    const v = d.vivo, t = (v && v.tarjetas) || {};
+    if (!v) return h("p", {class: "vacio"}, "Todavía sin lectura en vivo de este servidor: llega con el próximo ciclo.");
+    const viejo = !fresco(v.ok_en), est = k => viejo ? "gris" : t[k];
+    const webs = d.webs.filter(w => w.sondeada && fresco(w.ultima)), bien = webs.filter(w => w.estado === "ok"), ms = webs.filter(w => w.ms != null);
+    const media = ms.length ? Math.round(ms.reduce((a, w) => a + w.ms, 0) / ms.length) : null;
+    const cpu = v.cpu.pct, m = v.memoria, k = v.disco;
+    return h("div", {class: "rej"},
+      tarjeta("web", "Webs", d.webs.length ? bien.length + " de " + d.webs.length : "—", d.webs.length ? "responden" + (media != null ? " · " + media + " ms de media" : "") : "sin webs vigiladas", d.webs.length ? (bien.length === d.webs.length ? "verde" : bien.length ? "ambar" : "rojo") : "gris"),
+      tarjeta("cpu", "Procesador", cpu == null ? "—" : Math.round(cpu) + " %", (cpu == null ? "" : cpu < 30 ? "Tranquilo" : cpu < 80 ? "Con trabajo" : "Al límite") + (v.cpu.nucleos ? " · " + v.cpu.nucleos + " núcleos" : ""), est("cpu"), cpu),
+      tarjeta("mem", "Memoria", [gb(m.usada), h("small", {}, " / " + gb(m.total) + " GB")], est("memoria") === "verde" ? "Va holgada" : "Va justa", est("memoria"), m.total ? m.usada / m.total * 100 : null),
+      tarjeta("disco", "Disco", [gb(k.usado), h("small", {}, " / " + gb(k.total) + " GB")], est("disco") === "verde" ? "Espacio de sobra" : "Se está llenando", est("disco"), k.total ? k.usado / k.total * 100 : null));
+  }
+
+  function seguridad(d, fresco){
+    const v = d.vivo; if (!v) return null;
+    const t = v.tarjetas || {}, viejo = !fresco(v.ok_en), est = k => viejo ? "gris" : t[k], b = v.bastionado || {}, a = v.actualizaciones || {}, f = v.fail2ban || {};
+    const tj = (ic, rot, val, sub, e) => tarjeta(ic, rot, val, sub, e, null, "c6");
+    const cartas = h("div", {class: "rej", style: "gap:10px"},
+      tj("persona", "Dentro ahora", v.sesiones ? v.sesiones + (v.sesiones === 1 ? " sesión" : " sesiones") : "Nadie", v.sesiones ? "sesiones SSH abiertas" : "Sin sesiones SSH", est("sesiones")),
+      tj("mano", "Intentos 1 h", v.intentos ? String(v.intentos.hora ?? 0) : "—", v.intentos ? (v.intentos.total ?? 0) + " en 24 h" : "el servidor no registra intentos", est("intentos")),
+      tj("prohibido", "Bloqueadas", f.instalado ? String(f.ahora ?? 0) : "—", f.instalado ? (f.total ?? 0) + " en total (fail2ban)" : "sin fail2ban", est("bloqueadas")),
+      tj("puerta", "Puertas abiertas", v.expuestos.length ? v.expuestos.join(" · ") : "—", v.raros.length ? "¡" + v.raros.join(", ") + " expuesto!" : "abiertas a Internet", est("puertos")),
+      tj("escudo", "Protección", b.total ? b.hechos + " de " + b.total : "—", b.estado === "verde" ? "todo en su sitio" : "ajustes de seguridad", viejo ? "gris" : b.estado),
+      tj("llave", "Mantenimiento", a.pendientes ? a.pendientes + " paquetes" : "Al día", a.reinicio ? "reinicio pendiente" : "paquetes del sistema", est("mantenimiento")));
+    const falta = (b.falta || []);
+    const lista = h("div", {class: "lista"}, ...(falta.length ? falta.map(c => h("div", {class: "f", style: "display:block"}, h("div", {style: "font-weight:600"}, c.texto || ""), c.arreglo ? h("div", {class: "mono tenue", style: "white-space:normal;overflow-wrap:anywhere;margin-top:2px"}, c.arreglo) : null))
+      : [h("div", {class: "f"}, h("div", {class: "n"}, punto("verde"), h("span", {}, "Todo en su sitio")), h("span", {class: "mono tenue"}, (b.hechos || 0) + " de " + (b.total || 0)))]));
+    return h("div", {class: "rej"}, h("div", {class: "c6 col-f"}, titulo("Seguridad", b.total ? b.hechos + " de " + b.total : null), cartas),
+      h("div", {class: "c6 col-f"}, titulo("Qué falta para protegerlo", falta.length ? String(falta.length) : null), lista));
+  }
+
+  function servicios(d){
+    const ss = ((d.vivo && d.vivo.servicios) || []).slice().sort((a, b) => a.ok - b.ok || String(a.nombre).localeCompare(String(b.nombre)));
+    if (!ss.length) return null;
+    const caidos = ss.filter(s => !s.ok).length;
+    return h("div", {class: "col-f"}, titulo("Servicios", caidos ? caidos + " caído" + (caidos > 1 ? "s" : "") + " de " + ss.length : ss.length + " en marcha"),
+      h("div", {class: "pils"}, ...ss.map(s => h("span", {class: "pil vidrio", title: s.nombre}, punto(s.ok ? "verde" : "rojo"), h("span", {}, s.nombre)))));
+  }
+
+  // procesador y memoria de las últimas 24 h (porcentajes máximos por hora, de /servidores/historia)
+  function graficaRecursos(cont){
+    const hoy = new Date(), ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
+    const iso = x => x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+    fetch("/servidores/historia?" + new URLSearchParams({servidor: elegido, desde: iso(ayer), hasta: iso(hoy), paso: "hora"})).then(r => r.ok ? r.json() : null).then(r => {
+      const pts = ((r && r.puntos) || []).filter(p => p.carga_max != null || p.mem_max != null).slice(-24);
+      if (pts.length < 2) { cont.replaceChildren(h("p", {class: "vacio"}, "Todavía no hay horas suficientes para dibujar la gráfica.")); return; }
+      const et = p => String(p.t).slice(11, 16);
+      grafico(cont, {tipo: "area", alto: 170, unidad: "%", fmt: x => Math.round(x) + " %",
+        series: [{nombre: "Memoria", color: "--s3", valores: pts.map(p => p.mem_max || 0)}, {nombre: "Procesador", color: "--s2", valores: pts.map(p => p.carga_max || 0)}],
+        etiquetas: pts.map(et), titulos: pts.map(p => (String(p.t).slice(0, 10) === iso(hoy) ? "Hoy" : "Ayer") + " a las " + et(p))});
+    }).catch(() => cont.replaceChildren(h("p", {class: "vacio"}, "No se pudo leer el historial del servidor.")));
+  }
+
   function cabecera(d, fresco){
     const s = d.servidor, partes = [];
     const [cl, tx] = clase(ESTADO_GLOBAL, s.estado);
-    partes.push(fresco(s.ok_en) ? h("span", {}, "Estado de la última lectura: ", insignia(cl, tx), " ") : h("span", {}, insignia("sv-neutro", "Sin lectura " + hace(s.ok_en, d.generado_en).replace("hace ", "desde hace ")), " "));
-    partes.push(h("span", {class: "sv-suave"}, "Último dato bueno " + hace(s.ok_en, d.generado_en) + " · generado a las " + hora(d.generado_en) + ". El detalle de disco, puertos y protección está en el desplegable de la barra."));
-    return h("p", {class: "sv-estado"}, ...partes);
+    partes.push(fresco(s.ok_en) ? h("span", {}, "Estado: ", insignia(cl, tx), " ") : h("span", {}, insignia("sv-neutro", "Sin lectura " + hace(s.ok_en, d.generado_en).replace("hace ", "desde hace ")), " "));
+    partes.push(h("span", {class: "sv-suave"}, "último dato bueno " + hace(s.ok_en, d.generado_en) + " · a las " + hora(d.generado_en)));
+    return h("p", {class: "sv-estado", style: "margin:0 0 0 auto"}, ...partes);
   }
 
   let aviso = null;
@@ -207,28 +275,35 @@
   }
 
   // la barra (selector, actualizar, probar aviso) sale siempre, también con errores: así nunca se queda la pestaña sin forma de cambiar de servidor
-  function barra(){
-    const selector = h("select", {"aria-label": "Servidor", onchange: ev => { elegido = ev.target.value; ultimoAviso = null; try { sessionStorage.setItem("sv-elegido", elegido); } catch (e) {} carga(); }},
-      ...servidores.map(s => h("option", {value: s.id, selected: s.id === elegido || null}, s.nombre)));
-    const probar = h("button", {disabled: probando || null, onclick: ev => probarAviso(ev.target)}, "Probar aviso");
+  function barra(estado){
+    const cambia = id => { elegido = id; ultimoAviso = null; try { sessionStorage.setItem("sv-elegido", elegido); } catch (e) {} carga(); };
+    const selector = servidores.length <= 5
+      ? h("div", {class: "seg vidrio", role: "group", "aria-label": "Servidor"}, ...servidores.map(s => h("button", {class: s.id === elegido ? "on" : "", onclick: () => cambia(s.id)}, s.nombre)))
+      : h("select", {"aria-label": "Servidor", onchange: ev => cambia(ev.target.value)}, ...servidores.map(s => h("option", {value: s.id, selected: s.id === elegido || null}, s.nombre)));
+    const probar = h("button", {class: "vidrio", disabled: probando || null, onclick: ev => probarAviso(ev.currentTarget)}, "Probar aviso");
     aviso = h("span", {class: "msg" + (ultimoAviso ? (ultimoAviso.ok ? " ok" : " err") : ""), role: "status"}, ultimoAviso ? ultimoAviso.t : "");
-    return h("div", {class: "sv-barra"}, selector, h("button", {onclick: () => carga()}, "Actualizar"), probar, aviso);
+    return h("div", {class: "filtros"}, h("div", {class: "grupo"}, h("span", {class: "etq"}, "Servidor"), selector),
+      h("button", {class: "vidrio", onclick: () => carga()}, "Actualizar"), probar, aviso, estado || null);
   }
 
   function pinta(d){
     const raiz = $("vista-servidores");
     const fresco = ts => ts != null && d.generado_en - ts <= d.ventana_s && d.generado_en - ts >= -60;
-    if (!d.disponible) { raiz.replaceChildren(h("section", {}, h("h2", {}, "Servidores"), barra(), h("p", {class: "vacio"}, d.motivo || "Sin datos todavía."))); return; }
+    if (!d.disponible) { raiz.replaceChildren(barra(), h("p", {class: "vacio"}, d.motivo || "Sin datos todavía.")); return; }
     const p = d.panel, frescoPanel = !!p && p.ok_en != null && d.generado_en - p.ok_en <= p.ventana_s && d.generado_en - p.ok_en >= -60 && p.error !== "alcance";
-    raiz.replaceChildren(...[h("section", {}, h("h2", {}, "Servidores"), barra(), cabecera(d, fresco)),
-      h("section", {}, h("h2", {}, "Webs"), tablaWebs(d, fresco)),
-      p ? h("section", {}, h("h2", {}, "Copias de seguridad"), cabeceraPanel(d, p, frescoPanel), tablaCopias(d, p, frescoPanel)) : null,
-      p ? h("section", {}, h("h2", {}, "Proyectos del panel"), arbolProyectos(d, p, frescoPanel)) : null,
-      h("section", {}, h("h2", {}, "Contenedores y servicios"), bloqueRecursos(d, fresco)),
-      h("section", {}, h("h2", {}, "Qué ha pasado"), lineaTiempo(d))].filter(Boolean));
+    const graf = h("div", {class: "graf"}, h("p", {class: "vacio"}, "Cargando…"));
+    raiz.replaceChildren(...[barra(cabecera(d, fresco)), tarjetasVivo(d, fresco),
+      h("div", {class: "rej"}, h("div", {class: "c7 col-f"}, titulo("Webs vigiladas", "disponibilidad medida desde este Mac"), h("div", {class: "tj"}, tablaWebs(d, fresco))),
+        h("div", {class: "c5 col-f"}, titulo("Qué ha pasado", "últimos 14 días"), h("div", {class: "lista"}, lineaTiempo(d)))),
+      bloque("Procesador y memoria", "máximo de cada hora · últimas 24 h", graf, h("div", {class: "leyenda"}, h("span", {}, h("i", {class: "p", style: "background:var(--s2)"}), "Procesador"), h("span", {}, h("i", {class: "p", style: "background:var(--s3)"}), "Memoria"))),
+      servicios(d), seguridad(d, fresco),
+      bloque("Contenedores y servicios", "lectura por SSH", bloqueRecursos(d, fresco)),
+      p ? bloque("Copias de seguridad", "panel " + (p.version ? "Dokploy " + p.version : "Dokploy"), cabeceraPanel(d, p, frescoPanel), tablaCopias(d, p, frescoPanel)) : null,
+      p ? bloque("Proyectos del panel", "estado del último despliegue", arbolProyectos(d, p, frescoPanel)) : null].filter(Boolean));
+    graficaRecursos(graf);
   }
 
-  function mensaje(txt){ $("vista-servidores").replaceChildren(h("section", {}, h("h2", {}, "Servidores"), servidores.length ? barra() : null, h("p", {class: "vacio"}, txt))); }
+  function mensaje(txt){ $("vista-servidores").replaceChildren(...[servidores.length ? barra() : null, h("div", {class: "tj"}, h("p", {class: "vacio"}, txt))].filter(Boolean)); }
 
   function carga(){
     if (!elegido) return;
