@@ -93,7 +93,7 @@ def errores_servidores(lista):
         return []
     if not isinstance(lista, list):
         return ["servidores debe ser una lista"]
-    errores, nombres = [], set()
+    errores, nombres, paneles = [], set(), set()
     for i, s in enumerate(lista):
         donde = f"servidores[{i}]"
         if not isinstance(s, dict):
@@ -129,6 +129,13 @@ def errores_servidores(lista):
             motivo = url_valida(s.get("panel_url"), solo_https=True)
             if motivo:
                 errores.append(f"{donde}: panel_url {motivo}")
+            else:
+                from urllib.parse import urlsplit
+                u = urlsplit(s["panel_url"])
+                clave_panel = ((u.hostname or "").lower(), u.port or 443)
+                if clave_panel in paneles:         # dos servidores con el mismo panel compartirían clave y leerían dos veces lo mismo (recursos y avisos duplicados)
+                    errores.append(f"{donde}: panel_url repetido (otro servidor ya usa ese panel)")
+                paneles.add(clave_panel)
         webs = s.get("webs") or []
         if not isinstance(webs, list):
             errores.append(f"{donde}: webs debe ser una lista")

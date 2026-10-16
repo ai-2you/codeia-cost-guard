@@ -289,5 +289,165 @@ class AvisosPanelTest(Base):
             self.assertNotIn("tienda", t.lower())
 
 
+class ProbarConexionTest(Base):
+    def setUp(self):
+        super().setUp()
+        sp._PRUEBAS.clear()
+        self.addCleanup(sp._PRUEBAS.clear)
+        self.t = 1000.0
+        self.conf = {"servidores": [dict(SERVIDOR)]}
+
+    def prueba(self, cuerpo=None, resultado=None, clave=CLAVE, conf=None):
+        res = resultado if resultado is not None else lectura()
+        return sp.probar({"servidor": ID} if cuerpo is None else cuerpo, conf or self.conf, leer=self.leer_falso(res), clave_de=lambda c: clave, reloj=lambda: self.t)
+
+    def test_dice_la_version_y_cuantas_cosas_ve_sin_enseñar_nombres(self):
+        codigo, d = self.prueba()
+        self.assertEqual(codigo, 200)
+        self.assertEqual(d, {"ok": True, "version": "0.30.8", "version_no_probada": False, "servicios": 6, "dominios": 0, "copias": 4, "copias_truncadas": False})
+        self.assertNotIn("tienda", json.dumps(d).lower())
+        self.assertEqual(self.peticiones, [("https://Panel.Ejemplo.com:443/lo/que/sea", CLAVE)])             # la URL sale de la configuración
+
+    def test_el_cuerpo_solo_lleva_el_id_y_no_acepta_urls(self):
+        for malo in ({}, {"servidor": ID, "panel_url": "https://evil.example.com"}, {"servidor": "no-es-hex"}, {"servidor": 5}, [], "x"):
+            self.assertEqual(self.prueba(malo)[0], 400, malo)
+        self.assertEqual(self.peticiones, [])
+
+    def test_servidor_desconocido_o_sin_panel(self):
+        self.assertEqual(self.prueba({"servidor": OTRO})[0], 404)
+        self.assertEqual(self.prueba(conf={"servidores": [{k: v for k, v in SERVIDOR.items() if k not in ("panel", "panel_url")}]})[0], 404)
+        self.assertEqual(self.peticiones, [])
+
+    def test_sin_clave_no_hay_peticion(self):
+        self.assertEqual(self.prueba(clave=""), (200, {"ok": False, "error": "sin_clave"}))
+        self.assertEqual(self.peticiones, [])
+
+    def test_los_errores_son_codigos_cerrados(self):
+        self.assertEqual(self.prueba(resultado={"ok": False, "error": "clave_rechazada"}), (200, {"ok": False, "error": "clave_rechazada"}))
+
+    def test_limites_de_uso(self):
+        self.assertEqual(self.prueba()[0], 200)
+        codigo, d = self.prueba()
+        self.assertEqual(codigo, 429)
+        self.assertGreater(d["espera_s"], 0)
+        self.assertEqual(len(self.peticiones), 1)
+        for _ in range(sp.MAX_PRUEBAS_HORA - 1):
+            self.t += sp.ESPERA_PRUEBA_S + 1
+            self.assertEqual(self.prueba()[0], 200)
+        self.t += sp.ESPERA_PRUEBA_S + 1
+        self.assertEqual(self.prueba()[0], 429)
+
+    def test_simultaneas_solo_hacen_una_lectura(self):
+        soltar, dentro = threading.Event(), threading.Event()
+
+        def lento():
+            dentro.set()
+            soltar.wait(5)
+            return lectura()
+        res = []
+        hilo = threading.Thread(target=lambda: res.append(self.prueba(resultado=lento)))
+        hilo.start()
+        self.assertTrue(dentro.wait(5))
+        self.assertEqual([self.prueba()[0] for _ in range(4)], [429] * 4)
+        soltar.set()
+        hilo.join(5)
+        self.assertEqual((len(self.peticiones), res[0][0]), (1, 200))
+
+
+class DetalleYDesplegableTest(Base):
+    def test_el_detalle_trae_el_arbol_los_dominios_y_las_copias(self):
+        from infobar import servidores_detalle as sd
+        conf = {"servidores": [dict(SERVIDOR, webs=["https://tienda.ejemplo.com/"])], "intervalo_normal_s": 300}
+        r = lectura(servicios=[srv("a")] + [srv(f"s{i}") for i in range(5)], copias=[cop(T0 - i * DIA, dueno="a") for i in range(4)])
+        r["dominios"] = [{"host": "tienda.ejemplo.com", "dueno": "a", "tipo_dueno": "application", "https": True, "puerto": 3000, "ruta": "/"},
+                         {"host": "otro.ejemplo.com", "dueno": "a", "tipo_dueno": "application", "https": True, "puerto": None, "ruta": None}]
+        self.pasada(r)
+        codigo, d = sd.atiende({"servidor": [ID]}, T0 + 60, conf)
+        self.assertEqual(codigo, 200)
+        p = d["panel"]
+        self.assertEqual((p["error"], p["version"], p["n_servicios"]), ("", "0.30.8", 6))
+        a = next(s for s in p["servicios"] if s["id"] == "a")
+        self.assertEqual([(x["host"], x["vigilado"]) for x in a["dominios"]], [("tienda.ejemplo.com", True), ("otro.ejemplo.com", False)])      # solo se marca lo que el dueño ya vigila
+        self.assertEqual([c["evaluacion"] for c in p["copias"]], ["al_dia"])
+        self.assertNotIn("clave", json.dumps(d).lower().replace("clave_", ""))
+
+    def test_sin_panel_el_bloque_es_nulo(self):
+        from infobar import servidores_detalle as sd
+        con = sh.abrir()
+        try:
+            sh._alta_servidor(con, ID, NOMBRE, T0)
+        finally:
+            con.close()
+        self.assertIsNone(sd.atiende({"servidor": [ID]}, T0 + 60, {"servidores": [dict(SERVIDOR)], "intervalo_normal_s": 300})[1]["panel"])
+
+    def test_motivos_del_desplegable(self):
+        from infobar import desplegable_servidores as ds
+        panel = {"ok_en": T0, "copias_resumen": {"n": 3, "antiguas": 2, "sin_buena": 1},
+                 "servicios": [srv("a", estado="error", despliegue=T0 - 3600), srv("b", estado="error", despliegue=T0 - 30 * DIA), srv("c", estado="error", despliegue=T0 - 60), srv("d")]}
+        textos = [x for _, x in ds._motivos({}, {}, {}, [], panel, T0)]
+        self.assertIn("2 copias de seguridad sin hacer desde hace más de lo normal", textos)
+        self.assertIn("1 aplicación con el último despliegue fallido", textos)                    # solo el de hace una hora: el de hace 30 días y el de hace un minuto no
+        self.assertEqual(ds._motivos({}, {}, {}, [], {"ok_en": None, "copias_resumen": {"antiguas": 5}}, T0), [])      # sin lectura buena no se dice nada
+        self.assertEqual(ds._motivos({}, {}, {}, [], None, T0), [])
+
+
+class ConfiguracionPanelTest(unittest.TestCase):
+    def test_panel_url_repetido_entre_servidores(self):
+        from infobar import servidores as s
+        a = {"nombre": "a", "ssh": "infobar@a.example.com", "panel": "dokploy", "panel_url": "https://panel.ejemplo.com"}
+        b = {"nombre": "b", "ssh": "infobar@b.example.com", "panel": "dokploy", "panel_url": "https://PANEL.ejemplo.com:443/otra"}
+        self.assertEqual(s.errores_servidores([a]), [])
+        self.assertTrue(any("panel_url repetido" in e for e in s.errores_servidores([a, b])))
+        self.assertEqual(s.errores_servidores([a, dict(b, panel_url="https://panel2.ejemplo.com")]), [])
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClaveHuerfanaTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import http.client as cliente_http
+        from infobar import servidor_local
+        cls.http, cls.sl = cliente_http, servidor_local
+        cls.srv = servidor_local.crear_servidor(0)
+        cls.puerto = cls.srv.server_address[1]
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+        cls.cookie = aislamiento.cookie_de(cls.srv)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+
+    def guarda(self, servidores):
+        from infobar.servidores import revision_servidores
+        rev = revision_servidores(self.sl.sin_secretos(config_y_estado.servidores_actuales()))
+        c = self.http.HTTPConnection("127.0.0.1", self.puerto, timeout=30)
+        c.request("POST", "/guardar", body=json.dumps({"proveedores": [], "aliases": {}, "servidores": servidores, "servidores_rev": rev}).encode(),
+                  headers={"Host": f"127.0.0.1:{self.puerto}", "Cookie": self.cookie, "Content-Type": "application/json", "Origin": f"http://127.0.0.1:{self.puerto}"})
+        r = c.getresponse()
+        return r.status, r.read()
+
+    def test_quitar_el_servidor_o_cambiar_su_panel_borra_la_clave_y_dejarlo_no(self):
+        limpia_config([dict(SERVIDOR)])
+        self.addCleanup(limpia_config, [])
+        with mock.patch.object(self.sl.claves, "borrar_clave") as borrar, mock.patch.object(self.sl, "log"):
+            self.assertEqual(self.guarda([dict(SERVIDOR, nombre="renombrado")])[0], 200)                 # mismo panel: la clave se queda
+            borrar.assert_not_called()
+            self.assertEqual(self.guarda([dict(SERVIDOR, nombre="renombrado", panel_url="https://otro.ejemplo.com")])[0], 200)
+            borrar.assert_called_once_with("dokploy:panel.ejemplo.com")                                  # otra dirección: la vieja se borra
+            borrar.reset_mock()
+            self.assertEqual(self.guarda([])[0], 200)
+            borrar.assert_called_once_with("dokploy:otro.ejemplo.com")                                   # sin servidores: se borra la que quedaba
+
+    def test_si_dos_servidores_comparten_cuenta_no_se_borra_mientras_quede_uno(self):
+        a = dict(SERVIDOR, nombre="a")
+        b = dict(SERVIDOR, nombre="b", id=OTRO, ssh="infobar@b.example.com", panel_url="https://PANEL.ejemplo.com:443")
+        limpia_config([a])
+        self.addCleanup(limpia_config, [])
+        # la validación rechaza dos servidores con el mismo panel: no se llega a guardar nada ni a borrar nada
+        with mock.patch.object(self.sl.claves, "borrar_clave") as borrar:
+            self.assertEqual(self.guarda([a, b])[0], 400)
+            borrar.assert_not_called()

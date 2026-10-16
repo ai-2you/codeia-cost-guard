@@ -335,6 +335,14 @@ Si un servidor no tiene registro de sshd en el journal, la tarjeta dice «sin da
   bucle, altas y bajas). Nada se enseña como bueno si su última lectura es vieja («sin lectura desde hace…»), las webs sin sondeo salen como tales y un hueco sin datos
   se dice como hueco. Lectura: `GET /servidores/detalle?servidor=<id>` (solo lectura, sin IPs). El botón **Probar aviso** (`POST /servidores/avisos/probar`, una cada 30 s) manda una
   notificación de prueba y avisa si los avisos reales están apagados; que macOS la muestre depende de sus permisos de notificaciones y del modo No molestar.
+- **API de Dokploy (opcional, solo consultas).** Con `panel: "dokploy"` y `panel_url` (https con nombre público) en un servidor, y su clave guardada en el Llavero desde Ajustes, CostGuard lee cada
+  5 minutos, en un hilo aparte, cinco rutas `GET` de Dokploy (≥ 0.30.0): el árbol de proyectos y aplicaciones con el estado de su último despliegue, los dominios y las ejecuciones de copia de
+  seguridad. Con ello guarda la **última copia buena** de cada base de datos y volumen (aprende su cadencia: una semanal no salta a los 3 días) y avisa de «copia antigua» (solo de las que
+  tuvieron una buena y la perdieron), de «despliegue fallido» (entre 10 minutos y 7 días) y de «panel sin lectura» (clave caducada o rechazada). La pestaña Servidores enseña «Copias de
+  seguridad» y «Proyectos del panel». **Ojo con la clave:** Dokploy solo tiene clave de solo lectura con licencia Enterprise, así que la de un miembro puede desplegar, parar y borrar copias en
+  los servicios que se le asignen. CostGuard solo hace consultas (hay un test que falla si su código contiene cualquier otra cosa), pero cualquier programa que se ejecute con tu usuario puede leer
+  la clave del Llavero: crea un usuario dedicado con solo el permiso «Access API/CLI», asígnale únicamente los proyectos que quieras vigilar y ponle una caducidad de 90 días. EasyPanel no tiene
+  clave de solo lectura ni siquiera de pago, así que no se lee su API (el estado sale por SSH). Dos servidores no pueden compartir el mismo `panel_url`; quitar un servidor o su panel borra su clave del Llavero.
 - Cada servidor tiene un `id` propio en `servidores.json`: renombrarlo no parte su historial; quitarlo y volver a añadirlo con el mismo nombre
   empieza uno nuevo.
 - Lectura: `GET /servidores/historia` (lista, o serie por día/hora con `servidor`, `desde`, `hasta`, `paso`) y `GET /servidores/ips?servidor=…&con_ips=1`

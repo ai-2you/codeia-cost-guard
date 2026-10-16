@@ -21,6 +21,9 @@ ESPERA_RECHAZO_S = 1800
 MAX_SERVICIOS_CACHE = 300
 MIN_PREVIOS_PARA_ALCANCE = 4
 PANELES = ("dokploy",)
+ESPERA_PRUEBA_S, MAX_PRUEBAS_HORA = 30, 10
+_PRUEBA = threading.Lock()
+_PRUEBAS = []
 SIN_ESPERA_LARGA = frozenset({"red", "tls", "timeout", "http_5xx", "http_otro", "plazo", "no_json", "demasiado_grande", "contrato", "redireccion"})
 _EN_MARCHA = threading.Lock()
 
@@ -96,3 +99,38 @@ def pasada(historial=None, ahora=None, leer=panel_dokploy.leer, clave_de=claves.
         return False
     finally:
         _EN_MARCHA.release()
+
+
+def probar(cuerpo, conf=None, leer=panel_dokploy.leer, clave_de=claves.leer_clave, reloj=time.monotonic):
+    """POST /servidores/panel/probar {servidor: id} → (código, dict). Hace las cinco consultas de lectura con la clave guardada y dice la versión y CUÁNTAS cosas ve, sin enseñar ninguna.
+    La URL sale de la configuración, nunca del cuerpo. Una a la vez, 1 cada 30 s y 10 por hora para toda la aplicación (el intento cuenta aunque falle)."""
+    import re
+    if not isinstance(cuerpo, dict) or set(cuerpo) != {"servidor"} or not (isinstance(cuerpo["servidor"], str) and re.fullmatch(r"[0-9a-f]{32}", cuerpo["servidor"])):
+        return 400, {"ok": False, "error": "entrada no válida"}
+    conf = conf if conf is not None else cfg()
+    s = next((x for x in servidores_validos(conf.get("servidores")) if x.get("id") == cuerpo["servidor"]), None)
+    if s is None or not cuenta(s):
+        return 404, {"ok": False, "error": "servidor sin panel configurado"}
+    if not _PRUEBA.acquire(blocking=False):
+        return 429, {"ok": False, "espera_s": ESPERA_PRUEBA_S}
+    try:
+        ahora = reloj()
+        _PRUEBAS[:] = [t for t in _PRUEBAS if ahora - t < 3600]
+        if _PRUEBAS and ahora - _PRUEBAS[-1] < ESPERA_PRUEBA_S:
+            return 429, {"ok": False, "espera_s": int(ESPERA_PRUEBA_S - (ahora - _PRUEBAS[-1])) + 1}
+        if len(_PRUEBAS) >= MAX_PRUEBAS_HORA:
+            return 429, {"ok": False, "espera_s": int(3600 - (ahora - _PRUEBAS[0])) + 1}
+        _PRUEBAS.append(ahora)
+        clave = clave_de(cuenta(s))
+        if not clave:
+            return 200, {"ok": False, "error": "sin_clave"}
+        try:
+            r = leer(s["panel_url"], clave, time.time())
+        finally:
+            clave = None
+        if not r["ok"]:
+            return 200, {"ok": False, "error": r["error"]}
+        return 200, {"ok": True, "version": r["version"], "version_no_probada": r["version_no_probada"], "servicios": len(r["servicios"]), "dominios": len(r["dominios"]),
+                     "copias": len(r["copias"]), "copias_truncadas": r["copias_truncadas"]}
+    finally:
+        _PRUEBA.release()

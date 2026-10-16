@@ -16,7 +16,7 @@ import hmac, json, os, secrets, subprocess, sys, threading, time
 
 from urllib.parse import parse_qs, urlsplit
 
-from . import ajustes, claves, exportacion, exportacion_csv, guia_web, historico, presupuestos, rutas, servidores_alta, servidores_api, servidores_avisos, servidores_webs
+from . import ajustes, claves, exportacion, exportacion_csv, guia_web, historico, presupuestos, rutas, servidores_alta, servidores_api, servidores_avisos, servidores_panel, servidores_webs
 from . import cuota_nan
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_con_revision, guardar_config, log, olvidar_cache
@@ -403,7 +403,7 @@ def crear_servidor(puerto=PUERTO):
             if not self._host_ok() or not self._sesion_ok():
                 return
             ruta = self.path.split("?")[0]
-            if ruta not in ("/guardar", "/clave", "/servidores/webs", "/servidores/avisos/probar") and ruta not in RUTAS_ALTA:
+            if ruta not in ("/guardar", "/clave", "/servidores/webs", "/servidores/avisos/probar", "/servidores/panel/probar") and ruta not in RUTAS_ALTA:
                 return self._manda(404, b"no", "text/plain")
             nuevo = self._cuerpo_json()
             if nuevo is None:
@@ -415,6 +415,8 @@ def crear_servidor(puerto=PUERTO):
                     return self._json(*servidores_webs.atiende_cambio(nuevo))
                 if ruta == "/servidores/avisos/probar":
                     return self._json(*servidores_avisos.probar(nuevo))
+                if ruta == "/servidores/panel/probar":
+                    return self._json(*servidores_panel.probar(nuevo))
                 if ruta in RUTAS_ALTA:
                     return self._json(*servidores_alta.atiende(RUTAS_ALTA[ruta], nuevo))
                 errores = errores_config(nuevo)
@@ -426,12 +428,20 @@ def crear_servidor(puerto=PUERTO):
                         en_disco = json.load(f)
                 except (OSError, ValueError):
                     en_disco = {}
+                cuentas_antes = {_cuenta_panel(s) for s in cfg().get("servidores") or [] if isinstance(s, dict)} - {""}
                 parche = sin_secretos(ajustes.normalizar(nuevo, en_disco, cfg().get("servidores")))
                 # la revisión se comprueba y la lista se escribe bajo el cerrojo de servidores.json (el mismo que usa un alta): un alta a la vez no se pierde
                 if not guardar_con_revision(parche, lambda lista: "servidores" not in nuevo or rev == revision_servidores(sin_secretos(lista))):
                     # la lista cambió desde que la página la leyó (un alta, otra pestaña): guardar la copia vieja la pisaría
                     return self._json(409, {"ok": False, "conflicto": True, "error": "la lista de servidores cambió: recarga la página antes de guardar"})
                 nueva_rev = revision_servidores(sin_secretos(cfg().get("servidores")))
+                if "servidores" in parche:           # la clave de un panel que se quita o cambia de dirección no se queda huérfana en el Llavero
+                    for cuenta in cuentas_antes - {_cuenta_panel(s) for s in cfg().get("servidores") or [] if isinstance(s, dict)}:
+                        try:
+                            claves.borrar_clave(cuenta)
+                            log("clave de un panel borrada del Llavero (el servidor o su panel ya no están)")
+                        except Exception as e:
+                            log(f"no se pudo borrar una clave huérfana ({type(e).__name__})")
                 try:
                     from . import webs_sondeo
                     webs_sondeo.olvidar(servidores=cfg().get("servidores") or [])     # las webs que ya no están en la lista pierden su estado ahora

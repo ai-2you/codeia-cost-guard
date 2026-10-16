@@ -78,7 +78,7 @@ def _seccion_webs(webs):
     return f'<div class="sec"><span>Webs</span><span class="nota">{nota}</span></div><div class="lista">{"".join(html)}{extra}</div>'
 
 
-def _motivos(t, res, d, webs):
+def _motivos(t, res, d, webs, panel=None, ahora=None):
     """Por qué el servidor no está en verde, en palabras: [(color, texto)] de las tarjetas ámbar y rojas y del bastionado."""
     out = []
 
@@ -104,6 +104,15 @@ def _motivos(t, res, d, webs):
     for clave, texto in nombres.items():
         if mal(clave):
             out.append((color(clave), texto))
+    p = panel if isinstance(panel, dict) else {}
+    antiguas = ((p.get("copias_resumen") or {}).get("antiguas") or 0) if p.get("ok_en") else 0
+    if antiguas:
+        out.append(("ambar", f"{antiguas} copia{'s' if antiguas > 1 else ''} de seguridad sin hacer desde hace más de lo normal"))
+    if ahora and p.get("ok_en"):
+        fallidos = sum(1 for sv in (p.get("servicios") or []) if isinstance(sv, dict) and sv.get("estado") == "error" and sv.get("tipo") in ("application", "compose")
+                       and isinstance(sv.get("despliegue"), (int, float)) and 600 < ahora - sv["despliegue"] <= 7 * 86400)
+        if fallidos:
+            out.append(("ambar", f"{fallidos} aplicación{'es' if fallidos > 1 else ''} con el último despliegue fallido"))
     n_caidos = len((t.get("servicios") or {}).get("caidos") or [])
     if mal("servicios") and n_caidos:
         out.append((color("servicios"), f"{n_caidos} servicio{'s' if n_caidos > 1 else ''} caído{'s' if n_caidos > 1 else ''}"))
@@ -144,7 +153,7 @@ def cuerpo_servidor(nombre, e, servidor_cfg, ahora, abiertas=frozenset()):
     k = d.get("disco") or {}
     hw.append(tarjeta("disco", "Disco", f'{_gb(k.get("usado"))} / {_gb(k.get("total"))} GB',
                       "Espacio de sobra" if _estado(t, "disco") == "verde" else "Se está llenando", _estado(t, "disco")))
-    motivos = _motivos(t, e.get("bastionado_resumen") or {}, d, webs)
+    motivos = _motivos(t, e.get("bastionado_resumen") or {}, d, webs, e.get("panel"), ahora)
     if motivos:
         filas = "".join(f'<div class="f"><span style="white-space:normal"><i class="p {c}"></i> {esc(x)}</span></div>' for c, x in motivos[:MAX_MOTIVOS])
         extra = f'<div class="nota" style="padding:4px 0">+{len(motivos) - MAX_MOTIVOS} más</div>' if len(motivos) > MAX_MOTIVOS else ""

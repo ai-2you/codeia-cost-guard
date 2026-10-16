@@ -28,7 +28,12 @@
     if (enHistorico && window.cargarHistorico) window.cargarHistorico();
     if (v === "servidores" && window.cargarServidores) window.cargarServidores();
   };
-  window.CG = {h, fmt, post};
+  const ERRORES_PANEL = {sin_clave: "No hay clave guardada.", clave_invalida: "La clave guardada no tiene un formato válido.", url_invalida: "La URL del panel no es válida (https con un nombre público).",
+    red: "No se pudo conectar con el panel.", tls: "El certificado del panel no es válido: usa un dominio con HTTPS válido.", timeout: "El panel tardó demasiado en contestar.", plazo: "El panel tardó demasiado en contestar.",
+    redireccion: "El panel redirige a otra dirección: pon la URL final.", clave_rechazada: "El panel rechazó la clave (caducada, revocada o sin el permiso «Access API/CLI»).", http_5xx: "El panel devolvió un error.",
+    http_otro: "El panel respondió con un código inesperado.", contrato: "El panel contestó algo que no entiendo (¿una versión de Dokploy que no conozco?).", demasiado_grande: "La respuesta del panel es demasiado grande.",
+    no_json: "El panel no devolvió JSON (¿hay un proxy con inicio de sesión delante?).", version_antigua: "Hace falta Dokploy 0.30.0 o superior."};
+  window.CG = {h, fmt, post, ERRORES_PANEL};
 
   function cargar(){
     const dest = $("vista-ajustes");
@@ -227,8 +232,8 @@
     const info = (A.paneles || {})[s.nombre];
     const f = (et, k, ph) => h("label", {}, et, h("input", {class: "ancho", "data-s": i, "data-k": k, value: s[k] == null ? "" : s[k], placeholder: ph || "",
       oninput: k === "nombre" ? ev => { const t = ev.target.closest(".prov").querySelector(".prov-cab strong"); if (t) t.textContent = ev.target.value.trim() || "(sin nombre)"; } : null}));
-    const panel = h("select", {"data-s": i, "data-k": "panel"}, ...[["", "ninguno"], ["dokploy", "Dokploy"], ["easypanel", "Easypanel"]].map(([v, t]) => h("option", {value: v, selected: (s.panel || "") === v}, t)));
-    const k = info ? filaClave({cuenta: info.cuenta}, info, "API key del panel (solo lectura)") : null;
+    const panel = h("select", {"data-s": i, "data-k": "panel"}, ...[["", "ninguno"], ["dokploy", "Dokploy"], ["easypanel", "Easypanel (sin API)"]].map(([v, t]) => h("option", {value: v, selected: (s.panel || "") === v}, t)));
+    const k = info ? filaClave({cuenta: info.cuenta}, info, "Clave de miembro de " + (s.panel === "dokploy" ? "Dokploy" : "el panel")) : null;
     return h("div", {class: "prov", "data-servidor": i},
       h("div", {class: "prov-cab"}, h("strong", {}, s.nombre || "(sin nombre)"), k ? k.estado : null,
         h("button", {onclick: () => { leer(); A.config.servidores.splice(i, 1); $("vista-ajustes").replaceChildren(...pinta()); }}, "Quitar servidor")),
@@ -237,7 +242,26 @@
         editorWebs(s)),
       h("label", {style: "display:block;margin-top:6px"}, h("input", {type: "checkbox", "data-s": i, "data-k": "avisos", checked: s.avisos !== false}), " Avisar con una notificación de este servidor (apágalo, por ejemplo, en los de clientes)"),
       detectorWebs(s),
-      k ? k.fila : (s.panel ? h("p", {class: "ayuda"}, "Guarda los ajustes y aquí podrás poner la clave del panel.") : null));
+      k ? h("div", {}, avisoPanel(), k.fila, s.id && info.clave_guardada ? probarPanel(s) : null) : (s.panel === "easypanel"
+        ? h("p", {class: "ayuda"}, "EasyPanel no tiene clave de solo lectura (la clave de su API puede cambiar y borrar cosas), así que por ahora no se lee su API: el estado sale por SSH.")
+        : s.panel ? h("p", {class: "ayuda"}, "Guarda los ajustes y aquí podrás poner la clave del panel.") : null));
+  }
+
+  function avisoPanel(){
+    return h("p", {class: "ayuda"}, "CostGuard solo hace consultas a Dokploy (cinco peticiones de lectura cada 5 minutos), pero la clave de un miembro puede más: desplegar, parar y borrar copias en los servicios que le asignes, y cualquier programa que se ejecute con tu usuario podría leerla del Llavero. Crea en Dokploy un usuario dedicado con solo el permiso «Access API/CLI», asígnale únicamente los proyectos que quieras vigilar y ponle una caducidad de 90 días.");
+  }
+
+  function probarPanel(s){
+    const msg = h("span", {class: "msg", role: "status"});
+    const boton = h("button", {onclick: () => {
+      boton.disabled = true; msg.className = "msg"; msg.textContent = "Probando…";
+      post("/servidores/panel/probar", {servidor: s.id}).then(r => {
+        if (r.espera_s) { msg.className = "msg err"; msg.textContent = "Espera " + r.espera_s + " s antes de volver a probar."; }
+        else if (r.ok) { msg.className = "msg ok"; msg.textContent = "Conecta (Dokploy " + r.version + "). Ve " + r.servicios + " servicios, " + r.dominios + " dominios y " + r.copias + " ejecuciones de copia." + (r.version_no_probada ? " Es una versión más nueva que las que he probado." : "") + (r.copias_truncadas ? " La lista de copias llegó al tope: puede faltar lo más antiguo." : ""); }
+        else { msg.className = "msg err"; msg.textContent = ERRORES_PANEL[r.error] || "No se pudo probar."; }
+      }).catch(() => { msg.className = "msg err"; msg.textContent = "No se pudo hablar con la barra."; }).finally(() => { boton.disabled = false; });
+    }}, "Probar conexión");
+    return h("div", {style: "margin-top:6px"}, boton, " ", msg);
   }
 
   const AVISO_COPIAS = {

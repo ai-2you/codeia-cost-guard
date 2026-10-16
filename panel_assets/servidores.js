@@ -2,7 +2,7 @@
    los nombres vienen del servidor. Los estados salen de un mapa cerrado a clases fijas; lo que no se conoce se pinta como «desconocido», nunca como correcto.
    Nada se enseña como bueno si su última lectura es vieja: la respuesta trae la ventana de frescura y cada fila su última lectura. */
 (function(){
-  const {h, post} = window.CG;
+  const {h, post, ERRORES_PANEL} = window.CG;
   const $ = id => document.getElementById(id);
   const MAX_FILAS = 500;
   // estado → [clase fija, texto]
@@ -96,6 +96,55 @@
     return h("div", {}, ...piezas);
   }
 
+  const ESTADO_DESPLIEGUE = {done: ["sv-ok", "Correcto"], error: ["sv-mal", "Falló"], running: ["sv-neutro", "En curso"], idle: ["sv-neutro", "Sin despliegues"]};
+  const ESTADO_COPIA = {al_dia: ["sv-ok", "Al día"], antigua: ["sv-aviso", "Sin hacer desde hace más de lo normal"], sin_buena: ["sv-neutro", "Sin copia buena registrada"]};
+  const dias = s => s >= 86400 * 2 ? "cada " + Math.round(s / 86400) + " días" : s >= 7200 ? "cada " + Math.round(s / 3600) + " h" : "";
+
+  function cabeceraPanel(d, p, frescoPanel){
+    const piezas = [];
+    if (p.error) piezas.push(insignia(p.error === "alcance" ? "sv-aviso" : "sv-mal", p.error === "alcance" ? "El alcance de la clave ha cambiado" : (ERRORES_PANEL[p.error] || "No se pudo leer el panel"),
+      p.error === "alcance" ? "Dokploy devolvió muchos menos servicios que antes (¿se le quitaron proyectos al usuario?). Se conserva lo anterior y no se evalúa nada nuevo." : ""));
+    piezas.push(h("span", {class: "sv-suave"}, (piezas.length ? " " : "") + (p.ok_en ? "Última lectura buena del panel " + hace(p.ok_en, d.generado_en) : "Aún sin lectura buena del panel") + (p.version ? " · Dokploy " + p.version : "") + (p.version_no_probada ? " (más nueva que las que he probado)" : "") + "."));
+    return h("p", {class: "sv-estado"}, ...piezas);
+  }
+
+  function tablaCopias(d, p, frescoPanel){
+    if (!p.copias.length) return h("p", {class: "vacio"}, "Todavía no hay copias registradas: Dokploy no ha ejecutado ninguna que este usuario pueda ver.");
+    const filas = p.copias.map(c => {
+      let est;
+      if (!frescoPanel) est = insignia("sv-neutro", "Sin lectura del panel");
+      else { const [cl, tx] = clase(ESTADO_COPIA, c.evaluacion); est = insignia(cl, tx); }
+      const ultima = c.ultima_ok ? hace(c.ultima_ok, d.generado_en) : "—";
+      const fallo = c.ultimo_estado === "error" ? " · la última ejecución falló" : c.ultimo_estado === "running" ? " · en curso" : "";
+      return h("tr", {}, celda(h("span", {class: "sv-nombre", title: c.etiqueta}, c.etiqueta)), celda(c.tipo === "volumeBackup" ? "Volumen" : "Base de datos"), celda(est),
+        celda(h("span", {}, ultima, h("span", {class: "sv-suave"}, (c.intervalo_s ? " · " + dias(c.intervalo_s) : "") + fallo))));
+    });
+    return h("div", {class: "sv-tabla"}, h("table", {class: "sv"}, h("thead", {}, h("tr", {}, ...["Copia", "Tipo", "Estado", "Última buena"].map(t => h("th", {}, t)))), h("tbody", {}, ...filas)),
+      h("p", {class: "ayuda"}, "«Buena» es una ejecución que terminó sin error (done): no garantiza que la copia se pueda restaurar. La cadencia se aprende de las copias vistas, así que una semanal no salta a los 3 días."));
+  }
+
+  function arbolProyectos(d, p, frescoPanel){
+    if (!p.servicios.length) return h("p", {class: "vacio"}, "El panel no devuelve servicios a este usuario (¿se le asignaron proyectos?).");
+    const porProyecto = new Map();
+    for (const s of p.servicios) { const k = s.proyecto || "(sin proyecto)"; if (!porProyecto.has(k)) porProyecto.set(k, []); porProyecto.get(k).push(s); }
+    const gravedad = s => s.estado === "error" ? 0 : s.estado == null ? 1 : 2;
+    const piezas = [];
+    for (const [nombre, ss] of [...porProyecto].sort((a, b) => Math.min(...a[1].map(gravedad)) - Math.min(...b[1].map(gravedad)) || a[0].localeCompare(b[0]))) {
+      ss.sort((a, b) => gravedad(a) - gravedad(b) || String(a.nombre || a.slug).localeCompare(String(b.nombre || b.slug)));
+      const filas = ss.map(s => {
+        const [cl, tx] = frescoPanel ? clase(ESTADO_DESPLIEGUE, s.estado) : ["sv-neutro", "Sin lectura del panel"];
+        const doms = s.dominios.map(x => x.vigilado ? enlaceWeb("https://" + x.host + "/") : h("span", {class: "sv-nombre sv-suave", title: "El panel lo sirve, pero no lo vigilas"}, x.host));
+        return h("tr", {}, celda(h("span", {class: "sv-nombre", title: s.nombre || s.slug || s.id}, s.nombre || s.slug || s.id)), celda(({application: "Aplicación", compose: "Compose"})[s.tipo] || "Base de datos"),
+          celda(s.tipo === "application" || s.tipo === "compose" ? h("span", {}, insignia(cl, tx, "Estado del último despliegue, no de si el contenedor está en marcha"), s.despliegue ? h("span", {class: "sv-suave"}, " " + hace(s.despliegue, d.generado_en)) : null) : h("span", {class: "sv-suave"}, "—")),
+          celda(h("span", {}, ...doms.flatMap((x, i) => i ? [", ", x] : [x]))));
+      });
+      piezas.push(h("div", {class: "sv-grupo"}, h("div", {class: "sv-grupo-cab"}, h("strong", {}, nombre), h("span", {class: "sv-suave"}, ss.length + (ss.length === 1 ? " elemento" : " elementos"))),
+        h("table", {class: "sv"}, h("tbody", {}, ...filas))));
+    }
+    piezas.push(h("p", {class: "ayuda"}, "El estado es el del último despliegue según el panel; si un contenedor está o no en marcha sale de la lectura por SSH (más arriba). Los dominios en gris los sirve el panel pero no están entre tus webs vigiladas."));
+    return h("div", {}, ...piezas);
+  }
+
   function textoEvento(e){
     if (e.origen === "web") {
       if (e.evento === "cayo") return ["sv-mal", "Una web cayó" + (e.codigo ? " (código " + e.codigo + ")" : "")];
@@ -170,10 +219,13 @@
     const raiz = $("vista-servidores");
     const fresco = ts => ts != null && d.generado_en - ts <= d.ventana_s && d.generado_en - ts >= -60;
     if (!d.disponible) { raiz.replaceChildren(h("section", {}, h("h2", {}, "Servidores"), barra(), h("p", {class: "vacio"}, d.motivo || "Sin datos todavía."))); return; }
-    raiz.replaceChildren(h("section", {}, h("h2", {}, "Servidores"), barra(), cabecera(d, fresco)),
+    const p = d.panel, frescoPanel = !!p && fresco(p.ok_en) && p.error !== "alcance";
+    raiz.replaceChildren(...[h("section", {}, h("h2", {}, "Servidores"), barra(), cabecera(d, fresco)),
       h("section", {}, h("h2", {}, "Webs"), tablaWebs(d, fresco)),
+      p ? h("section", {}, h("h2", {}, "Copias de seguridad"), cabeceraPanel(d, p, frescoPanel), tablaCopias(d, p, frescoPanel)) : null,
+      p ? h("section", {}, h("h2", {}, "Proyectos del panel"), arbolProyectos(d, p, frescoPanel)) : null,
       h("section", {}, h("h2", {}, "Contenedores y servicios"), bloqueRecursos(d, fresco)),
-      h("section", {}, h("h2", {}, "Qué ha pasado"), lineaTiempo(d)));
+      h("section", {}, h("h2", {}, "Qué ha pasado"), lineaTiempo(d))].filter(Boolean));
   }
 
   function mensaje(txt){ $("vista-servidores").replaceChildren(h("section", {}, h("h2", {}, "Servidores"), servidores.length ? barra() : null, h("p", {class: "vacio"}, txt))); }
