@@ -1,0 +1,698 @@
+<title>Cost Guard · panel</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: cabecera del desplegable (icono de estado + título + control segmentado) sobre una rejilla de 12
+   columnas; resumen arriba, detalle debajo. Tokens = desplegable_comun.py: cristal fino sobre un fondo con luz. */
+:root{
+  --bg:#eceef3; --luz1:rgba(26,143,60,.10); --luz2:rgba(196,98,63,.10); --luz3:rgba(10,132,184,.08);
+  --tarjeta:rgba(255,255,255,.58); --tarjeta-2:rgba(255,255,255,.9); --borde:rgba(0,0,0,.07); --borde-f:rgba(0,0,0,.05);
+  --activa:#fff; --fg:rgba(0,0,0,.86); --sub:rgba(0,0,0,.56); --tenue:rgba(0,0,0,.40); --pista:rgba(0,0,0,.055);
+  --terminal:#1f9d47; --opus:#c4623f; --verde:#30b351; --ambar:#e08600; --rojo:#e5372c; --gris:#8e8e93;
+  --s-claude:#d27454; --s-nan:#1b8fc0; --s-codex:#8b5cc8; --s-or:#8e8e93;
+  --sombra:0 1px 1px rgba(0,0,0,.03),0 6px 18px rgba(0,0,0,.035); --brillo:inset 0 1px 0 rgba(255,255,255,.7);
+  --f-texto:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+  --f-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141518; --luz1:rgba(48,209,88,.07); --luz2:rgba(224,135,106,.08); --luz3:rgba(100,210,255,.05);
+  --tarjeta:rgba(255,255,255,.055); --tarjeta-2:rgba(255,255,255,.09); --borde:rgba(255,255,255,.10); --borde-f:rgba(255,255,255,.06);
+  --activa:rgba(255,255,255,.15); --fg:rgba(255,255,255,.95); --sub:rgba(255,255,255,.60); --tenue:rgba(255,255,255,.40); --pista:rgba(255,255,255,.07);
+  --terminal:#30d158; --opus:#e0876a; --verde:#34c759; --ambar:#ff9f0a; --rojo:#ff453a; --gris:#8e8e93;
+  --s-claude:#e8907a; --s-nan:#64c8f0; --s-codex:#b48cf0; --s-or:#98989d; --sombra:none; --brillo:inset 0 1px 0 rgba(255,255,255,.06); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141518; --luz1:rgba(48,209,88,.07); --luz2:rgba(224,135,106,.08); --luz3:rgba(100,210,255,.05);
+  --tarjeta:rgba(255,255,255,.055); --tarjeta-2:rgba(255,255,255,.09); --borde:rgba(255,255,255,.10); --borde-f:rgba(255,255,255,.06);
+  --activa:rgba(255,255,255,.15); --fg:rgba(255,255,255,.95); --sub:rgba(255,255,255,.60); --tenue:rgba(255,255,255,.40); --pista:rgba(255,255,255,.07);
+  --terminal:#30d158; --opus:#e0876a; --verde:#34c759; --ambar:#ff9f0a; --rojo:#ff453a; --gris:#8e8e93;
+  --s-claude:#e8907a; --s-nan:#64c8f0; --s-codex:#b48cf0; --s-or:#98989d; --sombra:none; --brillo:inset 0 1px 0 rgba(255,255,255,.06); color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font:13.5px/1.45 var(--f-texto);-webkit-font-smoothing:antialiased;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:22px 40px;
+  background-image:radial-gradient(900px 520px at 8% -6%,var(--luz1),transparent 70%),radial-gradient(800px 560px at 96% 4%,var(--luz2),transparent 70%),radial-gradient(900px 700px at 50% 110%,var(--luz3),transparent 70%);
+  background-attachment:fixed}
+.envoltura{max-width:1220px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+/* cada vista ocupa todo el ancho: con margin:auto un hijo flex se encoge a su contenido */
+.envoltura>main{width:100%;max-width:none;margin:0}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--terminal);outline-offset:2px}
+.vidrio{background:var(--tarjeta);border:1px solid var(--borde);box-shadow:var(--sombra),var(--brillo);-webkit-backdrop-filter:blur(24px) saturate(1.5);backdrop-filter:blur(24px) saturate(1.5)}
+
+/* cabecera */
+.cab{display:flex;align-items:center;gap:13px;flex-wrap:wrap}
+.escudo{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;flex:none;background:color-mix(in srgb,var(--verde) 20%,transparent);color:var(--verde)}
+.escudo.ambar{background:color-mix(in srgb,var(--ambar) 20%,transparent);color:var(--ambar)}
+.escudo svg{width:22px;height:22px}
+.tit{font-size:20px;font-weight:700;letter-spacing:-.015em}
+.est{font-size:13px;color:var(--sub)}
+.cab-der{margin-left:auto;display:flex;gap:8px;align-items:center}
+.icono-btn{height:34px;min-width:34px;padding:0 11px;border-radius:10px;display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub)}
+.icono-btn svg{width:15px;height:15px}
+.icono-btn:hover{color:var(--fg)}
+
+.seg{display:inline-grid;grid-auto-flow:column;grid-auto-columns:1fr;border-radius:9px;padding:2px;gap:2px}
+.seg button{border:0;background:none;border-radius:7px;font-size:12.5px;font-weight:500;color:var(--sub);padding:5px 14px;white-space:nowrap;transition:background .15s,color .15s}
+.seg button:hover{color:var(--fg)}
+.seg button.on{background:var(--activa);color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.seg.grande{display:grid;width:100%;border-radius:11px}
+.seg.grande button{padding:7px 10px;font-size:13px;border-radius:9px}
+.seg.mini button{padding:3px 10px;font-size:11.5px}
+
+.filtros{display:flex;gap:10px 22px;flex-wrap:wrap;align-items:center}
+.filtros .grupo{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.etq{font-size:10.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--tenue)}
+.pil{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 12px;border-radius:14px;font-size:12.5px;font-weight:600;color:var(--sub);background:var(--tarjeta);border:1px solid var(--borde)}
+.pil:hover{color:var(--fg)}
+.pil.on{color:var(--fg);background:var(--activa);box-shadow:0 1px 2px rgba(0,0,0,.1)}
+.p{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+
+/* rejilla */
+.rej{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
+.c3{grid-column:span 3}.c4{grid-column:span 4}.c5{grid-column:span 5}.c6{grid-column:span 6}.c7{grid-column:span 7}.c8{grid-column:span 8}.c12{grid-column:span 12}
+@media (max-width:1020px){.c3{grid-column:span 6}.c4,.c5,.c6,.c7,.c8{grid-column:span 12}}
+@media (max-width:560px){.c3{grid-column:span 12}}
+/* misma altura en cada fila: la columna ya mide lo que la más alta; la tarjeta de dentro la rellena */
+.rej>div:not(.tj){display:flex;flex-direction:column;min-width:0}
+.rej>div:not(.tj)>.lista,.rej>div:not(.tj)>.tj,.rej>div:not(.tj)>.rej{flex:1}
+.rej>div:not(.tj)>.rej{align-content:stretch}
+
+/* tarjeta: la .tj del desplegable */
+.tj{border-radius:16px;padding:12px 15px 13px;min-width:0;display:flex;flex-direction:column}
+.tj .et{display:flex;align-items:center;gap:7px;color:var(--sub);font-size:12.5px}
+.tj .et svg{width:15px;height:15px;flex:none;opacity:.8}
+.tj .et .der{margin-left:auto;display:flex;align-items:center;gap:8px}
+.tj .v{font-size:23px;font-weight:650;margin-top:3px;font-variant-numeric:tabular-nums;letter-spacing:-.015em;white-space:nowrap;line-height:1.2}
+.tj .v small{font-size:13px;font-weight:500;color:var(--tenue);letter-spacing:0}
+.tj .s{font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tj .abajo{margin-top:auto}
+.cifra{font:600 34px/1.05 var(--f-mono);font-variant-numeric:tabular-nums;letter-spacing:-.03em;margin-top:6px}
+.k{color:var(--sub)}.m{color:var(--terminal)}.b{color:var(--opus)}
+.delta{font-size:11.5px;font-weight:600;padding:1px 7px;border-radius:9px;background:var(--pista);color:var(--sub);font-variant-numeric:tabular-nums}
+.delta.sube{color:var(--opus);background:color-mix(in srgb,var(--opus) 13%,transparent)}
+.delta.baja{color:var(--terminal);background:color-mix(in srgb,var(--terminal) 13%,transparent)}
+.barra{height:5px;border-radius:3px;background:var(--pista);overflow:hidden;margin-top:8px}
+.barra i{display:block;height:100%;border-radius:3px;background:var(--terminal);animation:crece .7s cubic-bezier(.2,.8,.2,1) both}
+.barra i.ambar{background:var(--ambar)}.barra i.rojo{background:var(--rojo)}
+@keyframes crece{from{width:0}}
+
+.sec{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:0 3px 7px;font-size:10.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--tenue)}
+.sec .nota{letter-spacing:0;text-transform:none;font-weight:400;font-size:12px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;letter-spacing:0;text-transform:none;padding:1px 8px;border-radius:10px;border:1px solid var(--borde);color:var(--sub);white-space:nowrap}
+.chip.vivo{color:var(--terminal);border-color:color-mix(in srgb,var(--terminal) 35%,transparent)}
+.chip.vivo .p{background:var(--terminal);animation:latido 2.4s ease-in-out infinite}
+@keyframes latido{50%{opacity:.3}}
+
+.lista{border-radius:16px;padding:3px 15px}
+.f{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 12px;align-items:center;padding:8px 0}
+.f+.f{border-top:1px solid var(--borde-f)}
+.f .n{display:flex;align-items:center;gap:8px;min-width:0;font-size:13px;font-weight:500}
+.f .n>span:not(.chip){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.f .barra{grid-column:1/-1;margin-top:1px}
+.f .nota-f{grid-column:1/-1;font-size:11.5px;color:var(--tenue);margin-top:-1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mono{font:12.5px/1.35 var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tenue{color:var(--tenue)} .sub{color:var(--sub)}
+
+/* gráficos */
+.cabtarjeta{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.cabtarjeta h3{margin:0;font-size:13.5px;font-weight:650}
+.cabtarjeta .total{font:600 13px var(--f-mono);color:var(--sub)}
+.graf{position:relative;margin-top:4px}
+.graf svg{display:block;width:100%;height:auto;overflow:visible}
+.graf .rej-l{stroke:var(--borde-f)}
+.graf text{fill:var(--tenue);font:10.5px var(--f-texto);font-variant-numeric:tabular-nums}
+.graf .zona{fill:transparent;cursor:crosshair}
+/* sin transiciones ni transform dentro de tarjetas con cristal: el repintado del backdrop-filter deja franjas */
+.graf.hover .col rect{fill-opacity:.4}
+.graf.hover .col.on rect{fill-opacity:1}
+.graf .guia{stroke:var(--sub);stroke-width:1;stroke-dasharray:3 3;opacity:0;transition:opacity .1s}
+.graf.hover .guia{opacity:.6}
+.graf .trazo{stroke-dasharray:var(--l);stroke-dashoffset:var(--l);animation:dibuja 1s cubic-bezier(.3,.7,.2,1) forwards}
+@keyframes dibuja{to{stroke-dashoffset:0}}
+.tip{position:absolute;pointer-events:none;z-index:5;min-width:150px;padding:8px 11px;border-radius:11px;font-size:12px;line-height:1.5;
+  background:var(--tarjeta-2);border:1px solid var(--borde);box-shadow:0 8px 24px rgba(0,0,0,.18);opacity:0;transition:opacity .12s}
+.tip.ver{opacity:1}
+.tip b{display:block;font-size:12px;margin-bottom:3px}
+.tip .l{display:flex;align-items:center;gap:7px;justify-content:space-between}
+.tip .l span:first-child{display:flex;align-items:center;gap:6px;color:var(--sub)}
+.tip .l .mono{font-size:11.5px}
+.tip .tot{border-top:1px solid var(--borde-f);margin-top:4px;padding-top:4px}
+.leyenda{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--sub);margin-top:6px}
+.leyenda span{display:inline-flex;align-items:center;gap:6px}
+
+.dona{display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;align-items:center}
+@media (max-width:480px){.dona{grid-template-columns:minmax(0,1fr)}}
+.dona .centro{font:600 15px var(--f-mono)}
+
+.mapa{overflow-x:auto}
+.mapa table{border-collapse:separate;border-spacing:3px;font-size:11.5px;min-width:600px;width:100%}
+.mapa th{font-weight:500;color:var(--tenue);text-align:center;padding:2px;font-size:10.5px}
+.mapa th:first-child{text-align:left}
+.mapa td{height:24px;border-radius:6px;text-align:center}
+.mapa td.nom{background:none!important;text-align:left;font:500 12px var(--f-texto);white-space:nowrap;padding-right:8px}
+.mapa td.tot{background:none!important;text-align:right;font:11.5px var(--f-mono);color:var(--sub);padding-left:8px}
+.escala{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--tenue);margin-top:8px;justify-content:flex-end}
+.escala i{width:14px;height:10px;border-radius:3px;display:inline-block}
+
+.tabla{overflow-x:auto}
+.tabla table{width:100%;border-collapse:collapse;font-size:12.5px}
+.tabla th,.tabla td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--borde-f);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tabla th{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--tenue)}
+.tabla th:first-child,.tabla td:first-child{text-align:left}
+.tabla tr:last-child td{border-bottom:0}
+
+.pie{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--tenue);font-size:12px;padding:4px 3px}
+.ejemplo{display:inline-flex;align-items:center;gap:6px;color:var(--ambar);font-weight:600}
+
+/* servidores */
+.pildoras{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:7px}
+.pildoras .pil{color:var(--fg);min-width:0}
+.pildoras .pil span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.linea-t .ev{display:grid;grid-template-columns:44px 12px minmax(0,1fr);gap:8px;align-items:start;padding:7px 0;font-size:12.5px}
+.linea-t .ev+.ev{border-top:1px solid var(--borde-f)}
+.linea-t .ev .p{margin-top:5px}
+
+/* ajustes */
+.ajustes{display:grid;grid-template-columns:230px minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:820px){.ajustes{grid-template-columns:minmax(0,1fr)}}
+.menu-aj{display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:16px}
+.menu-aj button{border:0;background:none;text-align:left;padding:8px 10px;border-radius:9px;font-size:13px;color:var(--sub);display:flex;align-items:center;gap:9px}
+.menu-aj button svg{width:16px;height:16px;opacity:.8}
+.menu-aj button.on{background:var(--activa);color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.1)}
+@media (max-width:820px){.menu-aj{flex-direction:row;overflow-x:auto}.menu-aj button{white-space:nowrap}}
+.panel-aj{border-radius:16px;padding:16px 18px}
+.form{display:grid;gap:14px}
+.campo{display:grid;gap:5px;min-width:0}
+.campo label,.campo .lab{font-size:12.5px;color:var(--sub);font-weight:500}
+.ayuda{font-size:12px;color:var(--tenue)}
+input[type=text],input[type=number],select,textarea{font:13px var(--f-texto);color:var(--fg);background:var(--tarjeta-2);border:1px solid var(--borde);border-radius:9px;padding:8px 10px;width:100%;min-width:0}
+.dos{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.bloque{border-top:1px solid var(--borde-f);padding-top:14px}
+.acciones{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.btn{height:34px;padding:0 15px;border-radius:10px;background:var(--tarjeta-2);border:1px solid var(--borde);font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.btn:hover{border-color:color-mix(in srgb,var(--fg) 25%,transparent)}
+.btn.prim{background:var(--terminal);border-color:transparent;color:#fff;font-weight:600}
+.interruptor{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0}
+.interruptor+.interruptor{border-top:1px solid var(--borde-f)}
+.tog{width:38px;height:22px;border-radius:11px;background:var(--pista);border:1px solid var(--borde);position:relative;flex:none;padding:0}
+.tog::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:left .15s}
+.tog.on{background:var(--terminal);border-color:transparent}
+.tog.on::after{left:18px}
+.chips-ed{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chips-ed .pil{height:26px;font-weight:500;color:var(--fg);padding-right:6px}
+.chips-ed .x{border:0;background:none;color:var(--tenue);padding:0 4px;font-size:13px;line-height:1}
+.chips-ed .x:hover{color:var(--rojo)}
+.chips-ed input{width:190px;flex:none;height:28px;padding:4px 10px}
+.fila-cuota{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) auto;gap:8px;align-items:center;margin-bottom:8px}
+.aviso-c{padding:10px 12px;border-radius:12px;font-size:12.5px;background:color-mix(in srgb,var(--terminal) 10%,transparent);border:1px solid color-mix(in srgb,var(--terminal) 28%,transparent);display:flex;gap:9px;align-items:flex-start}
+.aviso-c svg{width:16px;height:16px;flex:none;margin-top:1px;color:var(--terminal)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="envoltura">
+  <header class="cab">
+    <div class="escudo ambar" id="escudo"></div>
+    <div><div class="tit" id="titulo">Mis agentes</div><div class="est" id="estado"></div></div>
+    <div class="cab-der">
+      <button class="icono-btn vidrio" data-a="tema" aria-label="Cambiar tema"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Tema</button>
+      <button class="icono-btn vidrio" data-a="refrescar" aria-label="Actualizar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+    </div>
+  </header>
+
+  <nav class="seg grande vidrio" id="vistas" aria-label="Vistas">
+    <button class="on" data-a="vista" data-v="agentes">Agentes</button>
+    <button data-a="vista" data-v="historico">Histórico</button>
+    <button data-a="vista" data-v="servidores">Servidores</button>
+    <button data-a="vista" data-v="ajustes">Ajustes</button>
+  </nav>
+
+  <!-- ============ AGENTES ============ -->
+  <main id="v-agentes" class="envoltura">
+    <div class="filtros">
+      <div class="grupo"><span class="etq">Periodo</span>
+        <div class="seg vidrio" id="f-periodo"><button data-a="periodo" data-v="1">Hoy</button><button class="on" data-a="periodo" data-v="7">7 días</button><button data-a="periodo" data-v="30">30 días</button></div></div>
+      <div class="grupo"><span class="etq">Plan</span><div class="grupo" id="f-plan"></div></div>
+    </div>
+
+    <section class="rej">
+      <div class="tj vidrio c5" id="k-5h"></div>
+      <div class="tj vidrio c4" id="k-ritmo"></div>
+      <div class="tj vidrio c3" id="k-cache"></div>
+      <div class="tj vidrio c4" id="k-hoy"></div>
+      <div class="tj vidrio c4" id="k-semana"></div>
+      <div class="tj vidrio c4" id="k-mes"></div>
+    </section>
+
+    <section class="tj vidrio">
+      <div class="cabtarjeta"><h3>Consumo por día <span class="total" id="tot-dia"></span></h3>
+        <div class="seg mini vidrio" id="g-dia"><button class="on" data-a="gdia" data-v="auto">Auto</button><button data-a="gdia" data-v="barras">Barras</button><button data-a="gdia" data-v="area">Área</button><button data-a="gdia" data-v="calendario">Calendario</button></div></div>
+      <div class="graf" id="graf-dia"></div>
+      <div class="leyenda" id="ley-dia"></div>
+    </section>
+
+    <section class="rej">
+      <div class="c7"><div class="sec"><span>Planes</span><span class="nota">5 h · semana · mes</span></div><div class="lista vidrio" id="planes"></div></div>
+      <div class="c5"><div class="sec"><span>Cuotas del mes</span><span class="chip vivo"><i class="p"></i>en vivo · NaN</span></div><div class="lista vidrio" id="cuotas"></div></div>
+    </section>
+
+    <section class="rej">
+      <div class="tj vidrio c6"><div class="cabtarjeta"><h3>Modelos</h3><span class="ayuda" id="nota-mod"></span></div><div class="dona" id="modelos"></div></div>
+      <div class="c6"><div class="sec"><span>Proyectos</span><span class="nota" id="nota-proy"></span></div><div class="lista vidrio" id="proyectos"></div></div>
+    </section>
+
+    <section class="tj vidrio">
+      <div class="cabtarjeta"><h3>Qué modelo consume cada día</h3><span class="ayuda">últimos 14 días</span></div>
+      <div class="mapa" id="mapa"></div>
+      <div class="escala" id="escala"></div>
+    </section>
+
+    <section class="rej">
+      <div class="c6"><div class="sec"><span>Hoy, en detalle</span><span class="nota">de dónde salen los tokens</span></div><div class="tj vidrio" id="hoy-det"></div></div>
+      <div class="c6"><div class="sec"><span>Aplicaciones</span><span class="nota">sesiones registradas</span></div><div class="lista vidrio" id="apps"></div></div>
+    </section>
+  </main>
+
+  <!-- ============ HISTÓRICO ============ -->
+  <main id="v-historico" class="envoltura" hidden>
+    <div class="filtros">
+      <div class="grupo"><span class="etq">Rango</span><div class="seg vidrio" id="h-rango"><button data-a="hrango" data-v="30">30 días</button><button data-a="hrango" data-v="90">90 días</button><button data-a="hrango" data-v="365">12 meses</button><button data-a="hrango" data-v="todo">Todo</button></div></div>
+      <div class="grupo"><span class="etq">Paso</span><div class="seg vidrio" id="h-paso"><button data-a="hpaso" data-v="dia">Día</button><button data-a="hpaso" data-v="semana">Semana</button><button data-a="hpaso" data-v="mes">Mes</button></div></div>
+      <div class="grupo"><span class="etq">Agrupar</span><div class="seg vidrio" id="h-grupo"><button data-a="hgrupo" data-v="nada">Nada</button><button data-a="hgrupo" data-v="plan">Plan</button><button data-a="hgrupo" data-v="proyecto">Proyecto</button><button data-a="hgrupo" data-v="agente">Agente</button></div></div>
+      <button class="btn" style="margin-left:auto"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Descargar CSV</button>
+    </div>
+    <section class="rej" id="h-kpis"></section>
+    <section class="tj vidrio"><div class="cabtarjeta"><h3 id="h-tit">Consumo por semana</h3><span class="ayuda" id="h-nota"></span></div><div class="graf" id="h-graf"></div><div class="leyenda" id="h-ley"></div></section>
+    <section class="tj vidrio tabla" id="h-tabla"></section>
+  </main>
+
+  <!-- ============ SERVIDORES ============ -->
+  <main id="v-servidores" class="envoltura" hidden>
+    <div class="filtros">
+      <div class="grupo"><span class="etq">Servidor</span><div class="seg vidrio"><button class="on" data-a="sel">produccion</button><button data-a="sel">pruebas</button></div></div>
+      <span class="mono sub" style="margin-left:auto">203.0.113.10 · Ubuntu 24.04 · Dokploy</span>
+    </div>
+    <section class="rej" id="s-kpis"></section>
+    <section class="rej">
+      <div class="c7"><div class="sec"><span>Webs vigiladas</span><span class="nota">últimas 24 h</span></div><div class="tj vidrio tabla" id="s-webs"></div></div>
+      <div class="c5"><div class="sec"><span>Línea de tiempo</span><span class="nota">hoy</span></div><div class="lista vidrio linea-t" id="s-tiempo"></div></div>
+    </section>
+    <section class="tj vidrio"><div class="cabtarjeta"><h3>Procesador y memoria</h3><span class="ayuda">últimas 24 h</span></div><div class="graf" id="s-graf"></div><div class="leyenda"><span><i class="p" style="background:var(--s-nan)"></i>Procesador</span><span><i class="p" style="background:var(--s-codex)"></i>Memoria</span></div></section>
+    <section><div class="sec"><span>Servicios</span><span class="nota">Swarm · 9 en marcha</span></div><div class="pildoras" id="s-servicios"></div></section>
+    <section class="rej">
+      <div class="c6"><div class="sec"><span>Seguridad</span><span class="nota">13 de 13</span></div><div class="rej" id="s-seg" style="gap:10px"></div></div>
+      <div class="c6"><div class="sec"><span>Panel Dokploy</span><span class="nota">copias y despliegues</span></div><div class="lista vidrio" id="s-dokploy"></div></div>
+    </section>
+  </main>
+
+  <!-- ============ AJUSTES ============ -->
+  <main id="v-ajustes" hidden>
+    <div class="ajustes">
+      <nav class="menu-aj vidrio" id="menu-aj" aria-label="Secciones de ajustes"></nav>
+      <section class="panel-aj vidrio" id="aj-cuerpo"></section>
+    </div>
+  </main>
+
+  <footer class="pie">
+    <span class="ejemplo"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3l9 16H3L12 3z"/><path d="M12 10v4M12 17v.5"/></svg>Maqueta con datos de ejemplo</span>
+    <span>Medido a las 22:09 · 1.950 sesiones de Claude Code, Codex y OpenCode · turnos repetidos descartados · equivalente a precio de API: US$ 4.800 en 30 días (solo informativo: con suscripción se gasta cuota, no dinero)</span>
+  </footer>
+</div>
+
+<script>
+// ================= datos de ejemplo (deterministas) =================
+let semilla = 11;
+const azar = () => { semilla = (semilla * 16807) % 2147483647; return (semilla - 1) / 2147483646; };
+const HOY = new Date(2026, 9, 15);
+const PLANES = [
+  {id:"claude", nombre:"Claude (Max)", color:"--s-claude", cinco:120e6, semana:3.6e9, mes:7.5e9, hoy:480e6,
+   modelos:["claude","opus","sonnet","haiku"], api:false, cuotas:[], lim5:0, limS:0, limM:0},
+  {id:"nan", nombre:"NaN", color:"--s-nan", cinco:0, semana:40e6, mes:2.8e9, hoy:0,
+   modelos:["deepseek-v4-flash","qwen3.8-flash","glm5.3-flash","mimo-v2.6-flash","qwen3.6"], api:true,
+   cuotas:[["qwen3.8-flash",500e6],["deepseek-v4-flash",3e9],["glm5.3-flash",2e9],["mimo-v2.6-flash",1e9]], lim5:0, limS:0, limM:0},
+  {id:"codex", nombre:"OpenAI (Codex)", color:"--s-codex", cinco:0, semana:0, mes:60e6, hoy:0,
+   modelos:["gpt-5.6","codex"], api:false, cuotas:[], lim5:0, limS:0, limM:0},
+];
+const DIAS = Array.from({length:30}, (_, i) => {
+  const d = new Date(HOY); d.setDate(d.getDate() - (29 - i));
+  const finde = d.getDay() === 0 || d.getDay() === 6, base = (finde ? .45 : 1) * (.4 + azar() * .95);
+  return {fecha:d, claude:Math.round(base * 1.05e9), nan: azar() < .5 ? Math.round((.2 + azar()) * 4.2e8) : 0, codex: azar() < .14 ? Math.round(azar() * 3e7) : 0};
+});
+Object.assign(DIAS[29], {claude:480e6, nan:0, codex:0});
+const MODELOS = [["opus-5-5","claude",.93],["sonnet-5-5","claude",.04],["haiku-5-5","claude",.03],["deepseek-v4-flash","nan",.55],["qwen3.8-flash","nan",.25],["glm5.3-flash","nan",.17],["mimo-v2.6-flash","nan",.03],["gpt-5.6","codex",1]];
+const PROYECTOS = [["tienda-online",.27],["api-reservas",.19],["blog-personal",.14],["landing-cafe",.11],["panel-clientes",.09],["scripts-varios",.07],["app-gimnasio",.06]];
+const USO_CUOTA = {"qwen3.8-flash":350e6,"deepseek-v4-flash":900e6,"glm5.3-flash":300e6,"mimo-v2.6-flash":5e6,"qwen3.6":150e6};
+const APPS = [["Claude Code",1200,"claude"],["OpenCode",600,"nan"],["Codex",150,"codex"]];
+const LIM_HORA = 8e6;
+const HORAS = Array.from({length:30}, (_, i) => Math.max(.4e6, (i < 8 ? 2.2e6 : 4.5e6) + Math.sin(i / 2.3) * 2.4e6 + azar() * 4e6 + (i > 24 ? 9e6 : 0)));
+
+// ================= utilidades =================
+const $ = id => document.getElementById(id);
+function fmt(n){ n = Number(n) || 0; const u = n >= 1e9 ? [1e9,"B"] : n >= 1e6 ? [1e6,"M"] : n >= 1e3 ? [1e3,"K"] : [1,""], v = n / u[0];
+  return u[1] ? v.toLocaleString("es-ES",{maximumFractionDigits:1, minimumFractionDigits: v < 100 ? 1 : 0}) + " " + u[1] : String(Math.round(v)); }
+function cifra(n){ const t = fmt(n), u = (t.match(/[KMB]$/) || ["K"])[0].toLowerCase(); return `<span class="${u}">${t}</span>`; }
+const pct = (a, b) => (a / b * 100).toLocaleString("es-ES",{maximumFractionDigits:1}) + " %";
+const etDia = d => d.toLocaleDateString("es-ES",{weekday:"short", day:"numeric"}).replace(".", "");
+const ICON = {
+  reloj:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', pulso:'<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  caja:'<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/>', cal:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  capas:'<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>', web:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>',
+  cpu:'<rect x="7" y="7" width="10" height="10" rx="1"/><path d="M9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M3 15h4M17 9h4M17 15h4"/>',
+  mem:'<rect x="3" y="7" width="18" height="10" rx="1"/><path d="M7 11v2M11 11v2M15 11v2"/>', disco:'<path d="M4 15l2-9h12l2 9"/><rect x="3" y="15" width="18" height="5" rx="1"/>',
+  escudo:'<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>', candado:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  mano:'<path d="M8 13V5a1.5 1.5 0 0 1 3 0v6M11 11V4a1.5 1.5 0 0 1 3 0v7M14 11V5a1.5 1.5 0 0 1 3 0v8c0 4-2.5 7-6 7-3 0-4.5-2-6-5l-1.5-3a1.5 1.5 0 0 1 2.6-1.5L8 13"/>',
+  puerta:'<path d="M5 21V4h11v17M3 21h18M13 12h.5"/>', llave:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>',
+  servidor:'<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+  carpeta:'<path d="M3 6h6l2 2h10v11H3z"/>', moneda:'<circle cx="12" cy="12" r="9"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2.2 0 3 6 1.6 6 4.6 0 1.3-1.3 2.2-3 2.2-1.4 0-2.6-.6-3-1.6M12 6v2M12 16v2"/>',
+  copia:'<path d="M4 7h11v13H4z"/><path d="M9 4h11v13"/>', campana:'<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.5"/>', tema:'<circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',
+};
+const ico = (n, w) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w||1.8}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
+const punto = c => `<i class="p" style="background:var(${c})"></i>`;
+const barra = (p, cls, color) => `<div class="barra"><i class="${cls||""}" style="width:${Math.max(0,Math.min(100,p)).toFixed(1)}%${color?`;background:var(${color})`:""}"></i></div>`;
+let uid = 0;
+
+// --- curva monótona (Fritsch–Carlson): suave sin pasar por debajo de cero ni inventar picos ---
+function curva(pts){
+  const n = pts.length; if (n < 2) return ""; const dx = [], m = [], t = [];
+  for (let i = 0; i < n - 1; i++){ dx[i] = pts[i+1][0] - pts[i][0]; m[i] = (pts[i+1][1] - pts[i][1]) / dx[i]; }
+  t[0] = m[0]; t[n-1] = m[n-2];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i-1] * m[i] <= 0 ? 0 : 3 * (dx[i-1] + dx[i]) / ((2*dx[i] + dx[i-1]) / m[i-1] + (dx[i] + 2*dx[i-1]) / m[i]);
+  let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++){ const h = dx[i] / 3;
+    d += `C${(pts[i][0]+h).toFixed(1)},${(pts[i][1]+t[i]*h).toFixed(1)} ${(pts[i+1][0]-h).toFixed(1)},${(pts[i+1][1]-t[i+1]*h).toFixed(1)} ${pts[i+1][0].toFixed(1)},${pts[i+1][1].toFixed(1)}`; }
+  return d;
+}
+function ticks(max){ const e = Math.pow(10, Math.floor(Math.log10(max || 1))), paso = [1,2,2.5,5,10].map(x => x*e).find(s => max/s <= 4) || e*10, t = [];
+  for (let v = 0; v < max + paso*.001; v += paso) t.push(v); if (t[t.length-1] < max) t.push(t[t.length-1] + paso); return t; }
+
+/* Gráfico de series en el tiempo: área apilada o barras apiladas, con rejilla, guía y tooltip.
+   series: [{nombre,color,valores[]}], etiquetas: [texto eje], titulos: [texto del tooltip]. */
+function grafico(cont, {series, etiquetas, titulos, tipo, alto, unidad}){
+  const W = 960, H = alto || 250, izq = 46, der = 6, arr = 10, aba = 24, n = etiquetas.length, id = "g" + (++uid);
+  const tot = etiquetas.map((_, i) => series.reduce((a, s) => a + s.valores[i], 0)), tk = ticks(Math.max(...tot)), maxY = tk[tk.length-1];
+  const y = v => arr + (H - aba - arr) * (1 - v / maxY), ancho = W - izq - der;
+  const xc = i => tipo === "barras" ? izq + ancho / n * (i + .5) : izq + (n > 1 ? ancho / (n - 1) * i : ancho / 2);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${unidad||"tokens"} por periodo"><defs>`;
+  series.forEach((se, k) => s += `<linearGradient id="${id}-${k}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(${se.color})" stop-opacity=".42"/><stop offset="1" stop-color="var(${se.color})" stop-opacity=".02"/></linearGradient>`);
+  s += `</defs>` + tk.map(t => `<line class="rej-l" x1="${izq}" x2="${W-der}" y1="${y(t)}" y2="${y(t)}"/><text x="${izq-8}" y="${y(t)+3.5}" text-anchor="end">${t ? (unidad==="%" ? t+" %" : fmt(t)) : "0"}</text>`).join("");
+  if (tipo === "barras"){
+    const w = Math.min(28, ancho / n * .56);
+    etiquetas.forEach((_, i) => { let acc = 0; s += `<g class="col" data-i="${i}">`;
+      series.forEach((se, k) => { const v = se.valores[i]; if (!v) return; const y0 = y(acc), y1 = y(acc + v), top = acc + v === tot[i];
+        s += `<rect x="${xc(i)-w/2}" y="${y1}" width="${w}" height="${Math.max(y0-y1,.5)}" fill="var(${se.color})" rx="${top?4:0}"/>`; acc += v; });
+      s += `</g>`; });
+  } else {
+    let base = etiquetas.map(() => 0);
+    const capas = series.map((se, k) => { const sup = base.map((b, i) => b + se.valores[i]), pa = sup.map((v, i) => [xc(i), y(v)]), pb = base.map((v, i) => [xc(i), y(v)]).reverse();
+      const linea = curva(pa), area = linea + "L" + curva(pb).slice(1); base = sup; return {se, k, linea, area, pa}; });
+    capas.slice().reverse().forEach(c => s += `<path d="${c.area}Z" fill="url(#${id}-${c.k})"/>`);
+    capas.forEach(c => s += `<path class="trazo" style="--l:3000" d="${c.linea}" fill="none" stroke="var(${c.se.color})" stroke-width="1.8" stroke-linejoin="round"/>`);
+    const ult = capas[capas.length-1].pa[n-1]; s += `<circle cx="${ult[0]}" cy="${ult[1]}" r="3.5" fill="var(${capas[capas.length-1].se.color})" stroke="var(--bg)" stroke-width="2"/>`;
+    s += `<line class="guia" x1="0" x2="0" y1="${arr}" y2="${H-aba}"/>` + capas.map(c => `<circle class="pt" r="3.5" fill="var(${c.se.color})" stroke="var(--bg)" stroke-width="2" opacity="0"/>`).join("");
+  }
+  const cada = Math.ceil(n / 10);
+  s += etiquetas.map((t, i) => (i % cada && i !== n-1) ? "" : `<text x="${xc(i)}" y="${H-6}" text-anchor="${tipo!=="barras"&&i===0?"start":tipo!=="barras"&&i===n-1?"end":"middle"}">${t}</text>`).join("");
+  const zw = ancho / (tipo === "barras" ? n : Math.max(n - 1, 1));
+  s += etiquetas.map((_, i) => `<rect class="zona" data-i="${i}" x="${tipo==="barras" ? izq + zw*i : xc(i) - zw/2}" y="0" width="${zw}" height="${H-aba}"/>`).join("");
+  cont.innerHTML = s + `</svg><div class="tip"></div>`;
+  cont._datos = {series, titulos, tot, unidad, xc, y, W, H, tipo};
+}
+
+// tooltip y guía compartidos por todos los gráficos (delegación: sin manejadores en línea)
+document.addEventListener("pointermove", ev => {
+  const z = ev.target.closest && ev.target.closest(".zona"), g = z && z.closest(".graf");
+  document.querySelectorAll(".graf.hover").forEach(x => { if (x !== g) { x.classList.remove("hover"); x.querySelector(".tip").classList.remove("ver"); } });
+  if (!g || !g._datos) return;
+  const D = g._datos, i = +z.dataset.i, r = g.getBoundingClientRect(), esc = r.width / D.W;
+  g.classList.add("hover"); g.querySelectorAll(".col").forEach(c => c.classList.toggle("on", +c.dataset.i === i));
+  const gu = g.querySelector(".guia"); if (gu){ gu.setAttribute("x1", D.xc(i)); gu.setAttribute("x2", D.xc(i)); let acc = 0;
+    g.querySelectorAll(".pt").forEach((p, k) => { acc += D.series[k].valores[i]; p.setAttribute("cx", D.xc(i)); p.setAttribute("cy", D.y(acc)); p.setAttribute("opacity", 1); }); }
+  const u = D.unidad === "%" ? v => Math.round(v) + " %" : fmt;
+  const tip = g.querySelector(".tip");
+  tip.innerHTML = `<b>${D.titulos[i]}</b>` + D.series.slice().reverse().map(s => `<div class="l"><span>${punto(s.color)}${s.nombre}</span><span class="mono">${s.valores[i] ? u(s.valores[i]) : "—"}</span></div>`).join("")
+    + (D.series.length > 1 && D.unidad !== "%" ? `<div class="l tot"><span>Total</span><span class="mono"><b style="display:inline">${fmt(D.tot[i])}</b></span></div>` : "");
+  tip.classList.add("ver");
+  const x = D.xc(i) * esc, tw = tip.offsetWidth; tip.style.left = Math.max(0, Math.min(r.width - tw, x + 14 > r.width - tw ? x - tw - 14 : x + 14)) + "px"; tip.style.top = "6px";
+});
+
+function donut(partes, tam, grosor, centro){
+  const r = (tam - grosor) / 2, c = 2 * Math.PI * r, total = partes.reduce((a, p) => a + p[0], 0) || 1; let acc = 0;
+  const arcos = partes.map(([v, col]) => { const l = Math.max(v / total * c - 2, .5); const s = `<circle r="${r}" cx="${tam/2}" cy="${tam/2}" fill="none" stroke="var(${col})" stroke-width="${grosor}" stroke-dasharray="${l} ${c-l}" stroke-dashoffset="${-acc}" transform="rotate(-90 ${tam/2} ${tam/2})" stroke-linecap="butt"/>`; acc += v / total * c; return s; });
+  return `<svg width="${tam}" height="${tam}" viewBox="0 0 ${tam} ${tam}" style="flex:none" aria-hidden="true"><circle r="${r}" cx="${tam/2}" cy="${tam/2}" fill="none" stroke="var(--pista)" stroke-width="${grosor}"/>${arcos.join("")}${centro?`<text x="50%" y="50%" text-anchor="middle" dominant-baseline="central" fill="var(--fg)" style="font:600 ${tam/7}px var(--f-mono)">${centro}</text>`:""}</svg>`;
+}
+function chispa(vals, color, alto, conPunto){
+  const w = 300, h = alto, max = Math.max(...vals, 1), pts = vals.map((v, i) => [i * w / (vals.length - 1), h - 2 - v / max * (h - 6)]), d = curva(pts), id = "c" + (++uid), u = pts[pts.length-1];
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:${h}px;display:block;margin-top:10px" aria-hidden="true">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(${color})" stop-opacity=".35"/><stop offset="1" stop-color="var(${color})" stop-opacity="0"/></linearGradient></defs>
+    <path d="${d}L${w},${h}L0,${h}Z" fill="url(#${id})"/><path d="${d}" fill="none" stroke="var(${color})" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+    ${conPunto?`<circle cx="${u[0]}" cy="${u[1]}" r="2.6" fill="var(${color})"/>`:""}</svg>`;
+}
+
+// ================= estado =================
+const E = {vista:"agentes", periodo:7, plan:"todos", gdia:"auto", hist:{rango:"90", paso:"semana", grupo:"plan"}, ajuste:"planes", planAj:"claude"};
+const diasPeriodo = () => DIAS.slice(-Math.max(E.periodo, E.periodo === 1 ? 1 : 2));
+const planesSel = () => E.plan === "todos" ? PLANES : PLANES.filter(p => p.id === E.plan);
+const totalDia = d => planesSel().reduce((a, p) => a + d[p.id], 0);
+const suma = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
+
+// ================= agentes =================
+function pintarFiltros(){
+  $("f-plan").innerHTML = [`<button class="pil${E.plan==="todos"?" on":""}" data-a="plan" data-v="todos">Todos</button>`]
+    .concat(PLANES.map(p => `<button class="pil${E.plan===p.id?" on":""}" data-a="plan" data-v="${p.id}">${punto(p.color)}${p.nombre}</button>`)).join("");
+  document.querySelectorAll("#f-periodo button").forEach(b => b.classList.toggle("on", +b.dataset.v === E.periodo));
+}
+function pintarKpis(){
+  const sel = planesSel(), cinco = suma(sel, p => p.cinco);
+  $("k-5h").innerHTML = `<div class="et">${ico("reloj")}Últimas 5 horas<span class="der"><span class="chip">ventana en curso</span><i class="p" style="background:var(--verde)"></i></span></div>
+    <div class="cifra">${cifra(cinco)}</div><div class="s">tokens · entrada, salida y caché · sin cuota declarada</div>
+    <div class="abajo">${chispa(HORAS, "--terminal", 52, true)}<div class="s tenue" style="display:flex;justify-content:space-between;margin-top:3px;font-size:11px"><span>hace 5 h</span><span>ahora</span></div></div>`;
+  const ritmo = 20e6, alto = ritmo > LIM_HORA, r = ritmo / LIM_HORA;
+  $("k-ritmo").innerHTML = `<div class="et">${ico("pulso")}Ritmo última hora<span class="der"><i class="p" style="background:var(${alto?"--ambar":"--verde"})"></i></span></div>
+    <div class="v" style="font-size:26px">${cifra(ritmo)}<small> /h</small></div>
+    <div class="s">${alto ? `${r.toLocaleString("es-ES",{maximumFractionDigits:1})}× el límite de ${fmt(LIM_HORA)}/h` : "por debajo del límite"}</div>
+    <div class="abajo">${medidor(r)}</div>`;
+  const cache = 98.9;
+  $("k-cache").innerHTML = `<div class="et">${ico("capas")}Caché leída hoy<span class="der"><i class="p" style="background:var(--verde)"></i></span></div>
+    <div style="display:flex;align-items:center;gap:14px;margin-top:10px">${donut([[cache,"--terminal"]], 70, 7, "")}
+    <div><div class="v">${cache.toLocaleString("es-ES")}<small> %</small></div><div class="s">${fmt(500e6)} de la entrada</div></div></div>
+    <div class="s abajo" style="white-space:normal;margin-top:10px">Contexto reenviado en cada turno. Es lo que más pesa.</div>`;
+  const tarj = (id, icono, nombre, valor, sub, serie, comp) => { const d = comp ? (valor - comp) / comp * 100 : 0;
+    $(id).innerHTML = `<div class="et">${ico(icono)}${nombre}<span class="der">${comp?`<span class="delta ${d>0?"sube":"baja"}">${d>0?"+":""}${Math.round(d)} %</span>`:""}</span></div>
+      <div class="v">${cifra(valor)}</div><div class="s">${sub}</div><div class="abajo">${chispa(serie, "--s-claude", 30)}</div>`; };
+  tarj("k-hoy", "pulso", "Hoy", suma(sel, p => p.hoy), "1.700 turnos · vs. ayer", DIAS.slice(-10).map(totalDia), totalDia(DIAS[28]) || 1);
+  tarj("k-semana", "caja", "Semana", suma(sel, p => p.semana), "11.500 turnos · vs. semana anterior", DIAS.slice(-14).map(totalDia), suma(sel, p => p.semana) * .86 || 1);
+  tarj("k-mes", "cal", "Mes (30 d)", suma(sel, p => p.mes), "42.000 turnos · vs. 30 d anteriores", DIAS.map(totalDia), suma(sel, p => p.mes) * 1.07 || 1);
+}
+function medidor(r){ // escala de 0 a 3× el límite, con la marca del límite
+  const tope = 3, p = Math.min(r / tope, 1) * 100, lim = 1 / tope * 100;
+  return `<div style="position:relative;height:8px;border-radius:4px;background:var(--pista);margin-top:14px">
+    <i style="position:absolute;inset:0 auto 0 0;width:${p}%;border-radius:4px;background:linear-gradient(90deg,var(--terminal) 0,var(--terminal) ${lim/p*100}%,var(--ambar) ${lim/p*100+8}%)"></i>
+    <i style="position:absolute;left:${lim}%;top:-4px;bottom:-4px;width:2px;border-radius:1px;background:var(--fg);opacity:.5"></i></div>
+    <div class="s tenue" style="display:flex;justify-content:space-between;margin-top:5px;font-size:11px"><span>0</span><span style="margin-left:${lim-12}%">límite</span><span>3×</span></div>`;
+}
+function pintarDia(){
+  const ds = E.periodo === 1 ? DIAS.slice(-7) : diasPeriodo(), sel = planesSel();
+  $("tot-dia").textContent = "· " + fmt(suma(ds, totalDia)) + (E.periodo === 1 ? " en 7 días" : "");
+  $("ley-dia").innerHTML = sel.map(p => `<span>${punto(p.color)}${p.nombre}</span>`).join("");
+  if (E.gdia === "calendario") { $("graf-dia").innerHTML = calendario(); $("graf-dia")._datos = null; return; }
+  // «Auto»: barras hasta dos semanas (pocos puntos), área con 30 días (se lee la tendencia)
+  const tipo = E.gdia === "auto" ? (ds.length > 14 ? "area" : "barras") : E.gdia;
+  grafico($("graf-dia"), {tipo, series: sel.map(p => ({nombre:p.nombre, color:p.color, valores: ds.map(d => d[p.id])})),
+    etiquetas: ds.map((d, i) => i === ds.length-1 ? "hoy" : etDia(d.fecha)),
+    titulos: ds.map((d, i) => i === ds.length-1 ? "Hoy" : d.fecha.toLocaleDateString("es-ES",{weekday:"long", day:"numeric", month:"short"}))});
+}
+function calendario(){
+  const max = Math.max(...DIAS.map(totalDia)), c = 30, g = 5, ini = (DIAS[0].fecha.getDay() + 6) % 7, cols = Math.ceil((DIAS.length + ini) / 7), W = 30 + cols * (c + g), H = 7 * (c + g);
+  let s = `<svg viewBox="0 0 ${W} ${H}" style="max-width:${W*1.5}px" role="img" aria-label="Calendario de consumo">`;
+  ["L","M","X","J","V","S","D"].forEach((t, i) => s += `<text x="10" y="${i*(c+g)+c/2+4}" text-anchor="middle">${t}</text>`);
+  DIAS.forEach((d, i) => { const k = i + ini, v = totalDia(d), o = v ? .18 + .82 * Math.sqrt(v / max) : 0;
+    s += `<rect x="${30+Math.floor(k/7)*(c+g)}" y="${(k%7)*(c+g)}" width="${c}" height="${c}" rx="7" fill="${v?"var(--s-claude)":"var(--pista)"}" fill-opacity="${v?o.toFixed(2):1}"><title>${etDia(d.fecha)}: ${fmt(v)}</title></rect>`;
+    if (i === DIAS.length-1) s += `<rect x="${30+Math.floor(k/7)*(c+g)-1.5}" y="${(k%7)*(c+g)-1.5}" width="${c+3}" height="${c+3}" rx="8" fill="none" stroke="var(--fg)" stroke-opacity=".5"/>`; });
+  return s + "</svg>";
+}
+function pintarPlanes(){
+  const max = Math.max(...PLANES.map(p => p.mes));
+  $("planes").innerHTML = PLANES.map(p => `<div class="f">
+    <div class="n">${punto(p.color)}<span>${p.nombre}</span>${p.api?'<span class="chip">cuota mensual</span>':""}</div>
+    <div class="mono">${cifra(p.cinco)} <span class="tenue">·</span> ${fmt(p.semana)} <span class="tenue">·</span> ${cifra(p.mes)}</div>
+    ${barra(p.mes/max*100, "", p.color)}<div class="nota-f">${p.modelos.join(", ")}</div></div>`).join("");
+  const nan = PLANES.find(p => p.id === "nan"), filas = nan.cuotas.concat([["qwen3.6",0]]);
+  $("cuotas").innerHTML = filas.map(([m, tope]) => { const uso = USO_CUOTA[m] || 0, q = tope ? uso / tope * 100 : 0, cls = q >= 90 ? "rojo" : q >= 70 ? "ambar" : "";
+    return `<div class="f"><div class="n">${punto(tope ? (cls ? "--"+cls : "--verde") : "--gris")}<span>${m}</span></div>
+      <div class="mono">${fmt(uso)} ${tope ? `<span class="tenue">/ ${fmt(tope)}</span> · ${q.toLocaleString("es-ES",{maximumFractionDigits:1})} %` : '<span class="tenue">· sin tope</span>'}</div>
+      ${tope ? barra(q, cls) : '<div class="nota-f">solo de tus logs · ponle tope en Ajustes</div>'}</div>`; }).join("");
+}
+function pintarListas(){
+  const ds = diasPeriodo(), sel = planesSel(), tot = {}; sel.forEach(p => tot[p.id] = suma(ds, d => d[p.id]));
+  const mods = MODELOS.filter(m => m[1] in tot).map(([n, pl, f]) => [n, pl, tot[pl] * f]).filter(m => m[2] > 0).sort((a, b) => b[2] - a[2]);
+  const totM = suma(mods, m => m[2]) || 1, nota = `${E.periodo === 1 ? "hoy" : E.periodo + " días"} · ${E.plan === "todos" ? "todos los planes" : sel[0].nombre}`;
+  $("nota-mod").textContent = nota; $("nota-proy").textContent = nota;
+  const colorMod = (m, i) => { const p = PLANES.find(x => x.id === m[1]); return i === 0 ? p.color : p.color; };
+  const partes = mods.map((m, i) => [m[2], colorMod(m, i)]);
+  $("modelos").innerHTML = donut(partes.map((p, i) => [p[0], p[1]]), 132, 14, fmt(totM)) + `<div class="lista" style="padding:0;border:0;background:none">` +
+    mods.slice(0, 6).map(([n, pl, v], i) => `<div class="f" style="padding:6px 0"><div class="n">${punto(PLANES.find(p => p.id === pl).color)}<span>${n}</span></div><div class="mono">${cifra(v)} <span class="tenue">${pct(v, totM)}</span></div></div>`).join("") + `</div>`;
+  const totP = suma(Object.values(tot), x => x);
+  $("proyectos").innerHTML = PROYECTOS.map(([n, f]) => `<div class="f"><div class="n"><span class="tenue" style="display:inline-flex;width:15px">${ico("carpeta")}</span><span>${n}</span></div>
+    <div class="mono">${cifra(totP*f)} <span class="tenue">${Math.round(f*100)} %</span></div>${barra(f/PROYECTOS[0][1]*100, "", "--s-claude")}</div>`).join("");
+}
+function pintarMapa(){
+  const ds = DIAS.slice(-14), val = (m, d) => d[m[1]] * m[2], max = Math.max(...MODELOS.flatMap(m => ds.map(d => val(m, d))));
+  let t = "<table><thead><tr><th>Modelo</th>" + ds.map((d, i) => `<th>${i === ds.length-1 ? "hoy" : d.fecha.getDate()}</th>`).join("") + "<th style='text-align:right'>Total</th></tr></thead><tbody>";
+  MODELOS.forEach(m => { const p = PLANES.find(x => x.id === m[1]), tot = suma(ds, d => val(m, d)); if (!tot) return;
+    t += `<tr><td class="nom">${punto(p.color)} ${m[0]}</td>` + ds.map(d => { const v = val(m, d), o = v ? .14 + .86 * Math.sqrt(v / max) : 0;
+      return `<td style="background:${v ? `color-mix(in srgb,var(${p.color}) ${Math.round(o*100)}%,transparent)` : "var(--pista)"}" title="${m[0]} · ${etDia(d.fecha)}: ${fmt(v)}"></td>`; }).join("")
+      + `<td class="tot">${fmt(tot)}</td></tr>`; });
+  $("mapa").innerHTML = t + "</tbody></table>";
+  $("escala").innerHTML = "menos " + [.14,.35,.6,.85,1].map(o => `<i style="background:color-mix(in srgb,var(--s-claude) ${o*100}%,transparent)"></i>`).join("") + " más";
+}
+function pintarHoy(){
+  const partes = [["Caché leída", 500e6, "--terminal"], ["Caché escrita", 18.4e6, "--opus"], ["Entrada", 6.2e6, "--s-nan"], ["Salida", 2.1e6, "--s-codex"]], tot = suma(partes, p => p[1]);
+  $("hoy-det").innerHTML = `<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;gap:2px">${partes.map(p => `<i style="flex:${Math.max(p[1]/tot, .015)};background:var(${p[2]})"></i>`).join("")}</div>
+    <div class="dos" style="margin-top:14px;gap:10px">${partes.map(p => `<div><div class="s" style="display:flex;align-items:center;gap:6px">${punto(p[2])}${p[0]}</div><div class="mono" style="font-size:16px;margin-top:2px">${cifra(p[1])}</div><div class="s tenue" style="font-size:11px">${pct(p[1], tot)}</div></div>`).join("")}</div>`;
+  const maxA = Math.max(...APPS.map(a => a[1]));
+  $("apps").innerHTML = APPS.map(([n, v, pl]) => `<div class="f"><div class="n">${punto(PLANES.find(p => p.id === pl).color)}<span>${n}</span></div><div class="mono">${v.toLocaleString("es-ES")}</div>${barra(v/maxA*100, "", PLANES.find(p => p.id === pl).color)}</div>`).join("");
+}
+function pintarAgentes(){ pintarFiltros(); pintarKpis(); pintarDia(); pintarPlanes(); pintarListas(); pintarMapa(); pintarHoy(); }
+
+// ================= histórico =================
+// 400 días de ejemplo para que Rango, Paso y Agrupar cambien el gráfico de verdad
+const HIST = (() => { semilla = 99; return Array.from({length:400}, (_, i) => { const d = new Date(HOY); d.setDate(d.getDate() - (399 - i));
+  const finde = d.getDay() === 0 || d.getDay() === 6, crec = .45 + i / 400 * .7, b = (finde ? .5 : 1) * crec * (.5 + azar() * .9);
+  return {fecha:d, claude: b * 8.5e8, nan: i > 330 && azar() < .55 ? (.3 + azar()) * 3.4e8 : 0, codex: azar() < .1 ? azar() * 2.5e7 : 0}; }); })();
+const GRUPOS = {
+  nada: [{nombre:"Total", color:"--terminal", de: d => d.claude + d.nan + d.codex}],
+  plan: PLANES.map(p => ({nombre:p.nombre, color:p.color, de: d => d[p.id]})),
+  agente: [{nombre:"Claude Code", color:"--s-claude", de: d => d.claude}, {nombre:"OpenCode", color:"--s-nan", de: d => d.nan}, {nombre:"Codex", color:"--s-codex", de: d => d.codex}],
+  proyecto: [["tienda-online",.3,"--s-claude"],["api-reservas",.22,"--s-nan"],["blog-personal",.16,"--s-codex"],["Resto",.32,"--s-or"]]
+    .map(([n, f, c]) => ({nombre:n, color:c, de: d => (d.claude + d.nan + d.codex) * f})),
+};
+function pintarHistorico(){
+  const H = E.hist, desde = H.rango === "todo" ? 0 : HIST.length - +H.rango, dias = HIST.slice(desde);
+  // con muchos puntos el paso fino no se lee: «Todo» y «12 meses» por día pasan a semana
+  const paso = (H.paso === "dia" && dias.length > 120) ? "semana" : H.paso;
+  const clave = d => paso === "dia" ? d.fecha.toDateString() : paso === "mes" ? d.fecha.getFullYear() + "-" + d.fecha.getMonth()
+    : (() => { const l = new Date(d.fecha); l.setDate(l.getDate() - (l.getDay() + 6) % 7); return l.toDateString(); })();
+  const cubos = []; dias.forEach(d => { const k = clave(d); if (!cubos.length || cubos[cubos.length-1].k !== k) cubos.push({k, fecha:d.fecha, dias:[]}); cubos[cubos.length-1].dias.push(d); });
+  const grupos = GRUPOS[H.grupo], series = grupos.map(g => ({nombre:g.nombre, color:g.color, valores: cubos.map(c => suma(c.dias, g.de))}));
+  const totDia = d => d.claude + d.nan + d.codex, tot = suma(dias, totDia), prev = suma(HIST.slice(Math.max(0, desde - dias.length), desde), totDia);
+  const fFecha = (f, o) => f.toLocaleDateString("es-ES", o).replace(".", "");
+  const nombrePaso = {dia:"día", semana:"semana", mes:"mes"}[paso];
+  $("h-tit").textContent = "Consumo por " + nombrePaso;
+  $("h-nota").textContent = (H.grupo === "nada" ? "total" : "apilado por " + {plan:"plan", proyecto:"proyecto", agente:"agente"}[H.grupo]) + (paso !== H.paso ? " · por semana: por día no se leería" : "");
+  const d = prev ? (tot - prev) / prev * 100 : 0;
+  const kp = [["Total del rango", cifra(tot), `${dias.length} días · ${cubos.length} ${nombrePaso}${cubos.length === 1 ? "" : nombrePaso === "mes" ? "es" : "s"}`, "caja", ""],
+    ["Periodo anterior", prev ? cifra(prev) : "—", prev ? `los ${dias.length} días previos` : "no hay datos antes", "reloj", prev ? `<span class="delta ${d > 0 ? "sube" : "baja"}">${d > 0 ? "+" : ""}${Math.round(d)} %</span>` : ""],
+    ["Mes en curso", cifra(11.7e9), "proyección: " + fmt(24.1e9) + " a fin de mes", "cal", ""],
+    ["Datos desde", fFecha(HIST[0].fecha, {day:"numeric", month:"short", year:"numeric"}), HIST.length + " días guardados", "capas", ""]];
+  $("h-kpis").innerHTML = kp.map(k => `<div class="tj vidrio c3"><div class="et">${ico(k[3])}${k[0]}<span class="der">${k[4]}</span></div><div class="v">${k[1]}</div><div class="s">${k[2]}</div></div>`).join("");
+  const etiqueta = c => paso === "mes" ? fFecha(c.fecha, {month:"short", year:"2-digit"}) : fFecha(c.fecha, {day:"numeric", month:"short"});
+  const titulo = c => paso === "dia" ? fFecha(c.fecha, {weekday:"long", day:"numeric", month:"long"}) : paso === "mes" ? fFecha(c.fecha, {month:"long", year:"numeric"}) : "Semana del " + fFecha(c.fecha, {day:"numeric", month:"long"});
+  grafico($("h-graf"), {tipo: cubos.length > 40 ? "area" : "barras", alto:260, series, etiquetas: cubos.map(etiqueta), titulos: cubos.map(titulo)});
+  $("h-ley").innerHTML = series.map(s => `<span>${punto(s.color)}${s.nombre}</span>`).join("");
+  ["rango","paso","grupo"].forEach(k => document.querySelectorAll(`#h-${k} button`).forEach(b => b.classList.toggle("on", b.dataset.v === String(H[k]))));
+  $("h-tabla").innerHTML = `<table><thead><tr><th>${nombrePaso[0].toUpperCase() + nombrePaso.slice(1)}</th>${series.map(s => `<th>${s.nombre}</th>`).join("")}${series.length > 1 ? "<th>Total</th>" : ""}</tr></thead><tbody>` +
+    cubos.map((c, i) => i).reverse().slice(0, 8).map(i => `<tr><td>${etiqueta(cubos[i])}</td>${series.map(s => `<td class="mono">${s.valores[i] ? fmt(s.valores[i]) : "—"}</td>`).join("")}${series.length > 1 ? `<td class="mono"><b>${fmt(suma(series, s => s.valores[i]))}</b></td>` : ""}</tr>`).join("") + "</tbody></table>";
+}
+
+// ================= servidores =================
+function pintarServidores(){
+  semilla = 5;
+  const t = (i, n, v, s, e, extra) => `<div class="tj vidrio c3"><div class="et">${ico(i)}${n}<span class="der"><i class="p" style="background:var(--${e})"></i></span></div><div class="v">${v}</div><div class="s">${s}</div>${extra||""}</div>`;
+  $("s-kpis").innerHTML = t("web","Webs","4 de 4","responden · 312 ms de media","verde") + t("cpu","Procesador","5 %","Tranquilo · 2 núcleos","verde", barra(5))
+    + t("mem","Memoria","2,6 <small>/ 8,3 GB</small>","Va holgada","verde", barra(31)) + t("disco","Disco","26 <small>/ 103 GB</small>","Espacio de sobra","verde", barra(25));
+  const webs = [["example.com",200,412,61],["tienda.example.com",200,298,61],["api.example.com",200,121,24],["panel.example.com",200,388,87]];
+  $("s-webs").innerHTML = `<table><thead><tr><th>Web</th><th>Código</th><th>Respuesta</th><th style="width:32%">24 h</th><th>Certificado</th></tr></thead><tbody>` +
+    webs.map(w => `<tr><td>${punto("--verde")} ${w[0]}</td><td class="mono">${w[1]}</td><td class="mono">${w[2]} ms</td><td>${barras24()}</td><td class="mono">${w[3]} días</td></tr>`).join("") + "</tbody></table>";
+  const ev = [["21:44","--verde","Servidor de vuelta tras reiniciar","13 servicios en marcha en 2 min"],["21:40","--ambar","Reinicio por actualizaciones","46 paquetes instalados"],["21:15","--verde","fail2ban activo","vigila SSH"],["19:12","--verde","Despliegue correcto","tienda-online"],["03:00","--verde","Copia de seguridad","bd-tienda · 182 MB"]];
+  $("s-tiempo").innerHTML = ev.map(e => `<div class="ev"><span class="mono tenue">${e[0]}</span>${punto(e[1])}<div><div style="font-weight:500">${e[2]}</div><div class="sub" style="font-size:12px">${e[3]}</div></div></div>`).join("");
+  const hs = Array.from({length:24}, (_, i) => i);
+  grafico($("s-graf"), {tipo:"area", alto:170, unidad:"%", series:[{nombre:"Memoria", color:"--s-codex", valores: hs.map(i => 28 + Math.sin(i/4)*4 + azar()*3)}, {nombre:"Procesador", color:"--s-nan", valores: hs.map(i => 4 + azar()*7 + (i===21?38:0))}],
+    etiquetas: hs.map(i => String((i + 23) % 24).padStart(2, "0") + ":00"), titulos: hs.map(i => "Hoy a las " + String((i + 23) % 24).padStart(2, "0") + ":00")});
+  $("s-servicios").innerHTML = ["tienda-online","api-reservas","blog-personal","landing-cafe","panel-clientes","bd-tienda","bd-reservas","dokploy","dokploy-redis"].map(n => `<span class="pil">${punto("--verde")}<span>${n}</span></span>`).join("");
+  const sg = [["mano","Intentos 1 h","0","2 en 24 h"],["candado","Bloqueadas","0","fail2ban activo"],["puerta","Puertas abiertas","22 · 80 · 443","solo lo necesario"],["escudo","Protección","13 de 13","todo en su sitio"]];
+  $("s-seg").innerHTML = sg.map(x => `<div class="tj vidrio c6"><div class="et">${ico(x[0])}${x[1]}<span class="der"><i class="p" style="background:var(--verde)"></i></span></div><div class="v" style="font-size:20px">${x[2]}</div><div class="s">${x[3]}</div></div>`).join("");
+  $("s-dokploy").innerHTML = [["bd-tienda","copia de hoy 03:00","verde"],["bd-reservas","copia de hoy 03:05","verde"],["volumen-subidas","hace 9 días · más de lo normal","ambar"],["tienda-online","despliegue correcto 19:12","verde"]]
+    .map(x => `<div class="f"><div class="n">${punto("--"+x[2])}<span>${x[0]}</span></div><div class="mono sub">${x[1]}</div></div>`).join("");
+}
+function barras24(){ return `<svg viewBox="0 0 96 18" style="width:100%;height:18px;display:block" aria-hidden="true">${Array.from({length:24}, (_, i) => { const h = 7 + azar()*9; return `<rect x="${i*4}" y="${18-h}" width="2.6" height="${h}" rx="1.2" fill="var(--verde)" opacity="${(.35 + azar()*.45).toFixed(2)}"/>`; }).join("")}</svg>`; }
+
+// ================= ajustes =================
+const SECC = [["planes","Planes y modelos","moneda"],["claves","Claves de API","llave"],["servidores","Servidores","servidor"],["proyectos","Proyectos y presupuestos","carpeta"],["avisos","Avisos y ritmo","campana"],["copias","Copias cifradas","copia"],["apariencia","Apariencia","tema"]];
+const MOD_SUGERIDOS = ["claude-fable-5-1","gpt-5.6-mini","kimi-k3","minimax-m3","llama-5-70b"];
+function ajPlanes(){
+  const p = PLANES.find(x => x.id === E.planAj);
+  return `<div class="cabtarjeta"><h3>Planes y modelos</h3><button class="btn" data-a="nada">+ Añadir proveedor</button></div>
+    <p class="ayuda" style="margin:-2px 0 12px">Cada plan agrupa los modelos que cuentan contra su cuota. El nombre es el que ves en todo el panel.</p>
+    <div class="seg vidrio" style="margin-bottom:16px">${PLANES.map(x => `<button class="${x.id===p.id?"on":""}" data-a="planaj" data-v="${x.id}">${x.nombre}</button>`).join("")}<button data-a="nada">OpenRouter</button></div>
+    <div class="form">
+      <div class="dos"><div class="campo"><label for="aj-nombre">Nombre del plan</label><input id="aj-nombre" type="text" value="${p.nombre}"><span class="ayuda">Por ejemplo «Claude (Max)» si cambiaste de plan.</span></div>
+        <div class="campo"><label for="aj-fuente">De dónde sale el consumo</label><select id="aj-fuente">${p.api?"<option>En vivo por la API del proveedor</option><option>De los logs locales</option>":"<option>De los logs locales</option><option>En vivo por la API del proveedor</option>"}</select><span class="ayuda">${p.api?"Necesita su clave en «Claves de API».":"Lee Claude Code, Codex, OpenCode y pi en tu equipo."}</span></div></div>
+      <div class="campo"><span class="lab">Modelos que cuentan</span>
+        <div class="chips-ed" id="chips">${p.modelos.map(m => `<span class="pil">${m}<button class="x" data-a="quitamod" data-v="${m}" aria-label="Quitar ${m}">✕</button></span>`).join("")}
+          <input type="text" id="nuevo-mod" list="sugeridos" placeholder="Añadir modelo propio…" aria-label="Añadir modelo"><button class="btn" data-a="addmod">Añadir</button></div>
+        <datalist id="sugeridos">${MOD_SUGERIDOS.map(m => `<option value="${m}">`).join("")}</datalist>
+        <span class="ayuda">Vale una parte del nombre: «opus» cuenta opus-4-8 y opus-5-5. Los modelos vistos en tus logs aparecen como sugerencia.</span></div>
+      <div class="dos"><div class="campo"><label for="aj-l5">Límite 5 h (tokens)</label><input id="aj-l5" type="text" placeholder="sin límite" value="${p.lim5?fmt(p.lim5):""}"></div>
+        <div class="campo"><label for="aj-ls">Límite semanal</label><input id="aj-ls" type="text" placeholder="sin límite"></div>
+        <div class="campo"><label for="aj-lm">Límite mensual</label><input id="aj-lm" type="text" placeholder="sin límite"></div></div>
+      <div class="bloque"><div class="sec"><span>Cuotas mensuales por modelo</span><span class="nota">se reinician el día 1</span></div>
+        ${(p.cuotas.length ? p.cuotas : [["",0]]).map(([m, t]) => `<div class="fila-cuota"><select aria-label="Modelo">${p.modelos.map(x => `<option${x===m?" selected":""}>${x}</option>`).join("")}</select><input type="text" value="${t?fmt(t):""}" placeholder="tope en tokens" aria-label="Tope"><button class="btn" data-a="nada" aria-label="Quitar cuota">✕</button></div>`).join("")}
+        <button class="btn" data-a="nada">+ Añadir cuota</button></div>
+      <div class="acciones"><button class="btn" data-a="nada">Descartar</button><button class="btn prim" data-a="nada">Guardar cambios</button></div></div>`;
+}
+function pintarAjustes(){
+  $("menu-aj").innerHTML = SECC.map(s => `<button class="${E.ajuste===s[0]?"on":""}" data-a="ajuste" data-v="${s[0]}">${ico(s[2])}${s[1]}</button>`).join("");
+  const seguro = t => `<div class="aviso-c">${ico("candado")}<span>${t}</span></div>`;
+  const c = {
+    planes: ajPlanes,
+    claves: () => `<div class="cabtarjeta"><h3>Claves de API</h3></div>${seguro("Las claves van al Llavero de macOS (Administrador de credenciales en Windows). No se escriben en ningún fichero ni pasan por la línea de comandos.")}
+      ${PLANES.concat([{nombre:"OpenRouter", color:"--s-or"}]).map((p, i) => `<div class="interruptor"><div><div style="font-weight:600;display:flex;gap:8px;align-items:center">${punto(p.color)}${p.nombre}</div><div class="sub" style="font-size:12.5px">${p.api?"Clave guardada · cuota en vivo activa":"Sin clave · el consumo sale de tus logs"}</div></div><button class="btn" data-a="nada">${p.api?"Cambiar":"Añadir clave"}</button></div>`).join("")}`,
+    servidores: () => `<div class="cabtarjeta"><h3>Servidores</h3><button class="btn prim" data-a="nada">Dar de alta un servidor</button></div>
+      ${seguro("Sin contraseñas: la app entra como el usuario «infobar», que solo puede leer. Hosts y usuarios en ~/.cost-guard/servidores.json (solo tu usuario, fuera de git); la clave del panel Dokploy, en el Llavero.")}
+      <div class="form" style="margin-top:14px"><div class="dos"><div class="campo"><label for="aj-sn">Nombre</label><input id="aj-sn" type="text" value="produccion"></div><div class="campo"><label for="aj-ss">Usuario y servidor</label><input id="aj-ss" type="text" value="infobar@203.0.113.10"></div><div class="campo"><label for="aj-sp">Puerto SSH</label><input id="aj-sp" type="number" value="22"></div></div>
+      <div class="dos"><div class="campo"><label for="aj-pt">Panel</label><select id="aj-pt"><option>Dokploy</option><option>Easypanel</option><option>Ninguno</option></select></div><div class="campo"><label for="aj-pu">URL del panel</label><input id="aj-pu" type="text" value="https://panel.example.com"><span class="ayuda">La abre el botón «Panel» del desplegable.</span></div></div>
+      <div class="campo"><span class="lab">Webs a vigilar (máx. 4)</span><div class="chips-ed">${["example.com","tienda.example.com","api.example.com"].map(w => `<span class="pil">${w}<button class="x" data-a="nada" aria-label="Quitar">✕</button></span>`).join("")}<input type="text" placeholder="Elegir de los dominios del servidor…" aria-label="Añadir web"></div><span class="ayuda">La primera la abre el botón «Abrir».</span></div>
+      <div class="acciones"><button class="btn" data-a="nada">Comprobar conexión</button><button class="btn prim" data-a="nada">Guardar</button></div></div>`,
+    proyectos: () => `<div class="cabtarjeta"><h3>Proyectos y presupuestos</h3></div><p class="ayuda" style="margin:-2px 0 10px">Los proyectos salen de las carpetas donde trabajan tus agentes. Puedes renombrarlos, ocultarlos o ponerles un presupuesto con aviso al 80 % y al 100 %.</p>
+      <div class="tabla"><table><thead><tr><th>Carpeta</th><th style="text-align:left">Nombre visible</th><th>Presupuesto / mes</th><th>Uso</th><th>Visible</th></tr></thead><tbody>${PROYECTOS.slice(0,6).map(([n, f], i) => `<tr><td class="mono tenue">~/dev/${n}</td><td style="text-align:left">${n}</td><td class="mono">${i<2?fmt([3e9,1.5e9][i]):"—"}</td><td style="min-width:110px">${i<2?barra([74,96][i], [74,96][i]>=90?"rojo":"ambar"):""}</td><td><button class="tog${i!==5?" on":""}" data-a="tog" aria-label="Visible"></button></td></tr>`).join("")}</tbody></table></div>`,
+    avisos: () => `<div class="cabtarjeta"><h3>Avisos y ritmo</h3></div><div class="form"><div class="campo"><label for="aj-rit">Avisar cuando el ritmo supere (tokens por hora)</label><input id="aj-rit" type="text" value="8,0 M" style="max-width:220px"></div>
+      <div>${[["Ritmo alto de tokens",1],["Presupuesto al 80 % y al 100 %",1],["Web que no responde",1],["Servidor sin conexión",1],["Disco casi lleno",1],["Certificado a punto de caducar",1],["Copia de seguridad antigua",0]].map(([n, on]) => `<div class="interruptor"><span>${n}</span><button class="tog${on?" on":""}" data-a="tog" aria-label="${n}"></button></div>`).join("")}</div></div>`,
+    copias: () => `<div class="cabtarjeta"><h3>Copias cifradas</h3><span class="chip vivo"><i class="p"></i>al día</span></div><div class="lista" style="padding:0;border:0;background:none">${[["Última copia","hoy 03:00 · 41 MB"],["Destino","iCloud Drive / CostGuard"],["Cifrado","ChaCha20-Poly1305 · clave en el Llavero"],["Se guardan","las 14 últimas"]].map(x => `<div class="f"><span class="sub">${x[0]}</span><span class="mono">${x[1]}</span></div>`).join("")}</div><div class="acciones" style="margin-top:14px"><button class="btn" data-a="nada">Exportar CSV</button><button class="btn prim" data-a="nada">Copiar ahora</button></div>`,
+    apariencia: () => `<div class="cabtarjeta"><h3>Apariencia</h3></div><div class="campo"><span class="lab">Tema del panel y del desplegable</span><div class="seg vidrio" style="max-width:320px"><button data-a="sel">Claro</button><button data-a="sel">Oscuro</button><button class="on" data-a="sel">Sistema</button></div></div>`,
+  };
+  $("aj-cuerpo").innerHTML = c[E.ajuste]();
+}
+
+// ================= vistas y eventos (delegación por data-a, como exige la CSP del panel) =================
+const VISTA = {agentes:["Mis agentes","Ritmo alto: 20,0 M/h · el límite es 8,0 M/h","ambar","pulso"], historico:["Histórico","90 días · 13 semanas guardadas","","cal"], servidores:["Mis servidores","Todo en orden","","escudo"], ajustes:["Ajustes","Se guardan en tu equipo","","capas"]};
+function pintar(){
+  ["agentes","historico","servidores","ajustes"].forEach(v => $("v-" + v).hidden = v !== E.vista);
+  document.querySelectorAll("#vistas button").forEach(b => b.classList.toggle("on", b.dataset.v === E.vista));
+  const v = VISTA[E.vista]; $("titulo").textContent = v[0]; $("estado").textContent = v[1]; $("escudo").className = "escudo" + (v[2] ? " " + v[2] : ""); $("escudo").innerHTML = ico(v[3], 2);
+  ({agentes:pintarAgentes, historico:pintarHistorico, servidores:pintarServidores, ajustes:pintarAjustes})[E.vista]();
+}
+function marcar(el){ el.parentNode.querySelectorAll(":scope > button").forEach(b => b.classList.toggle("on", b === el)); }
+document.addEventListener("click", ev => {
+  const el = ev.target.closest("[data-a]"); if (!el) return;
+  const a = el.dataset.a, v = el.dataset.v;
+  if (a === "vista") { E.vista = v; try { localStorage.setItem("cg-vista", v); } catch(e){} }
+  else if (a === "periodo") E.periodo = +v;
+  else if (a === "plan") E.plan = v;
+  else if (a === "gdia") { E.gdia = v; marcar(el); pintarDia(); return; }
+  else if (a === "hrango") E.hist.rango = v;
+  else if (a === "hpaso") E.hist.paso = v;
+  else if (a === "hgrupo") E.hist.grupo = v;
+  else if (a === "ajuste") E.ajuste = v;
+  else if (a === "planaj") E.planAj = v;
+  else if (a === "quitamod") { const p = PLANES.find(x => x.id === E.planAj); p.modelos = p.modelos.filter(m => m !== v); }
+  else if (a === "addmod") { const i = $("nuevo-mod"), m = i.value.trim().toLowerCase(), p = PLANES.find(x => x.id === E.planAj); if (m && !p.modelos.includes(m)) p.modelos.push(m); }
+  else if (a === "tog") { el.classList.toggle("on"); return; }
+  else if (a === "sel") { marcar(el); return; }
+  else if (a === "tema") { const r = document.documentElement, osc = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = osc ? "light" : "dark"; }
+  else return;
+  pintar();
+});
+document.addEventListener("keydown", ev => { if (ev.key === "Enter" && ev.target.id === "nuevo-mod") { ev.preventDefault(); document.querySelector('[data-a="addmod"]').click(); } });
+try { const v = localStorage.getItem("cg-vista"); if (v && VISTA[v]) E.vista = v; } catch(e){}
+pintar();
+</script>

@@ -1,6 +1,6 @@
-/* Estado, agregacion y pintado. Los datos ya vienen resueltos en D (incrustados abajo);
-   aqui solo se filtra/suma en cliente — sin fetch salvo el configurador (/origenes, /guardar),
-   que ya existia. Los graficos (barras, lineas, tarta...) los pone panel_assets/graficos.js. */
+/* Vista Agentes: estado, agregación y pintado. Los datos ya vienen resueltos en D (incrustados abajo); aquí solo se
+   filtra y se suma en cliente. Los gráficos los pone panel_assets/graficos.js; Histórico, Servidores y Ajustes viven
+   en sus propios ficheros y cambian de vista con window.vista (ajustes.js). */
 /* Todo texto que viene de los logs (modelos, proyectos, planes) se escapa una vez aqui, antes de que ninguna plantilla lo
    use: asi cabe en HTML y en atributos entre comillas. Los clics no llevan datos en codigo: botones con data-a/data-v. */
 function esc(s){ return String(s).replace(/[&<>"'`\\]/g, c => "&#" + c.charCodeAt(0) + ";"); }
@@ -12,341 +12,293 @@ function escapar(v){
 }
 const D = escapar(__DATOS__);
 
-let periodo = "semana", plan = "todos", diasVer = 30, orden = ["mes", -1];
-let periodoModelo = "semana", planModelo = "todos";
-let periodoProyecto = "mes", planProyecto = "todos";
-// el panel se recarga solo cada 60 s (ajustes.js) para traer datos frescos: sin localStorage,
-// elegir "Tarta" se perdia en cuanto tocaba el siguiente refresco (igual que ya hace "tema" arriba)
-function _vista(clave, porDefecto){ return localStorage.getItem("vista_"+clave) || porDefecto; }
-function _guardarVista(clave, valor){ localStorage.setItem("vista_"+clave, valor); }
-let vistaDia = _vista("dia","barrasH"), vistaModelo = _vista("modelo","barrasH"),
-    vistaProyecto = _vista("proyecto","barrasH"), vistaMatriz = _vista("matriz","matriz");
-let seleccion = null;           // {desde, hasta}: indices dentro de `dias`
-let arrastreDesde = null;       // indice donde empezo el mousedown, mientras se arrastra
+/* el panel se recarga solo cada minuto (ajustes.js): lo elegido se guarda en el navegador para no volver a lo de
+   fábrica en cada recarga; si el almacenamiento no está disponible, se usa lo de fábrica */
+const PREF = (() => { try { return JSON.parse(localStorage.getItem("cg-panel") || "{}") || {}; } catch(e){ return {}; } })();
+function recordar(){ try { localStorage.setItem("cg-panel", JSON.stringify({periodo, plan, vistaDia, orden, periodoModelo, periodoProyecto})); } catch(e){} }
+let periodo = PREF.periodo || "semana", plan = PREF.plan || "todos", vistaDia = PREF.vistaDia || "auto", orden = Array.isArray(PREF.orden) ? PREF.orden : ["mes", -1];
+let periodoModelo = PREF.periodoModelo || periodo, periodoProyecto = PREF.periodoProyecto || periodo;
+if(plan !== "todos" && !Object.prototype.hasOwnProperty.call(D.proveedores || {}, plan)) plan = "todos";     // un plan renombrado o quitado
+if(!["hoy", "semana", "mes"].includes(periodo)) periodo = "semana";
+let seleccion = null;               // {desde, hasta}: índices dentro de `dias`
+let conMayus = false;               // un clic con mayúsculas amplía la selección a un tramo
 
-function fmt(n){n=Number(n)||0;
-  if(n>=1e9)return (n/1e9).toFixed(1).replace(".",",")+" B";
-  if(n>=1e6)return (n/1e6).toFixed(1).replace(".",",")+" M";
-  if(n>=1e3)return (n/1e3).toFixed(0)+" K"; return String(Math.round(n));}
-const dias = Object.keys(D.dias);
-const DIASEM = ["dom","lun","mar","mie","jue","vie","sab"];
-function etiquetaDia(d){ const hoy=dias[dias.length-1], ayer=dias[dias.length-2];
-  if(d===hoy) return "hoy";
-  if(d===ayer) return "ayer";
-  const x = new Date(d+"T12:00:00");
-  return DIASEM[x.getDay()]+" "+d.slice(8); }
-const planes = () => Object.keys(D.proveedores);
+function fmt(n){ n = Number(n) || 0;
+  if(n >= 1e9) return (n/1e9).toFixed(1).replace(".", ",") + " B";
+  if(n >= 1e6) return (n/1e6).toFixed(1).replace(".", ",") + " M";
+  if(n >= 1e3) return (n/1e3).toFixed(0) + " K";
+  return String(Math.round(n)); }
+/* cifra con el color de su magnitud, como el desplegable: K tenue, M verde terminal, B naranja Opus */
+function cifra(n){ const t = fmt(n), u = (t.match(/[KMB]$/) || ["K"])[0].toLowerCase(); return `<span class="${u}">${t}</span>`; }
+const pct = (a, b) => b ? (a / b * 100).toFixed(1).replace(".", ",") + " %" : "—";
+const dias = Object.keys(D.dias || {});
+const DIASEM = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"], MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic"];
+function etiquetaDia(d){ if(d === dias[dias.length-1]) return "hoy"; if(d === dias[dias.length-2]) return "ayer";
+  const x = new Date(d + "T12:00:00"); return DIASEM[x.getDay()] + " " + x.getDate(); }
+function tituloDia(d){ const x = new Date(d + "T12:00:00"); return (d === dias[dias.length-1] ? "Hoy, " : "") + DIASEM[x.getDay()] + " " + x.getDate() + " de " + MESES[x.getMonth()]; }
+const planes = () => Object.keys(D.proveedores || {});
+const colorPlan = p => colorSerie(Math.max(planes().indexOf(p), 0));
+const punto = c => `<i class="p" style="background:var(${c})"></i>`;
+const prog = (p, cls, color) => `<div class="prog"><i class="${cls || ""}" style="width:${Math.max(0, Math.min(100, p)).toFixed(1)}%${color ? `;background:var(${color})` : ""}"></i></div>`;
+const suma = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
+
 const ACCIONES = {
-  setPeriodo, setPlan, setOrden, setVistaDia, setVistaModelo, setVistaProyecto, setVistaMatriz, setPeriodoModelo, setPlanModelo,
-  setPeriodoProyecto, setPlanProyecto, setDias: v => setDias(+v), cerrarDetalle: () => { limpiarSeleccion(); pintarTablas(); },
-  vista: v => window.vista(v), cambiarTema: () => cambiarTema()};
+  setPeriodo: v => { periodo = periodoModelo = periodoProyecto = v; seleccion = null; pintar(); },
+  setPlan: v => { plan = v; seleccion = null; pintar(); },
+  setVistaDia: v => { vistaDia = v; pintarDia(); },
+  setDia: v => elegirDia(+v),
+  setDiaCal: v => elegirDiaGuardado(+v),
+  cerrarDetalle: () => { seleccion = null; pintarDia(); },
+  setOrden: v => { orden = orden[0] === v ? [v, -orden[1]] : [v, -1]; pintarPlanes(); },
+  setPeriodoModelo: v => { periodoModelo = v; pintarModelos(); },
+  setPeriodoProyecto: v => { periodoProyecto = v; pintarProyectos(); },
+  vista: v => { window.vista(v); pintarCab(v); },
+  refrescar: () => { const v = location.hash.slice(1); if(v) window.vista(v); else location.reload(); },
+  cambiarTema: () => cambiarTema()};
+document.addEventListener("pointerdown", e => { conMayus = e.shiftKey; });
 document.addEventListener("click", e => {
   const el = e.target.closest("[data-a]");
   const f = el && Object.prototype.hasOwnProperty.call(ACCIONES, el.dataset.a) ? ACCIONES[el.dataset.a] : null;
   if(f) f(esc(el.dataset.v === undefined ? "" : el.dataset.v));     // el atributo llega decodificado: se escapa igual que las claves de D
+  if(f) recordar();
 });
-function cambiarTema(){const r=document.documentElement,n=r.getAttribute("data-tema")==="claro"?"oscuro":"claro";
-  r.setAttribute("data-tema",n);localStorage.setItem("tema",n);document.getElementById("tema").textContent=n==="claro"?"Modo oscuro":"Modo claro";}
-// tu eleccion si la hay; si no, la apariencia del sistema (como el desplegable de la barra)
-document.documentElement.setAttribute("data-tema",localStorage.getItem("tema")||(matchMedia("(prefers-color-scheme: dark)").matches?"oscuro":"claro"));
-addEventListener("DOMContentLoaded",()=>{const b=document.getElementById("tema");if(b)b.textContent=document.documentElement.getAttribute("data-tema")==="claro"?"Modo oscuro":"Modo claro";});
 
-/* --- que dias entran en un periodo (hoy/semana/mes/todo/N) --- */
-function diasParaPeriodo(p, verN){
-  if(p==="hoy") return dias.slice(-1);
-  if(p==="semana") return dias.slice(-7);
-  if(p==="mes") return dias.slice(-30);
-  if(p==="todo") return dias.slice();
-  return dias.slice(-(verN||30));
+/* --- tema: tu elección si la hay; si no, la apariencia del sistema (como el desplegable de la barra) --- */
+function botonTema(){ const b = document.getElementById("tema"), claro = document.documentElement.getAttribute("data-tema") === "claro";
+  if(b) b.innerHTML = icono(claro ? "luna" : "sol") + (claro ? "Oscuro" : "Claro"); }
+function cambiarTema(){ const r = document.documentElement, n = r.getAttribute("data-tema") === "claro" ? "oscuro" : "claro";
+  r.setAttribute("data-tema", n); try { localStorage.setItem("tema", n); } catch(e){} botonTema(); }
+let _temaGuardado = null; try { _temaGuardado = localStorage.getItem("tema"); } catch(e){}
+document.documentElement.setAttribute("data-tema", _temaGuardado || (matchMedia("(prefers-color-scheme: dark)").matches ? "oscuro" : "claro"));
+
+/* --- cabecera: título, estado e icono según la vista --- */
+function pintarCab(v){
+  const lim = (D.limites || {}).limite_hora_tokens || 0, alto = lim && D.ritmo >= lim;
+  const C = {panel: ["Mis agentes", alto ? `Ritmo alto: ${fmt(D.ritmo)}/h · el límite es ${fmt(lim)}/h` : `Última hora: ${fmt(D.ritmo)} tokens`, alto ? "ambar" : "", "pulso"],
+    historico: ["Histórico", "Consumo guardado por día, semana o mes", "", "cal"], servidores: ["Mis servidores", "Salud, webs y seguridad de tus VPS", "", "escudo"],
+    ajustes: ["Ajustes", "Planes, claves, servidores y avisos · se guardan en tu equipo", "", "ajustes"]}[v] || null;
+  if(!C) return;
+  document.getElementById("titulo").textContent = C[0];
+  document.getElementById("sub").textContent = C[1];
+  const e = document.getElementById("escudo"); e.className = "escudo" + (C[2] ? " " + C[2] : ""); e.innerHTML = icono(C[3], 2);
 }
-function diasPeriodo(){ return diasParaPeriodo(periodo, diasVer); }
 
-/* --- agregados: todos aceptan que plan y que dias, para poder reusarlos
-   tanto en las secciones globales como en los filtros propios y en el detalle
-   del dia/tramo seleccionado --- */
+/* --- qué días entran en un periodo --- */
+function diasParaPeriodo(p){
+  if(p === "hoy") return dias.slice(-1);
+  if(p === "semana") return dias.slice(-7);
+  if(p === "mes") return dias.slice(-30);
+  return dias.slice();
+}
+/* --- agregados por plan y por días (los mismos que antes, para el panel y para el detalle del día) --- */
+function planesDe(planSel){ return planSel === "todos" ? planes() : [planSel]; }
 function porModelo(planSel, diasSel){
   const ds = new Set(diasSel), out = {};
-  const planes_ = planSel==="todos" ? planes() : [planSel];
-  planes_.forEach(p => {
-    Object.entries(D.cruce[p]||{}).forEach(([m, dd]) => {
-      let t=0; Object.entries(dd).forEach(([d,v]) => { if(ds.has(d)) t+=v; });
-      if(t) out[m]=(out[m]||0)+t;
-    });
-  });
+  planesDe(planSel).forEach(p => Object.entries((D.cruce || {})[p] || {}).forEach(([m, dd]) => {
+    let t = 0; Object.entries(dd).forEach(([d, v]) => { if(ds.has(d)) t += v; }); if(t) out[m] = (out[m] || 0) + t; }));
   return out;
 }
 function porProyecto(planSel, diasSel){
   const ds = new Set(diasSel), out = {};
-  const planes_ = planSel==="todos" ? planes() : [planSel];
-  planes_.forEach(p => {
-    Object.entries(D.proy_cruce[p]||{}).forEach(([proy, dd]) => {
-      let t=0; Object.entries(dd).forEach(([d,v]) => { if(ds.has(d)) t+=v; });
-      if(t) out[proy]=(out[proy]||0)+t;
-    });
-  });
+  planesDe(planSel).forEach(p => Object.entries((D.proy_cruce || {})[p] || {}).forEach(([pr, dd]) => {
+    let t = 0; Object.entries(dd).forEach(([d, v]) => { if(ds.has(d)) t += v; }); if(t) out[pr] = (out[pr] || 0) + t; }));
   return out;
 }
-function porDia(planSel, diasSel){
-  const out = {}; diasSel.forEach(d => out[d]=0);
-  const planes_ = planSel==="todos" ? planes() : [planSel];
-  planes_.forEach(p => Object.values(D.cruce[p]||{}).forEach(dd =>
-    Object.entries(dd).forEach(([d,v]) => { if(out[d]!==undefined) out[d]+=v; })));
-  return out;
+function porDiaPlan(p, diasSel){            // tokens de un plan en cada día pedido
+  const out = Object.fromEntries(diasSel.map(d => [d, 0]));
+  Object.values((D.cruce || {})[p] || {}).forEach(dd => Object.entries(dd).forEach(([d, v]) => { if(d in out) out[d] += v; }));
+  return diasSel.map(d => out[d]);
 }
-function tokPeriodo(objeto){return Object.values(objeto).reduce((a,b)=>a+b,0);}
-function totalesPlan(diasSel, planFiltro){
-  const ds = new Set(diasSel), out = {};
-  const planes_ = (planFiltro||"todos")==="todos" ? planes() : [planFiltro];
-  planes_.forEach(p => {
-    let t=0; Object.values(D.cruce[p]||{}).forEach(dd => Object.entries(dd).forEach(([d,v]) => { if(ds.has(d)) t+=v; }));
-    out[p] = {tok: t, cinco_h: (D.proveedores[p]||{}).cinco_h||0, semana: (D.proveedores[p]||{}).semana||0,
-              mes: (D.proveedores[p]||{}).mes||0, pct_5h: (D.proveedores[p]||{}).pct_5h||0, pct_semana: (D.proveedores[p]||{}).pct_semana||0};
-  });
-  return out;
-}
+function totalDias(planSel, diasSel){ const t = diasSel.map(() => 0); planesDe(planSel).forEach(p => porDiaPlan(p, diasSel).forEach((v, i) => t[i] += v)); return t; }
 
-/* --- filtros: botones reusables (periodo y plan), globales y por seccion --- */
-function botonesPeriodo(actual, fn, conTodo){
-  const ops = [["hoy","Hoy"],["semana","7 dias"],["mes","30 dias"]].concat(conTodo?[["todo","Todo"]]:[]);
-  return ops.map(p => `<button class="${actual===p[0]?"on":""}" data-a="${fn}" data-v="${p[0]}">${p[1]}</button>`).join("");
-}
-function botonesPlan(actual, fn){
-  return [`<button class="${actual==="todos"?"on":""}" data-a="${fn}" data-v="todos">Todos</button>`]
-    .concat(planes().map(p => `<button class="${actual===p?"on":""}" data-a="${fn}" data-v="${p}">${p}</button>`)).join("");
-}
-function botonesPestanas(opciones, actual, fn){
-  return `<div class="pestanas">${opciones.map(o =>
-    `<button class="${actual===o[0]?"on":""}" data-a="${fn}" data-v="${o[0]}">${ICONOS[o[0]]||""}${o[1]}</button>`).join("")}</div>`;
-}
-
+/* --- filtros --- */
 function pintarFiltros(){
-  document.getElementById("f-periodo").innerHTML = "<span class='etq'>Periodo</span>"+botonesPeriodo(periodo,"setPeriodo");
-  document.getElementById("f-plan").innerHTML = "<span class='etq'>Plan</span>"+botonesPlan(plan,"setPlan");
+  document.getElementById("f-periodo").innerHTML = `<span class="etq">Periodo</span><div class="seg vidrio">` +
+    [["hoy", "Hoy"], ["semana", "7 días"], ["mes", "30 días"]].map(([k, t]) => `<button class="${periodo === k ? "on" : ""}" data-a="setPeriodo" data-v="${k}">${t}</button>`).join("") + "</div>";
+  document.getElementById("f-plan").innerHTML = `<span class="etq">Plan</span>` +
+    [`<button class="pil vidrio${plan === "todos" ? " on" : ""}" data-a="setPlan" data-v="todos">Todos</button>`]
+      .concat(planes().map(p => `<button class="pil vidrio${plan === p ? " on" : ""}" data-a="setPlan" data-v="${p}">${punto(colorPlan(p))}${p}</button>`)).join("");
 }
-function opcionesDias(){ if(periodo==="hoy") return [1]; if(periodo==="semana") return [5,7]; return [5,10,15,30]; }
-function setPeriodo(p){ periodo=p; diasVer=Math.min(diasVer, opcionesDias().slice(-1)[0]); limpiarSeleccion(); pintar(); }
-function setPlan(p){ plan=p; limpiarSeleccion(); pintar(); }
-function setDias(n){ diasVer=n; limpiarSeleccion(); pintar(); }
-function setOrden(k){ orden = (orden[0]===k) ? [k,-orden[1]] : [k,-1]; pintarTablas(); }
-function setVistaDia(v){ vistaDia=v; _guardarVista("dia",v); pintarTablas(); }
-function setVistaModelo(v){ vistaModelo=v; _guardarVista("modelo",v); pintarTablas(); }
-function setVistaProyecto(v){ vistaProyecto=v; _guardarVista("proyecto",v); pintarTablas(); }
-function setVistaMatriz(v){ vistaMatriz=v; _guardarVista("matriz",v); pintarTablas(); }
-function setPeriodoModelo(p){ periodoModelo=p; pintarTablas(); }
-function setPlanModelo(p){ planModelo=p; pintarTablas(); }
-function setPeriodoProyecto(p){ periodoProyecto=p; pintarTablas(); }
-function setPlanProyecto(p){ planProyecto=p; pintarTablas(); }
 
+/* --- tarjetas de arriba --- */
+function medidor(r){            // de 0 a 3× el límite, con su marca
+  const tope = 3, p = Math.min(r / tope, 1) * 100, lim = 100 / tope, corte = p ? Math.min(lim / p * 100, 100) : 100;
+  return `<div style="position:relative;height:8px;border-radius:4px;background:var(--pista);margin-top:14px">
+    <i style="position:absolute;inset:0 auto 0 0;width:${p.toFixed(1)}%;border-radius:4px;background:linear-gradient(90deg,var(--marca) 0,var(--marca) ${corte.toFixed(0)}%,var(--ambar) ${Math.min(corte + 8, 100).toFixed(0)}%)"></i>
+    <i style="position:absolute;left:${lim.toFixed(1)}%;top:-4px;bottom:-4px;width:2px;border-radius:1px;background:var(--texto);opacity:.5"></i></div>
+    <div class="s tenue" style="display:flex;justify-content:space-between;margin-top:5px;font-size:11px"><span>0</span><span>límite</span><span>3×</span></div>`;
+}
 function pintarKpis(){
-  const t = totalesPlan(diasPeriodo(), plan), glo = Object.values(t).reduce((a,b)=>({tok:a.tok+b.tok,cinco_h:a.cinco_h+b.cinco_h}),{tok:0,cinco_h:0});
-  const nom = plan==="todos" ? (periodo==="hoy"?"Hoy":"Ultimos "+diasPeriodo().length+" dias") : plan;
-  const k5 = plan==="todos" ? D.cinco_h : (D.proveedores[plan]||{}).cinco_h||0;
-  const lim5 = D.limites.limite_5h_tokens;
-  const c5 = (plan!=="todos" && (D.proveedores[plan]||{}).pct_5h) ? " · "+(D.proveedores[plan].pct_5h)+" % de su cuota"
-           : (lim5 && plan==="todos" ? " · "+(k5/lim5*100).toFixed(0)+" % de su cuota" : "");
-  const tarjetas = [
-    ["Ultimas 5 horas", fmt(k5), "tokens"+c5, true],
-    [nom, fmt(glo.tok), (plan==="todos"?"todos los planes":plan), true],
-    ["Cache leida hoy", D.cache_pct+" %", fmt(D.hoy.cr)+" de la entrada", false],
-    ["Dias con actividad", String(diasPeriodo().length), "de "+dias.length+" guardados", false]];
-  document.getElementById("kpis").innerHTML = tarjetas.map(x =>
-    `<div class="tarjeta${x[3]?" g":""}"><div class="rot">${x[0]}</div><div class="num">${x[1]}</div><div class="pie">${x[2]}</div></div>`).join("");
-  document.getElementById("detalle").innerHTML = [
-    ["Hoy", fmt(D.hoy.tok), D.hoy.turnos+" turnos"], ["Semana", fmt(D.semana.tok), D.semana.turnos+" turnos"],
-    ["Mes (30 d)", fmt(D.mes.tok), D.mes.turnos+" turnos"], ["Ritmo ultima hora", fmt(D.ritmo), "limite "+fmt(D.limites.limite_hora_tokens)+"/h"],
-  ].map(x => `<div class="tarjeta"><div class="rot">${x[0]}</div><div class="num">${x[1]}</div><div class="pie">${x[2]}</div></div>`).join("");
+  const P = D.proveedores || {}, L = D.limites || {}, sel = planesDe(plan);
+  // últimas 5 h: reparto por plan (la barra) y % de la cuota si la hay
+  const cinco = plan === "todos" ? D.cinco_h : (P[plan] || {}).cinco_h || 0;
+  const pct5 = plan !== "todos" ? (P[plan] || {}).pct_5h || 0 : (L.limite_5h_tokens ? cinco / L.limite_5h_tokens * 100 : 0);
+  const partes = sel.map(p => [p, (P[p] || {}).cinco_h || 0]).filter(x => x[1] > 0), tot5 = suma(partes, x => x[1]) || 1;
+  document.getElementById("k-5h").innerHTML = `<div class="et">${icono("reloj")}Últimas 5 horas<span class="der"><span class="chip">ventana en curso</span>${punto(pct5 >= 90 ? "--rojo" : pct5 >= 70 ? "--ambar" : "--verde")}</span></div>
+    <div class="cifra">${cifra(cinco)}</div>
+    <div class="s">${pct5 ? pct5.toFixed(0) + " % de su cuota de 5 h" : "tokens · entrada, salida y caché · sin cuota declarada"}</div>
+    <div class="abajo">${pct5 ? prog(pct5, pct5 >= 90 ? "rojo" : pct5 >= 70 ? "ambar" : "") : ""}
+      ${partes.length ? `<div class="mezcla">${partes.map(([p, v]) => `<i style="flex:${Math.max(v / tot5, .02)};background:var(${colorPlan(p)})" title="${p}: ${fmt(v)}"></i>`).join("")}</div>
+      <div class="leyenda" style="margin-top:6px">${partes.map(([p, v]) => `<span>${punto(colorPlan(p))}${p} <span class="mono">${fmt(v)}</span></span>`).join("")}</div>` : '<div class="s tenue" style="margin-top:10px">sin consumo en la ventana</div>'}</div>`;
+  // ritmo de la última hora contra el límite
+  const lim = L.limite_hora_tokens || 0, r = lim ? D.ritmo / lim : 0, alto = lim && D.ritmo >= lim;
+  document.getElementById("k-ritmo").innerHTML = `<div class="et">${icono("pulso")}Ritmo última hora<span class="der">${punto(alto ? "--ambar" : "--verde")}</span></div>
+    <div class="v" style="font-size:26px">${cifra(D.ritmo)}<small> /h</small></div>
+    <div class="s">${!lim ? "sin límite de ritmo (se pone en Ajustes)" : alto ? r.toFixed(1).replace(".", ",") + "× el límite de " + fmt(lim) + "/h" : "por debajo del límite de " + fmt(lim) + "/h"}</div>
+    <div class="abajo">${lim ? medidor(r) : ""}</div>`;
+  // caché leída hoy
+  const cache = +D.cache_pct || 0;
+  document.getElementById("k-cache").innerHTML = `<div class="et">${icono("capas")}Caché leída hoy<span class="der">${punto("--verde")}</span></div>
+    <div style="display:flex;align-items:center;gap:14px;margin-top:10px">${anillo([[cache, "--marca"], [100 - cache, "--pista", 0]], 70, 7, "")}
+    <div><div class="v">${cache.toFixed(1).replace(".", ",")}<small> %</small></div><div class="s">${fmt((D.hoy || {}).cr)} de la entrada</div></div></div>
+    <div class="s abajo" style="white-space:normal;margin-top:10px">Contexto reenviado en cada turno: es lo que más pesa.</div>`;
+  // fila del periodo elegido (Hoy / 7 días / 30 días) y del plan del filtro: total, media diaria y días con actividad
+  const ds = diasParaPeriodo(periodo), n = ds.length, valores = totalDias(plan, ds), total = suma(valores, x => x);
+  const previos = dias.length >= 2 * n ? totalDias(plan, dias.slice(-2 * n, -n)) : null, antes = previos ? suma(previos, x => x) : 0;
+  const delta = (a, b) => b ? `<span class="delta ${a > b ? "sube" : "baja"}" title="frente al periodo anterior de la misma duración">${a > b ? "+" : ""}${Math.round((a - b) / b * 100)} %</span>` : "";
+  const turnos = plan === "todos" ? suma(ds, d => (D.dias[d] || {}).turnos || 0) : null;
+  const nombre = periodo === "hoy" ? "Hoy" : "Últimos " + n + " días", conActividad = valores.filter(v => v > 0).length;
+  const contexto = periodo === "hoy" ? totalDias(plan, dias.slice(-10)) : valores;           // un solo día no hace curva: los últimos 10 de contexto
+  const T = (id, ic, rot, der, valor, sub, abajo) => document.getElementById(id).innerHTML =
+    `<div class="et">${icono(ic)}${rot}<span class="der">${der || ""}</span></div><div class="v">${valor}</div><div class="s">${sub}</div><div class="abajo">${abajo || ""}</div>`;
+  T("k-hoy", periodo === "hoy" ? "pulso" : "cal", nombre, delta(total, antes), cifra(total),
+    (turnos != null ? turnos.toLocaleString("es-ES") + " turnos · " : "") + (antes ? (periodo === "hoy" ? "vs. ayer" : "vs. " + n + " días anteriores") : (plan === "todos" ? "todos los planes" : plan)),
+    chispa(contexto, plan === "todos" ? "--s1" : colorPlan(plan), 30));
+  const media = periodo === "hoy" ? suma(totalDias(plan, dias.slice(-8, -1)), x => x) / 7 : total / Math.max(n, 1);
+  T("k-semana", "caja", periodo === "hoy" ? "Media diaria de la semana" : "Media por día", "", cifra(media),
+    periodo === "hoy" ? (media ? "hoy vas al " + Math.round(total / media * 100) + " % de un día normal" : "sin consumo la última semana") : "en " + n + " días" + (conActividad < n ? " · " + Math.round(total / Math.max(conActividad, 1) / 1e6).toLocaleString("es-ES") + " M los días con uso" : ""),
+    periodo === "hoy" && media ? prog(total / media * 100, total > media ? "ambar" : "") : "");
+  T("k-mes", "capas", "Días con actividad", "", `${conActividad}<small> / ${n}</small>`, `${dias.length} días guardados en los logs`, prog(conActividad / Math.max(n, 1) * 100, "", plan === "todos" ? "--s1" : colorPlan(plan)));
 }
 
-function tablaPlanes(){
-  let filas = Object.entries(D.proveedores).filter(([n])=>plan==="todos"||n===plan);
-  const k = orden[0], s = orden[1];
-  filas.sort((a,b) => {
-    const v = x => k==="nombre" ? x[0].toLowerCase() : (x[1][k]||0);
-    return (v(a) > v(b) ? 1 : v(a) < v(b) ? -1 : 0) * s; });
-  const cab = [["nombre","Plan"],["cinco_h","5 h"],["semana","Semana"],["mes","Mes"],["hoy","Hoy"]];
-  const cuotas = [];
-  filas.forEach(([n,x]) => (x.modelos_cuota||[]).forEach(mc => cuotas.push({plan:n, fuente:x.cuota_fuente||"logs", ...mc})));
-  cuotas.sort((a,b) => ((b.pct??-1) - (a.pct??-1)) || (b.mes - a.mes));
-  const enVivo = cuotas.some(c=>c.fuente==="api");
-  const bloqueCuotas = cuotas.length ? `<h3 style="margin:18px 0 6px">Cuotas mensuales por modelo <span class="sub" style="font-weight:400">· mes natural (día 1) contra el tope de config.json${enVivo?" · consumo en vivo (API NaN)":" · de tus logs"}</span></h3>
-    <table><tr><th style="text-align:left">Modelo</th><th style="text-align:left">Plan</th><th style="text-align:right">Mes</th><th style="text-align:right">Tope</th><th style="text-align:right">Consumido</th></tr>
-    ${cuotas.map(c=>`<tr><td>${c.modelo} ${c.fuente==="api"?'<span class="auto">en vivo</span>':(c.sin_tope&&c.plan?'<span class="auto">solo logs</span>':'')}</td><td style="color:var(--suave)">${c.plan}</td><td style="text-align:right">${fmt(c.mes)}</td><td style="text-align:right">${c.limite?fmt(c.limite):"—"}</td><td style="text-align:right">${c.pct!=null?c.pct+" %":"sin tope"}</td></tr>`).join("")}</table>` : "";
-  return `<section><h2>Por plan (proveedor) <span style="text-transform:none;letter-spacing:0">· pulsa una cabecera para ordenar · pasa el ratón por el plan para ver sus modelos</span></h2><table>
-  <tr>${cab.map(c=>{const act=orden[0]===c[0];const f=act?(orden[1]<0?"▼":"▲"):"↕";
-    return `<th class="${act?"act":""}" data-a="setOrden" data-v="${c[0]}">${c[1]} <span class="f">${f}</span></th>`;}).join("")}</tr>
-  ${filas.map(([n,x],i)=>`<tr><td title="Modelos: ${(x.modelos||[]).join(", ")||"-"}"><span class="punto" style="background:${colorI(i)}"></span>${n}${x.auto?"<span class='auto'>auto</span>":""}</td>
-    <td>${fmt(x.cinco_h)}${x.pct_5h?" ("+x.pct_5h+" %)":""}</td><td>${fmt(x.semana)}${x.pct_semana?" ("+x.pct_semana+" %)":""}</td>
-    <td>${fmt(x.mes)}</td><td>${fmt(x.hoy)}</td></tr>`).join("")}
-  </table>${(D.limites.limite_5h_tokens||D.limites.limite_semana_tokens)?"":"<p class='sub' style='margin:10px 0 0'>Los planes con etiqueta <span class='auto'>auto</span> salen solos de tus logs. Para agrupar modelos o poner cuota, edita config.json; con la cuota aparece el % consumido.</p>"}${bloqueCuotas}</section>`;
+/* --- consumo por día, con detalle del día o tramo pulsado --- */
+function diasGrafico(){ return periodo === "hoy" ? dias.slice(-7) : diasParaPeriodo(periodo); }
+function elegirDia(i){ elegirDiaGuardado(dias.indexOf(diasGrafico()[i])); }
+function elegirDiaGuardado(g){              // g: índice dentro de todos los días guardados
+  if(!(g >= 0 && g < dias.length)) return;
+  if(conMayus && seleccion) seleccion = {desde: Math.min(seleccion.desde, g), hasta: Math.max(seleccion.hasta, g)};
+  else seleccion = seleccion && seleccion.desde === g && seleccion.hasta === g ? null : {desde: g, hasta: g};
+  pintarDia();
 }
-
-/* --- por dia: pestañas de vista + clic/arrastre para seleccionar un dia o tramo --- */
-function seccionDia(){
-  const nver = Math.min(diasVer, diasPeriodo().length);
-  const diasMostrar = diasPeriodo().slice(-nver);
-  const serieObj = porDia(plan, diasMostrar);
-  const datosGrafico = diasMostrar.map(d => [etiquetaDia(d), serieObj[d]||0, d]);
-  const seleccionadas = seleccion ? new Set(dias.slice(seleccion.desde, seleccion.hasta+1)) : null;
-  const ops = opcionesDias();
-  const controlDias = `<div class="fila-b"><span class="etq">Dias en el grafico</span>` +
-    (ops.length===1 ? `<button class="on" disabled>solo hoy</button>`
-      : ops.map(n=>`<button class="${nver===n?"on":""}" data-a="setDias" data-v="${n}">${n}</button>`).join("")) +
-    `<span class="sub" style="margin-left:6px">(el periodo elige el maximo · pulsa o arrastra sobre el grafico)</span></div>`;
-  let grafico;
-  if(vistaDia==="barrasV") grafico = barrasV(datosGrafico, {fmt, seleccionadas});
-  else if(vistaDia==="lineas") grafico = lineas(datosGrafico, {fmt, seleccionadas});
-  else if(vistaDia==="calendario") grafico = calendario(diasMostrar.map(d=>[d, serieObj[d]||0]), {fmt, seleccionadas});
-  else grafico = barrasH(datosGrafico, {fmt, seleccionadas, clicable:true});
-  const pestanas = botonesPestanas([["barrasH","Barras"],["barrasV","Barras verticales"],["lineas","Lineas"],["calendario","Calendario"]], vistaDia, "setVistaDia");
-  return `<section>${controlDias}<h2>Por dia (tokens)</h2>${pestanas}<div id="grafico-dia">${grafico}</div></section>`;
-}
-
-/* --- por modelo: filtro propio (periodo + plan) + pestañas de vista --- */
-function seccionModelo(){
-  const ds = diasParaPeriodo(periodoModelo);
-  const m = porModelo(planModelo, ds), total = tokPeriodo(m);
-  const datos = Object.entries(m).sort((a,b)=>b[1]-a[1]);
-  const filtroPropio = `<div class="fila-b"><span class="etq">Periodo</span>${botonesPeriodo(periodoModelo,"setPeriodoModelo",true)}</div>
-    <div class="fila-b"><span class="etq">Plan</span>${botonesPlan(planModelo,"setPlanModelo")}</div>`;
-  const pestanas = botonesPestanas([["barrasH","Barras"],["tarta","Tarta"],["donut","Donut"]], vistaModelo, "setVistaModelo");
-  let grafico;
-  if(vistaModelo==="tarta") grafico = tarta(datos, {fmt});
-  else if(vistaModelo==="donut") grafico = donut(datos, {fmt});
-  else grafico = barrasH(datos, {fmt});
-  const tabla = `<table style="margin-top:12px">
-    <tr><th>Modelo</th><th>Tokens</th><th>% del total</th><th>Plan</th></tr>
-    ${datos.map(([k,v])=>`<tr><td>${k}</td><td>${fmt(v)}</td><td>${total?(v/total*100).toFixed(1):0} %</td>
-      <td style="color:var(--suave)">${D.modelo_prov[k]||"-"}</td></tr>`).join("")||"<tr><td colspan=4>sin datos</td></tr>"}</table>`;
-  return `<section>${filtroPropio}<h2>Por modelo · ${planModelo==="todos"?"todos los planes":planModelo} · ${ds.length} dias</h2>${pestanas}${grafico}${tabla}</section>`;
-}
-
-function tablaMatriz(){
-  const ds = diasPeriodo(), ult = ds.slice(-Math.min(diasVer,21));
-  const mm = porModelo(plan, ds);
-  const modelos = Object.entries(mm).sort((a,b)=>b[1]-a[1]).slice(0,8).map(x=>x[0]);
-  if(!modelos.length) return "<p class='vacio'>sin datos</p>";
-  function diaModelo(m,d){
-    let t=0; const ps = plan==="todos"?planes():[plan];
-    ps.forEach(p => { const v=((D.cruce[p]||{})[m]||{})[d]; if(v) t+=v; }); return t;
-  }
-  let max = 0;
-  modelos.forEach(m => ult.forEach(d => { max = Math.max(max, diaModelo(m,d)); }));
-  const cab = "<tr><th>Modelo</th>"+ult.map(d=>`<th>${d.slice(8)}</th>`).join("")+`<th>Total ${plan==="todos"?"":"("+plan+")"}</th></tr>`;
-  const filas = modelos.map(m => {
-    const celdas = ult.map(d => { const v=diaModelo(m,d), f=max?v/max:0;
-      const st = v?`background:rgba(48,209,88,${(0.12+f*0.8).toFixed(2)});color:${f>0.55?"#0b0b0c":"var(--texto)"}`:"";
-      return `<td class="${v?"":"cero"}" style="${st}" title="${fmt(v)}">${v?fmt(v).replace(" ",""):"-"}</td>`; }).join("");
-    return `<tr><td>${m}</td>${celdas}<td>${fmt(mm[m])}</td></tr>`; }).join("");
-  return `<div class="mat"><table>${cab}${filas}</table></div>`;
-}
-function seccionMatriz(){
-  const ds = diasPeriodo(), ult = ds.slice(-Math.min(diasVer,12));
-  const mm = porModelo(plan, ds);
-  const modelos = Object.entries(mm).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  const pestanas = botonesPestanas([["matriz","Matriz"],["apiladas","Barras apiladas"]], vistaMatriz, "setVistaMatriz");
-  let cuerpo;
-  if(vistaMatriz==="apiladas"){
-    // serie de cada modelo -> {dia:tok}, sumando los planes elegidos
-    const planes_ = plan==="todos"?planes():[plan];
-    const seriesAgg = modelos.map(([m]) => {
-      const porDiaM = {};
-      planes_.forEach(p => { const dd=(D.cruce[p]||{})[m]||{}; Object.entries(dd).forEach(([d,v])=>{ porDiaM[d]=(porDiaM[d]||0)+v; }); });
-      return [m, porDiaM];
-    });
-    cuerpo = barrasApiladas(ult, seriesAgg, {fmt});
+function pintarDia(){
+  const ds = diasGrafico(), sel = planesDe(plan);
+  const series = sel.map(p => ({nombre: p, color: colorPlan(p), valores: porDiaPlan(p, ds)})).filter(s => s.valores.some(v => v));
+  const tipo = vistaDia === "auto" ? (ds.length > 14 ? "area" : "barras") : vistaDia;
+  const elegidos = new Set(); if(seleccion) ds.forEach((d, i) => { const g = dias.indexOf(d); if(g >= seleccion.desde && g <= seleccion.hasta) elegidos.add(i); });
+  const caja = document.getElementById("sec-dia");
+  caja.innerHTML = `<div class="sec"><span>Consumo por día <span class="nota">· ${fmt(suma(totalDias(plan, tipo === "calendario" ? diasParaPeriodo(periodo) : ds), x => x))}${periodo === "hoy" && tipo !== "calendario" ? " en 7 días" : ""}</span></span>
+    <span class="nota"><span class="seg mini vidrio">${[["auto", "Auto"], ["barras", "Barras"], ["area", "Área"], ["calendario", "Calendario"]].map(([k, t]) => `<button class="${vistaDia === k ? "on" : ""}" data-a="setVistaDia" data-v="${k}">${t}</button>`).join("")}</span></span></div>
+    <div class="tj"><div id="graf-dia"></div><div class="leyenda">${series.map(s => `<span>${punto(s.color)}${s.nombre}</span>`).join("")}<span class="tenue" style="margin-left:auto">pulsa un día para ver su detalle · con ⇧ eliges un tramo</span></div></div>`;
+  const cont = document.getElementById("graf-dia");
+  if(tipo === "calendario"){
+    const todosDias = diasParaPeriodo(periodo), tot = totalDias(plan, todosDias), selCal = new Set();      // el calendario sigue al periodo: hoy, 7 o 30 días
+    if(seleccion) todosDias.forEach((d, i) => { const g = dias.indexOf(d); if(g >= seleccion.desde && g <= seleccion.hasta) selCal.add(i); });
+    cont.className = "graf";
+    // cada celda lleva su índice dentro de todos los días guardados
+    const desde = dias.length - todosDias.length;
+    cont.innerHTML = calendario(todosDias.map((d, i) => [d, tot[i]]), {fmt, accion: "setDiaCal", indice: i => desde + i, sel: selCal, color: sel.length === 1 ? colorPlan(sel[0]) : "--s1", nombre: tituloDia});
+    cont._datos = null;
   } else {
-    cuerpo = tablaMatriz();
+    grafico(cont, {tipo, series, etiquetas: ds.map(etiquetaDia), titulos: ds.map(tituloDia), fmt, accion: "setDia", sel: elegidos});
   }
-  return `<section><h2>Que modelo consume cada dia</h2>${pestanas}${cuerpo}</section>`;
+  pintarDetalle();
+}
+function pintarDetalle(){
+  const z = document.getElementById("detalle-dia");
+  if(!seleccion){ z.innerHTML = ""; return; }
+  const ds = dias.slice(seleccion.desde, seleccion.hasta + 1);
+  const titulo = ds.length === 1 ? tituloDia(ds[0]) : `${tituloDia(ds[0])} → ${tituloDia(ds[ds.length-1])} · ${ds.length} días`;
+  const total = suma(totalDias(plan, ds), x => x), turnos = suma(ds, d => (D.dias[d] || {}).turnos || 0);
+  const lista = arr => arr.length ? arr.map(([n, v]) => `<div class="linea-det"><span>${n}</span><span>${fmt(v)}</span></div>`).join("") : '<div class="linea-det"><span class="vacio">sin datos</span></div>';
+  const porPlan = planes().map(p => [p, suma(porDiaPlan(p, ds), x => x)]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  z.innerHTML = `<div class="cab-det"><b>${titulo}</b><span class="mono">${cifra(total)} · ${turnos} turnos</span><button data-a="cerrarDetalle" aria-label="Cerrar el detalle">✕</button></div>
+    <div class="cols"><div><h4>Por modelo</h4>${lista(Object.entries(porModelo(plan, ds)).sort((a, b) => b[1] - a[1]).slice(0, 6))}</div>
+    <div><h4>Por proyecto</h4>${lista(Object.entries(porProyecto(plan, ds)).sort((a, b) => b[1] - a[1]).slice(0, 6))}</div>
+    <div><h4>Por plan</h4>${lista(porPlan)}</div></div>`;
 }
 
-/* --- por proyecto: filtro propio + pestañas de vista --- */
-function seccionProyecto(){
-  const ds = diasParaPeriodo(periodoProyecto);
-  const acc = porProyecto(planProyecto, ds);
-  const datos = Object.entries(acc).sort((a,b)=>b[1]-a[1]).slice(0,12);
-  const filtroPropio = `<div class="fila-b"><span class="etq">Periodo</span>${botonesPeriodo(periodoProyecto,"setPeriodoProyecto",true)}</div>
-    <div class="fila-b"><span class="etq">Plan</span>${botonesPlan(planProyecto,"setPlanProyecto")}</div>`;
-  const pestanas = botonesPestanas([["barrasH","Barras"],["tarta","Tarta"],["donut","Donut"]], vistaProyecto, "setVistaProyecto");
-  let grafico;
-  if(vistaProyecto==="tarta") grafico = tarta(datos, {fmt});
-  else if(vistaProyecto==="donut") grafico = donut(datos, {fmt});
-  else grafico = barrasH(datos, {fmt});
-  return `<section>${filtroPropio}<h2>Por proyecto · ${planProyecto==="todos"?"todos":planProyecto} · ${ds.length} dias</h2>${pestanas}${grafico}</section>`;
+/* --- planes y cuotas --- */
+function pintarPlanes(){
+  const P = D.proveedores || {}, k = orden[0], s = orden[1];
+  const filas = Object.entries(P).filter(([n]) => plan === "todos" || n === plan)
+    .sort((a, b) => { const v = x => k === "nombre" ? x[0].toLowerCase() : (x[1][k] || 0); return (v(a) > v(b) ? 1 : v(a) < v(b) ? -1 : 0) * s; });
+  const maxMes = Math.max(...filas.map(([, x]) => x.mes || 0), 1);
+  const btn = (c, t) => `<button class="orden${k === c ? " on" : ""}" data-a="setOrden" data-v="${c}" title="Ordenar por ${t}">${t}${k === c ? (s < 0 ? " ▾" : " ▴") : ""}</button>`;
+  document.getElementById("sec-planes").innerHTML = `<div class="sec"><span>Planes</span><span class="nota">${btn("cinco_h", "5 h")}·${btn("semana", "semana")}·${btn("mes", "mes")}</span></div>
+    <div class="lista">${filas.map(([n, x]) => { const c = colorPlan(n), q = Math.max(x.pct_5h || 0, x.pct_semana || 0);
+      return `<div class="f"><div class="n">${punto(c)}<span>${n}</span>${x.auto ? '<span class="chip" title="Sale solo de tus logs">auto</span>' : ""}${(x.modelos_cuota || []).length ? '<span class="chip">cuota mensual</span>' : ""}</div>
+        <div class="mono">${cifra(x.cinco_h)}${x.pct_5h ? ` <span class="tenue">${x.pct_5h} %</span>` : ""} <span class="tenue">·</span> ${fmt(x.semana)}${x.pct_semana ? ` <span class="tenue">${x.pct_semana} %</span>` : ""} <span class="tenue">·</span> ${cifra(x.mes)}</div>
+        ${q ? prog(q, q >= 90 ? "rojo" : q >= 70 ? "ambar" : "") : prog((x.mes || 0) / maxMes * 100, "", c)}
+        <div class="nota-f">${(x.modelos || []).join(", ") || "sin modelos con consumo"}</div></div>`; }).join("") || '<p class="vacio">sin planes</p>'}</div>`;
+  const cuotas = [];
+  filas.forEach(([n, x]) => (x.modelos_cuota || []).forEach(mc => cuotas.push({plan: n, fuente: x.cuota_fuente || "logs", ...mc})));
+  cuotas.sort((a, b) => ((b.pct ?? -1) - (a.pct ?? -1)) || (b.mes - a.mes));
+  const vivo = cuotas.filter(c => c.fuente === "api").map(c => c.plan);
+  document.getElementById("sec-cuotas").innerHTML = `<div class="sec"><span>Cuotas del mes</span>${vivo.length ? `<span class="chip vivo"><i class="p"></i>en vivo · ${[...new Set(vivo)].join(", ")}</span>` : '<span class="nota">mes natural · desde el día 1</span>'}</div>
+    <div class="lista">${cuotas.map(c => { const q = c.pct != null ? +c.pct : null, cls = q >= 90 ? "rojo" : q >= 70 ? "ambar" : "";
+      return `<div class="f"><div class="n">${punto(q == null ? "--gris" : cls ? "--" + cls : "--verde")}<span>${c.modelo}</span></div>
+        <div class="mono">${fmt(c.mes)} ${c.limite ? `<span class="tenue">/ ${fmt(c.limite)}</span> · ${String(q).replace(".", ",")} %` : '<span class="tenue">· sin tope</span>'}</div>
+        ${q != null ? prog(q, cls) : `<div class="nota-f">${c.fuente === "api" ? "en vivo" : "solo de tus logs"} · ${c.plan} · ponle tope en Ajustes</div>`}</div>`; }).join("")
+      || '<p class="vacio">Sin cuotas mensuales por modelo. Se ponen en Ajustes → Planes.</p>'}</div>`;
 }
 
-function pintarFuentes(){
-  const b = D.bases || [];
-  document.getElementById("fuentes").innerHTML = `<section><h2>Aplicaciones que registran datos</h2>
-    <p class="sub" style="margin:0 0 8px">De que app sale cada sesion (${D.fuentes} ficheros/sesiones en total) — no de que proveedor de API.
-    Eso esta en la tabla «Por plan» de mas abajo.</p>
-    ${b.length ? b.map(x=>`<div class="fila"><span class="et">${x.split(" (")[0]}</span><span class="pista"><span class="barra" style="width:100%;opacity:.25"></span></span><span class="val">${(x.match(/\((\d+)\)/)||[])[1]||""} sesiones</span></div>`).join("")
-      : "<p class='vacio'>sin bases de datos detectadas</p>"}
-    </section>`;
+/* --- modelos y proyectos, cada uno con su periodo --- */
+function segPeriodo(actual, accion){
+  return `<div class="seg mini vidrio">${[["hoy", "Hoy"], ["semana", "7 d"], ["mes", "30 d"], ["todo", "Todo"]].map(([k, t]) => `<button class="${actual === k ? "on" : ""}" data-a="${accion}" data-v="${k}">${t}</button>`).join("")}</div>`;
+}
+function pintarModelos(){
+  const ds = diasParaPeriodo(periodoModelo), m = Object.entries(porModelo(plan, ds)).sort((a, b) => b[1] - a[1]), total = suma(m, x => x[1]);
+  const rango = {}, op = m.map(([n]) => { const p = (D.modelo_prov || {})[n] || ""; rango[p] = (rango[p] || 0) + 1; return [p, [1, .72, .5, .34][Math.min(rango[p] - 1, 3)]]; });
+  const top = m.slice(0, 7), resto = suma(m.slice(7), x => x[1]);
+  document.getElementById("sec-modelos").innerHTML = `<div class="sec"><span>Modelos</span><span class="nota">${segPeriodo(periodoModelo, "setPeriodoModelo")}</span></div><div class="tj">
+    ${m.length ? `<div class="dona">${anillo(m.map(([, v], i) => [v, colorPlan(op[i][0]), op[i][1]]), 136, 14, fmt(total))}
+      <div class="lista">${top.map(([n, v], i) => `<div class="f" style="padding:6px 0"><div class="n"><i class="p" style="background:var(${colorPlan(op[i][0])});opacity:${op[i][1]}"></i><span>${n}</span></div><div class="mono">${cifra(v)} <span class="tenue">${pct(v, total)}</span></div></div>`).join("")}
+      ${resto ? `<div class="f" style="padding:6px 0"><div class="n tenue"><span>otros ${m.length - 7}</span></div><div class="mono">${fmt(resto)} <span class="tenue">${pct(resto, total)}</span></div></div>` : ""}</div></div>`
+      : '<p class="vacio">sin consumo en este periodo</p>'}</div>`;
+}
+function pintarProyectos(){
+  const ds = diasParaPeriodo(periodoProyecto), p = Object.entries(porProyecto(plan, ds)).sort((a, b) => b[1] - a[1]), total = suma(p, x => x[1]);
+  const max = p.length ? p[0][1] : 1;
+  document.getElementById("sec-proyectos").innerHTML = `<div class="sec"><span>Proyectos</span><span class="nota">${segPeriodo(periodoProyecto, "setPeriodoProyecto")}</span></div>
+    <div class="lista">${p.slice(0, 8).map(([n, v]) => `<div class="f"><div class="n"><span class="tenue" style="display:inline-flex;width:15px;flex:none">${icono("carpeta")}</span><span>${n}</span></div>
+      <div class="mono">${cifra(v)} <span class="tenue">${pct(v, total)}</span></div>${prog(v / max * 100, "", "--s1")}</div>`).join("") || '<p class="vacio">sin consumo en este periodo</p>'}</div>`;
 }
 
-/* --- detalle del dia/tramo seleccionado: se abre a la derecha de "Por dia" --- */
-function limpiarSeleccion(){ seleccion = null; }
-function seleccionarDia(indice){
-  if(seleccion && seleccion.desde===indice && seleccion.hasta===indice){ seleccion = null; }
-  else { seleccion = {desde: indice, hasta: indice}; }
-  pintarTablas();
-}
-function seleccionarTramo(i0, i1){
-  seleccion = {desde: Math.min(i0,i1), hasta: Math.max(i0,i1)};
-  pintarTablas();
-}
-function pintarDetalleSeleccion(){
-  const zona = document.getElementById("zona-dia");
-  if(!seleccion){ zona.classList.remove("con-detalle"); document.getElementById("detalle-dia").innerHTML = ""; return; }
-  zona.classList.add("con-detalle");
-  const diasSel = dias.slice(seleccion.desde, seleccion.hasta+1);
-  const titulo = diasSel.length===1 ? diasSel[0] : `${diasSel[0]} → ${diasSel[diasSel.length-1]}`;
-  const totTok = tokPeriodo(porDia(plan, diasSel));
-  const turnos = diasSel.reduce((a,d)=>a+(D.dias[d]?.turnos||0),0);
-  const porM = Object.entries(porModelo(plan, diasSel)).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  const porP = Object.entries(porProyecto(plan, diasSel)).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  const porPlan = Object.entries(totalesPlan(diasSel, "todos")).filter(([,x])=>x.tok>0).sort((a,b)=>b[1].tok-a[1].tok);
-  const listaLD = arr => arr.length ? arr.map(x => `<div class="linea-det"><span>${x[0]}</span><span>${fmt(x[1])}</span></div>`).join("")
-    : "<div class='linea-det'><span class='vacio'>sin datos</span></div>";
-  document.getElementById("detalle-dia").innerHTML = `
-    <span class="cerrar" data-a="cerrarDetalle">✕</span>
-    <h3>${titulo}</h3>
-    <div class="linea-det"><span>Total</span><span>${fmt(totTok)}</span></div>
-    <div class="linea-det"><span>Turnos</span><span>${turnos}</span></div>
-    <h4>Por modelo</h4>${listaLD(porM)}
-    <h4>Por proyecto</h4>${listaLD(porP)}
-    <h4>Por plan</h4>${listaLD(porPlan.map(([n,x])=>[n, x.tok]))}`;
-}
-function engancharClicsDia(){
-  const cont = document.getElementById("grafico-dia");
-  if(!cont) return;
-  const claveDeEvento = e => { const el = e.target.closest("[data-k]"); return el ? el.dataset.k : null; };
-  const indiceDeClave = k => dias.indexOf(k);
-  cont.onclick = e => { const k = claveDeEvento(e); if(k && arrastreDesde===null) seleccionarDia(indiceDeClave(k)); };
-  cont.onmousedown = e => { const k = claveDeEvento(e); if(k) arrastreDesde = indiceDeClave(k); };
-  document.onmouseup = () => {
-    if(arrastreDesde===null) return;
-    const destino = cont.dataset.hoverIdx;
-    if(destino!==undefined && destino!=="" && +destino!==arrastreDesde) seleccionarTramo(arrastreDesde, +destino);
-    arrastreDesde = null;
-  };
-  cont.onmousemove = e => { const k = claveDeEvento(e); if(k) cont.dataset.hoverIdx = indiceDeClave(k); };
+/* --- matriz modelo × día como mapa de calor --- */
+function pintarMatriz(){
+  const ds = (periodo === "hoy" ? dias.slice(-7) : diasParaPeriodo(periodo)).slice(-14);
+  const mm = Object.entries(porModelo(plan, ds)).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const celda = (m, d) => suma(planesDe(plan), p => (((D.cruce || {})[p] || {})[m] || {})[d] || 0);
+  let max = 0; mm.forEach(([m]) => ds.forEach(d => { max = Math.max(max, celda(m, d)); }));
+  const caja = document.getElementById("sec-matriz");
+  if(!mm.length){ caja.innerHTML = '<div class="sec"><span>Qué modelo consume cada día</span></div><div class="tj"><p class="vacio">sin datos</p></div>'; return; }
+  caja.innerHTML = `<div class="sec"><span>Qué modelo consume cada día</span><span class="nota">últimos ${ds.length} días · intensidad = tokens del día</span></div>
+    <div class="tj"><div class="mapa"><table><thead><tr><th>Modelo</th>${ds.map(d => `<th>${d === dias[dias.length-1] ? "hoy" : +d.slice(8)}</th>`).join("")}<th style="text-align:right">Total</th></tr></thead><tbody>
+    ${mm.map(([m, t]) => { const c = colorPlan((D.modelo_prov || {})[m] || "");
+      return `<tr><td class="nom">${punto(c)} ${m}</td>${ds.map(d => { const v = celda(m, d), o = v ? .14 + .86 * Math.sqrt(v / max) : 0;
+        return `<td style="background:${v ? `color-mix(in srgb,var(${c}) ${Math.round(o*100)}%,transparent)` : "var(--pista)"}" title="${m} · ${tituloDia(d)}: ${fmt(v)}"></td>`; }).join("")}<td class="tot">${fmt(t)}</td></tr>`; }).join("")}
+    </tbody></table></div><div class="escala">menos ${[.14, .35, .6, .85, 1].map(o => `<i style="background:color-mix(in srgb,var(--s1) ${o*100}%,transparent)"></i>`).join("")} más</div></div>`;
 }
 
-function pintarTablas(){
-  document.getElementById("tablas").innerHTML = tablaPlanes() +
-    `<div class="zona" id="zona-dia"><div>${seccionDia()}</div><div id="detalle-dia"></div></div>` +
-    seccionModelo() + seccionMatriz() + seccionProyecto();
-  pintarDetalleSeleccion();
-  engancharClicsDia();
+/* --- hoy en detalle y aplicaciones --- */
+function pintarHoyYApps(){
+  const h = D.hoy || {}, partes = [["Caché leída", h.cr, "--marca"], ["Caché escrita", h.cw, "--marca2"], ["Entrada", h.gi, "--s2"], ["Salida", h.go, "--s3"]], tot = suma(partes, x => x[1] || 0);
+  document.getElementById("sec-hoy").innerHTML = `<div class="sec"><span>Hoy, en detalle</span><span class="nota">de dónde salen los tokens</span></div>
+    <div class="tj">${tot ? `<div class="mezcla" style="height:10px;margin-top:2px">${partes.map(p => `<i style="flex:${Math.max((p[1] || 0) / tot, .015)};background:var(${p[2]})"></i>`).join("")}</div>
+      <div class="rej" style="margin-top:14px;gap:10px">${partes.map(p => `<div class="c3"><div class="s" style="display:flex;align-items:center;gap:6px">${punto(p[2])}${p[0]}</div><div class="mono" style="font-size:16px;margin-top:2px">${cifra(p[1])}</div><div class="s tenue" style="font-size:11px">${pct(p[1] || 0, tot)}</div></div>`).join("")}</div>
+      <div class="s abajo" style="white-space:normal;margin-top:12px">Cada turno reenvía el contexto: menos turnos y menos contexto pesan más que bajar el esfuerzo del modelo.</div>` : '<p class="vacio">todavía sin consumo hoy</p>'}</div>`;
+  const apps = (D.bases || []).map(x => [String(x).split(" (")[0], +((String(x).match(/\((\d+)\)/) || [])[1] || 0)]), maxA = Math.max(...apps.map(a => a[1]), 1);
+  document.getElementById("sec-apps").innerHTML = `<div class="sec"><span>Aplicaciones</span><span class="nota">${D.fuentes} sesiones leídas</span></div>
+    <div class="lista">${apps.map(([n, v], i) => `<div class="f"><div class="n">${punto(colorSerie(i))}<span>${n}</span></div><div class="mono">${v ? v + " sesiones" : ""}</div>${prog(v / maxA * 100, "", colorSerie(i))}</div>`).join("")
+      || '<p class="vacio">sin aplicaciones detectadas</p>'}</div>`;
 }
 
 function pintar(){
-  pintarFiltros(); pintarKpis(); pintarFuentes(); pintarTablas();
-  document.getElementById("sub").textContent = `Generado ${D.generado} · se actualiza solo cada minuto · ${D.fuentes} ficheros + ${(D.bases||[]).join(", ")} · turnos repetidos descartados`;
-  document.getElementById("pie").innerHTML = `Los <b>turnos</b> son idas y vueltas con el modelo: cada uno reenvia el contexto, y por eso la mayor parte es <b>cache leida</b>.
-   Menos turnos y menos contexto pesan mas que bajar el <i>effort</i>. Equivalente API (${D.mes.usd.toFixed(0)} USD en 30 dias) solo informativo: con suscripcion se agota la cuota.
-   Fuentes: ficheros de Claude Code y Codex, y las bases de datos de <b>OpenCode</b> y <b>Hermes</b>. Los planes que corren en la nube no dejan log aqui.`;
+  pintarFiltros(); pintarKpis(); pintarDia(); pintarPlanes(); pintarModelos(); pintarProyectos(); pintarMatriz(); pintarHoyYApps();
+  document.getElementById("pie").innerHTML = `<span>Generado ${D.generado} · se actualiza cada minuto · ${D.fuentes} sesiones${(D.bases || []).length ? " de " + D.bases.map(b => String(b).split(" (")[0]).join(", ") : ""} · turnos repetidos descartados</span>
+    <span>Equivalente a precio de API: US$ ${Math.round((D.mes || {}).usd || 0).toLocaleString("es-ES")} en 30 días (solo informativo: con suscripción se gasta cuota, no dinero)</span>`;
 }
+addEventListener("DOMContentLoaded", () => { botonTema(); });
+addEventListener("load", () => pintarCab(location.hash.slice(1) || "panel"));       // Histórico/Servidores/Ajustes pueden abrirse por #hash
+botonTema(); pintarCab("panel");
 pintar();
