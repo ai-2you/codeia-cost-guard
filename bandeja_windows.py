@@ -41,7 +41,7 @@ from infobar import bandeja_windows_menu as bwm  # noqa: E402
 from infobar import bandeja_windows_popover as popover  # noqa: E402
 
 _icon = None  # referencia global: la necesitan _entregar y las acciones del menu
-_usa_popover = False   # True solo si el popover nativo se creo y arranco sin errores (ver main())
+_usa_popover = False   # True solo si la ventana nativa se creo y arranco sin errores (ver main())
 _hilos = []            # los de costbar.arrancar_hilos(): el trabajador recibe "Refrescar ahora" y todos paran al salir
 _agentes = {"cinco_h": 0, "hoy": 0, "turnos": 0, "pct_5h": 0, "ritmo": 0, "limite_5h": 0, "limite_hora": 0}
 _lock_icono = threading.Lock()   # _entregar (hilo trabajador) y las acciones (hilo de pystray) repintan el icono
@@ -92,7 +92,7 @@ def _entregar(tipo, dato):
         costbar.log(f"bandeja: ERROR al pintar el icono {type(e).__name__}: {e}")
 
 
-VENTANA_PANEL = "440,760"  # ancho,alto en px del navegador en modo --app (fallback sin popover):
+VENTANA_PANEL = "440,760"  # ancho,alto en px del navegador en modo --app (respaldo sin ventana nativa):
                             # mas grande que popover.ANCHO/ALTO (420x720) porque aqui SI cuenta el
                             # chrome propio de la ventana del navegador (bordes, barra de titulo).
 
@@ -121,7 +121,7 @@ def _ruta_navegador_app():
 
 
 def _accion_abrir_panel_navegador(url):
-    """Respaldo cuando no hay popover nativo (pywebview no instalado, o fallo al crearlo/arrancarlo
+    """Respaldo cuando no hay ventana nativa (pywebview no instalado, o fallo al crearlo/arrancarlo
     -- ver main()): ventana de "aplicacion" de Edge/Chrome (sin pestanas ni barra de direcciones)
     y, si no hay ninguno de los dos, el navegador por defecto.
 
@@ -140,7 +140,7 @@ def _accion_abrir_panel_navegador(url):
 
 def _accion_panel(icon):
     if _usa_popover:
-        popover.alternar(costbar.url_panel, costbar.log)      # la funcion: el ticket solo se pide al mostrar
+        popover.mostrar(costbar.url_panel, costbar.log)      # la funcion: el ticket solo se pide al mostrar
     else:
         _accion_abrir_panel_navegador(costbar.url_panel())
 

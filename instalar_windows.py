@@ -2,7 +2,7 @@
 """instalar_windows.py: instala codeia-cost-guard en Windows (bandeja + autoarranque).
 
 Equivalente Windows de install.sh. Copia el motor, infobar/ y panel_assets/ a ~/.cost-guard (mismo destino
-que macOS/Linux), crea un entorno virtual propio con PAQUETES (icono de bandeja, popover nativo del panel con
+que macOS/Linux), crea un entorno virtual propio con PAQUETES (icono de bandeja, ventana nativa del panel con
 WebView2 y copias cifradas), registra el arranque al iniciar sesion con la clave Run del usuario (sin
 administrador) y arranca la bandeja sin ventana de consola (pythonw.exe). Quita la tarea programada o el .vbs
 de Inicio que dejaban las versiones anteriores de este instalador.
@@ -96,7 +96,7 @@ def _ejecutar(cmd, error_msg):
 
 def crear_venv_e_instalar(destino):
     """Entorno virtual propio en destino/venv con PAQUETES: pillow y pystray (icono de bandeja; backend Windows
-    100% ctypes, sin pywin32), pywebview y pythonnet (popover nativo del panel) y cryptography (copias cifradas,
+    100% ctypes, sin pywin32), pywebview y pythonnet (ventana nativa del panel) y cryptography (copias cifradas,
     la misma versión que install.sh). Reejecutar es idempotente: si el venv ya existe no se recrea, solo se
     reinstalan/confirman los paquetes."""
     venv_dir = os.path.join(destino, "venv")

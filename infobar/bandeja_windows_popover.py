@@ -22,10 +22,9 @@ TITULO_VENTANA = "CostGuard"
 
 _ventana = None
 _visible = False
-_minimizada = False
 _saliendo = False        # la ventana se está cerrando de verdad (Salir, cierre de sesión, apagado): no se cancela
 _salida_pedida = False   # solo "Salir": distingue el cierre pedido del que hace el sistema
-_lock = threading.Lock()   # mostrar/ocultar/cerrar desde el hilo de pystray (clics en el icono y el menú)
+_lock = threading.Lock()   # mostrar/cerrar desde el hilo de pystray (clics en el icono y el menú)
 
 # Página en blanco como CONTENIDO, nunca como URL: pywebview trata como fichero local cualquier URL que no empiece por
 # http://, https:// o file:// (about:blank incluida) y levanta su servidor bottle, sin sesión, sirviendo el directorio
@@ -61,21 +60,17 @@ def area_trabajo():
 
 
 def _posicion():
-    """Ancla la ventana junto al cursor (justo donde está el icono que se acaba de pulsar), sin salirse del área de trabajo."""
+    """Ancla la ventana junto al cursor (justo donde está el icono que se acaba de pulsar), sin salirse del área de trabajo.
+    Con el tamaño que tenga ahora (se puede redimensionar), no con el inicial."""
     cx, cy = _posicion_cursor()
     izq, arriba, derecha, abajo = area_trabajo()
-    x = min(max(cx - ANCHO, izq), derecha - ANCHO)
-    y = min(max(cy - ALTO, arriba), abajo - ALTO)
+    try:
+        ancho, alto = int(_ventana.width) or ANCHO, int(_ventana.height) or ALTO
+    except Exception:
+        ancho, alto = ANCHO, ALTO
+    x = min(max(cx - ancho, izq), derecha - ancho)
+    y = min(max(cy - alto, arriba), abajo - alto)
     return int(x), int(y)
-
-
-def _ocultar():
-    """Oculta y deja la página en blanco: oculta, el panel seguiría recargándose cada 60 s (y regenerándose en el servidor)
-    sin que nadie lo mire. Cada apertura carga una URL nueva con su ticket."""
-    global _visible
-    _visible = False
-    _ventana.hide()
-    _ventana.load_html(_EN_BLANCO)
 
 
 def crear():
@@ -88,20 +83,7 @@ def crear():
         x=int(derecha - ANCHO), y=int(max(arriba, abajo - ALTO)),
         hidden=True, frameless=False, resizable=True, background_color="#212124")
     _ventana.events.before_show += _engancha_cierre
-    _ventana.events.minimized += _al_minimizar
-    _ventana.events.restored += _al_restaurar
-    _ventana.events.maximized += _al_restaurar
     return _ventana
-
-
-def _al_minimizar():
-    global _minimizada
-    _minimizada = True
-
-
-def _al_restaurar():
-    global _minimizada
-    _minimizada = False
 
 
 def _engancha_cierre():
@@ -127,7 +109,7 @@ def _al_cerrar(_emisor, args):
         _saliendo = True
         return
     args.Cancel = True
-    # sin _lock: este evento llega en el hilo de la interfaz, y alternar() puede tener el cerrojo esperando a ese mismo hilo
+    # sin _lock: este evento llega en el hilo de la interfaz, y mostrar() puede tener el cerrojo esperando a ese mismo hilo
     _visible = False
     try:
         _ventana.hide()
@@ -140,38 +122,59 @@ def salida_pedida():
     return _salida_pedida
 
 
-def alternar(url_fresca, log):
-    """Desde el icono de la bandeja: si la ventana está visible la oculta, si está minimizada la restaura y si no, carga el
-    panel fresco y la muestra junto al cursor. `url_fresca` es una función (costbar.url_panel): el ticket solo se pide al
-    mostrar.
+_SW_RESTORE = 9
 
-    Orden al mostrar: show() -> _visible=True -> move().
+
+def _hwnd():
+    return wintypes.HWND(_ventana.native.Handle.ToInt64())
+
+
+def _minimizada():
+    """Estado real de la ventana en el momento del clic (los avisos de minimizar/restaurar de pywebview corren en hilos
+    aparte, sin orden: un estado guardado a partir de ellos se desincroniza)."""
+    try:
+        return bool(ctypes.windll.user32.IsIconic(_hwnd()))
+    except Exception:
+        return False
+
+
+def _restaurar():
+    """SW_RESTORE devuelve la ventana a como estaba antes de minimizarla, maximizada incluida (restore() de pywebview la
+    dejaría en tamaño normal)."""
+    ctypes.windll.user32.ShowWindow(_hwnd(), _SW_RESTORE)
+
+
+def _maximizada():
+    try:
+        return bool(ctypes.windll.user32.IsZoomed(_hwnd()))
+    except Exception:
+        return False
+
+
+def mostrar(url_fresca, log):
+    """Desde el icono de la bandeja: trae la ventana al frente, restaurándola si estaba minimizada; si estaba oculta, carga
+    el panel fresco y la coloca junto al cursor. No la oculta nunca: para eso está la X (como en Slack o Discord), y
+    un conmutador ocultaba sin que se notara una ventana tapada por otras. `url_fresca` es una función
+    (costbar.url_panel): el ticket solo se pide al cargar.
+
+    Orden al mostrar una ventana oculta: show() -> _visible=True -> move().
     - show() antes que move(): move() espera a que el evento "shown" se haya disparado alguna vez.
-    - _visible=True justo tras show(): si move() lanzara una excepción, la ventana ya está visible en pantalla, y con
-      _visible en False el clic en el icono no la ocultaría."""
+    - _visible=True justo tras show(): si move() lanzara una excepción, la ventana ya está visible en pantalla."""
     global _visible
     with _lock:
-        if _visible and _minimizada:
-            try:
-                _ventana.restore()
-            except Exception as e:
-                log(f"bandeja: ERROR ventana (restaurar) {type(e).__name__}: {e}")
-            return
-        if _visible:
-            try:
-                _ocultar()
-            except Exception as e:
-                log(f"bandeja: ERROR ventana (ocultar) {type(e).__name__}: {e}")
-            return
         try:
-            url = url_fresca()
-            if not url.startswith("http://127.0.0.1:"):        # solo el panel local: otra URL podría levantar el servidor de pywebview
-                raise ValueError("URL del panel inesperada")
-            _ventana.load_url(url)
-            _ventana.show()
-            _visible = True
-            x, y = _posicion()
-            _ventana.move(x, y)
+            if not _visible:
+                url = url_fresca()
+                if not url.startswith("http://127.0.0.1:"):    # solo el panel local: otra URL podría levantar el servidor de pywebview
+                    raise ValueError("URL del panel inesperada")
+                _ventana.load_url(url)
+            _ventana.show()                                   # la trae al frente
+            if _minimizada():                                 # también si se ocultó estando minimizada (cerrada desde la barra de tareas)
+                _restaurar()
+            if not _visible:
+                _visible = True
+                if not _maximizada():
+                    _ventana.move(*_posicion())
         except Exception as e:
             log(f"bandeja: ERROR ventana {type(e).__name__}: {e}")
 
