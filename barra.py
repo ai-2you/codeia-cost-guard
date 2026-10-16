@@ -21,17 +21,16 @@ import sys
 
 import objc
 from AppKit import (
-    NSAppearance, NSApplication, NSApplicationActivationPolicyAccessory, NSAttributedString, NSColor,
+    NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSApplicationActivationPolicyAccessory, NSAttributedString, NSColor,
     NSEvent, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSImage, NSImageLeft,
     NSImageView, NSMakePoint, NSMakeRect, NSMakeSize, NSMenu, NSMenuItem, NSPopover, NSScreen,
     NSPasteboard, NSPasteboardTypeString, NSProgressIndicator, NSScrollView, NSStatusBar, NSVariableStatusItemLength,
     NSViewController, NSVisualEffectView, NSWorkspace,
 )
 from Foundation import NSData, NSObject, NSTimer, NSURL
-from PIL import Image, ImageDraw, ImageFont
 
 import costbar
-from infobar import desplegable_png, servidores_ciclo
+from infobar import desplegable_png, icono_barra, servidores_ciclo
 from infobar import geometria_desplegable as G
 from infobar.desplegable_agentes import BOTONES as BOTONES_AGENTES
 from infobar.desplegable_servidores import BOTONES as BOTONES_SERVIDORES
@@ -39,9 +38,7 @@ from infobar.servidores import url_valida, errores_servidores
 from infobar.trabajador_barra import Trabajador
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
-ANCHO_ICONO = 74
 MATERIAL_POPOVER = 6        # NSVisualEffectMaterialPopover
-COLOR_PUNTO = {"ambar": (1.0, 0.62, 0.04), "rojo": (1.0, 0.27, 0.23), "gris": (0.56, 0.56, 0.58)}
 
 
 def log(txt):
@@ -71,37 +68,21 @@ def tema_activo():
     return tema_del_sistema() if pref == "sistema" else pref
 
 
-def imagen_icono(texto, pct):
-    """El icono: barrita de progreso + cifra. Plantilla: macOS lo pinta blanco o negro segun la barra."""
-    escala = 2
-    ancho, alto = ANCHO_ICONO * escala, 18 * escala
-    im = Image.new("RGBA", (ancho, alto), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    d.rounded_rectangle([0, 3 * escala, ancho - 1, alto - 4 * escala], radius=4 * escala,
-                        fill=(0, 0, 0, 0), outline=(0, 0, 0, 110), width=escala)
-    relleno = max(0, min(ancho - 2 * escala, int((ancho - 2 * escala) * pct / 100.0)))
-    if relleno > 0:
-        d.rounded_rectangle([escala, 4 * escala, escala + relleno, alto - 5 * escala],
-                            radius=3 * escala, fill=(0, 0, 0, 90))
-    fuente = None
-    for ruta in ("/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Menlo.ttc",
-                 "/System/Library/Fonts/Helvetica.ttc"):
-        if os.path.exists(ruta):
-            try:
-                fuente = ImageFont.truetype(ruta, 11 * escala)
-                break
-            except Exception:
-                continue
-    fuente = fuente or ImageFont.load_default()
-    caja = d.textbbox((0, 0), texto, font=fuente)
-    d.text(((ancho - (caja[2] - caja[0])) / 2, (alto - (caja[3] - caja[1])) / 2 - caja[1]), texto,
-           font=fuente, fill=(0, 0, 0, 255))
-    ruta = os.path.join(os.path.dirname(costbar.rutas.LOG), "icono.png")
-    im.save(ruta)
-    datos = open(ruta, "rb").read()
+def barra_oscura(boton):
+    """Apariencia REAL de la barra de menús (depende del fondo de pantalla, no del tema elegido para el desplegable)."""
+    try:
+        nombre = boton.effectiveAppearance().bestMatchFromAppearancesWithNames_([NSAppearanceNameAqua, NSAppearanceNameDarkAqua])
+        return str(nombre) == str(NSAppearanceNameDarkAqua)
+    except Exception:
+        return tema_del_sistema() == "oscuro"
+
+
+def imagen_icono(texto, fraccion, alerta, punto, oscuro):
+    """Pastilla del icono (infobar/icono_barra.py). Con colores propios: no es plantilla, por el punto de los servidores."""
+    datos, ancho = icono_barra.dibuja(texto, fraccion, alerta, punto, oscuro)
     img = NSImage.alloc().initWithData_(NSData.dataWithBytes_length_(datos, len(datos)))
-    img.setSize_((ANCHO_ICONO, 18))
-    img.setTemplate_(True)
+    img.setSize_((ancho, icono_barra.ALTO))
+    img.setTemplate_(False)
     return img
 
 
@@ -159,6 +140,7 @@ class Barra(NSObject):
             from infobar.hilo_copias import HiloCopias      # copias cifradas a destinatario: solo claves públicas, sin frases
             self.copias = HiloCopias()
             self.copias.start()
+        NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(3.0, self, "vigilaApariencia:", None, True)
         log("icono listo, trabajador, ingesta y copias en marcha")
         return self
 
@@ -191,21 +173,30 @@ class Barra(NSObject):
 
     @objc.python_method
     def pinta_icono(self):
+        """Pastilla con la cifra de 5 h, relleno según el consumo y, tras un separador, el punto de los servidores."""
         a = getattr(self, "agentes", None)
         boton = self.item.button()
-        if a:
-            txt = costbar.fmt_tok(a["cinco_h"]).replace(" ", " ")
-            boton.setImage_(imagen_icono(txt, min(100, a.get("pct_5h") or 40)))
-            boton.setToolTip_(f"5 h: {costbar.fmt_tok(a['cinco_h'])} · hoy {costbar.fmt_tok(a['hoy'])} · {a['turnos']} turnos")
-        # punto de color tras el icono si algun servidor no esta en verde (el icono es plantilla)
-        if self.punto in COLOR_PUNTO:
-            r, g, b = COLOR_PUNTO[self.punto]
-            titulo = NSAttributedString.alloc().initWithString_attributes_(" ●", {
-                NSForegroundColorAttributeName: NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0),
-                NSFontAttributeName: NSFont.systemFontOfSize_(10)})
-            boton.setAttributedTitle_(titulo)
-        else:
-            boton.setTitle_("" if a else "…")
+        self._oscuro = barra_oscura(boton)
+        if not a:
+            boton.setImage_(None)
+            boton.setTitle_("…")
+            return
+        fraccion, alerta = icono_barra.relleno(a.get("pct_5h") or 0, a.get("ritmo") or 0, a.get("limite_hora") or 0)
+        txt = costbar.fmt_tok(a["cinco_h"])
+        boton.setImage_(imagen_icono(txt, fraccion, alerta, self.punto, self._oscuro))
+        boton.setTitle_("")
+        ritmo = f" · ritmo {costbar.fmt_tok(a.get('ritmo') or 0)}/h" + (f" (límite {costbar.fmt_tok(a['limite_hora'])}/h)" if a.get("limite_hora") else "")
+        servidores = {"verde": " · servidores bien", "ambar": " · un servidor pide atención", "rojo": " · un servidor tiene un problema",
+                      "gris": " · servidores sin datos recientes"}.get(self.punto, "")
+        boton.setToolTip_(f"5 h: {txt} · hoy {costbar.fmt_tok(a['hoy'])} · {a['turnos']} turnos{ritmo}{servidores}")
+
+    def vigilaApariencia_(self, _t):
+        """La barra cambia de claro a oscuro con el fondo de pantalla o el modo del sistema: se repinta solo si cambió."""
+        try:
+            if barra_oscura(self.item.button()) != getattr(self, "_oscuro", None):
+                self.pinta_icono()
+        except Exception as e:
+            log(f"ERROR apariencia {type(e).__name__}: {e}")
 
     # --- desplegable ---
     @objc.python_method
