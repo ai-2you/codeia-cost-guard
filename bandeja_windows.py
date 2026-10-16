@@ -168,12 +168,12 @@ def _accion_salir(icon):
 def _soy_la_unica():
     """Mutex con nombre de la sesion: una segunda bandeja (doble clic, arranque repetido) se va sin tocar nada. Con dos,
     habria dos escritores de servidores.sqlite y de los avisos, y el doble de conexiones SSH. El mutex vive con el proceso."""
-    k = ctypes.windll.kernel32
+    k = ctypes.WinDLL("kernel32", use_last_error=True)      # propio: no toca los argtypes del kernel32 compartido
     k.CreateMutexW.restype = ctypes.c_void_p
     k.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
     global _mutex
     _mutex = k.CreateMutexW(None, False, _MUTEX)
-    return bool(_mutex) and k.GetLastError() != _ERROR_ALREADY_EXISTS
+    return bool(_mutex) and ctypes.get_last_error() != _ERROR_ALREADY_EXISTS
 
 
 def main():
@@ -181,6 +181,7 @@ def main():
     if not _soy_la_unica():
         costbar.log("bandeja: ya hay una en marcha en esta sesion; esta se va")
         return
+    os.chdir(costbar.AQUI)    # nada de lo que se lance hereda como directorio de trabajo el perfil del usuario
     costbar.endurecer()       # umask / permisos de lo que ya hubiera: todo esto es sensible
     _icon = pystray.Icon("CostGuard", bwm.imagen_icono_windows(*bwm.fraccion_e_icono(_agentes)),
                          bwm.texto_tooltip(_agentes), _construir_menu(_agentes))

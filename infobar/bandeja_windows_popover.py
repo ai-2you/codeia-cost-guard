@@ -52,6 +52,10 @@ ctypes.windll.user32.SetWinEventHook.argtypes = [
 
 
 _GA_ROOTOWNER = 3
+# Página en blanco como CONTENIDO, nunca como URL: pywebview trata como fichero local cualquier URL que no empiece por
+# http://, https:// o file:// (about:blank incluida) y levanta su servidor bottle, sin sesión, sirviendo el directorio
+# de trabajo del proceso. Con html= / load_html() no arranca ningún servidor.
+_EN_BLANCO = "<!doctype html><title></title>"
 
 
 def _escala():
@@ -104,7 +108,7 @@ def _ocultar():
     global _visible
     _visible = False
     _ventana.hide()
-    _ventana.load_url("about:blank")
+    _ventana.load_html(_EN_BLANCO)
 
 
 def _al_cambiar_primer_plano(hook, evento, hwnd, id_objeto, id_hijo, id_hilo_evento, tiempo_ms):
@@ -153,27 +157,35 @@ def crear():
     izq, arriba, derecha, abajo = area_trabajo()
     webview.settings["DRAG_REGION_SELECTOR"] = SELECTOR_ARRASTRE
     _ventana = webview.create_window(
-        TITULO_VENTANA, url="about:blank", width=ANCHO, height=ALTO,
+        TITULO_VENTANA, html=_EN_BLANCO, width=ANCHO, height=ALTO,
         x=int(derecha - ANCHO), y=int(max(arriba, abajo - ALTO)),
         hidden=True, frameless=True, on_top=True, resizable=False, easy_drag=False,
         background_color="#212124")
-    _ventana.events.closing += _al_cerrar
+    _ventana.events.shown += _engancha_cierre
     return _ventana
 
 
-def _al_cerrar():
+def _engancha_cierre():
+    """El aviso `closing` de pywebview no dice por qué se cierra la ventana: se escucha el FormClosing nativo, que sí."""
+    _ventana.native.FormClosing += _al_cerrar
+
+
+def _al_cerrar(_emisor, args):
     """Alt+F4 sobre el popover cerraría la única ventana y webview.start() volvería: el icono seguiría vivo sin poder
-    abrir nada. Salvo al salir, se cancela el cierre y se oculta."""
-    global _visible
-    if _saliendo:
-        return True
+    abrir nada. Si lo cierra el usuario, se cancela y se oculta (en blanco). Cualquier otro motivo (cierre de sesión,
+    apagado, el propio Salir) se deja pasar: cancelarlo haría que Windows dijera «CostGuard impide cerrar sesión»."""
+    global _visible, _saliendo
+    if _saliendo or str(args.CloseReason) != "UserClosing":
+        _saliendo = True
+        return
+    args.Cancel = True
     # sin _lock: este evento llega en el hilo de la interfaz, y alternar() puede tener el cerrojo esperando a ese mismo hilo
     _visible = False
     try:
         _ventana.hide()
+        _ventana.load_html(_EN_BLANCO)
     except Exception:
         pass
-    return False
 
 
 def saliendo():
@@ -206,7 +218,10 @@ def alternar(url_fresca, log):
                 log(f"bandeja: ERROR popover (ocultar) {type(e).__name__}: {e}")
             return
         try:
-            _ventana.load_url(url_fresca())
+            url = url_fresca()
+            if not url.startswith("http://127.0.0.1:"):        # solo el panel local: otra URL podria levantar el servidor de pywebview
+                raise ValueError("URL del panel inesperada")
+            _ventana.load_url(url)
             _ventana.show()
             _visible = True
             x, y = _posicion()

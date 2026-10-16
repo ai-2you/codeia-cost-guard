@@ -152,6 +152,8 @@ def arrancar(pythonw, script):
 
 
 def main():
+    print("Si tienes la bandeja en marcha, sal antes de ella (clic derecho > Salir): sus ficheros en uso pueden")
+    print("impedir actualizar el entorno virtual.")
     print(f"-> Copiando a {DESTINO}")
     copiar_ficheros(DESTINO)
 
@@ -168,7 +170,6 @@ def main():
     print("")
     print("Listo: mira la bandeja del sistema (icono con un anillo; las cifras, al pasar el raton)."
           if arrancada else "Listo: el icono aparecera en el siguiente inicio de sesion.")
-    print("  Si ya tenias una version anterior en marcha, sal de ella (clic derecho > Salir) y vuelve a abrirla.")
     print(f'  Arrancar:      "{pythonw}" "{script}"')
     print(f'  Desinstalar:   reg delete "HKCU\\{RUN}" /v {NOMBRE_RUN} /f')
     print("")

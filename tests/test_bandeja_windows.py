@@ -117,5 +117,27 @@ class ImagenIconoTest(unittest.TestCase):
         self.assertEqual(alerta.getpixel(punto)[:3], bwm.RELLENO_ALERTA[:3])
 
 
+
+class PopoverSinServidorTest(unittest.TestCase):
+    """pywebview levanta su servidor HTTP (sin sesión, sirviendo el directorio de trabajo) con cualquier URL que no empiece por
+    http://, https:// o file://. El popover solo puede cargar el panel local o contenido HTML."""
+
+    def test_el_popover_no_pasa_urls_que_levanten_el_servidor_de_pywebview(self):
+        import ast
+        ruta = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "infobar", "bandeja_windows_popover.py")
+        arbol = ast.parse(open(ruta, encoding="utf-8").read())
+        for nodo in ast.walk(arbol):
+            if not isinstance(nodo, ast.Call):
+                continue
+            nombre = getattr(nodo.func, "attr", getattr(nodo.func, "id", ""))
+            if nombre == "create_window":
+                claves = {k.arg for k in nodo.keywords}
+                self.assertIn("html", claves)
+                self.assertNotIn("url", claves)
+            if nombre == "load_url":
+                self.assertTrue(all(isinstance(a, ast.Name) and a.id == "url" for a in nodo.args), "load_url solo con la URL comprobada")
+        self.assertIn('url.startswith("http://127.0.0.1:")', open(ruta, encoding="utf-8").read())
+
+
 if __name__ == "__main__":
     unittest.main()
