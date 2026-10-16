@@ -144,6 +144,13 @@ class RevisionCodigoTest(unittest.TestCase):
         chk = {x["id"]: x for x in servidores_estado.bastionado({"bastionado": {}}, [22, 25])}["puertos"]
         self.assertIn("ningún servidor de correo", chk["arreglo"])
 
+    def test_tarjeta_de_puertos_cabe(self):
+        from infobar.desplegable_servidores import _puertas
+        # los del correo van al texto pequeño: en la cifra grande no caben 7 puertos
+        self.assertEqual(_puertas([22, 25, 80, 443, 465, 587, 993], {"correo": "Mailu"}), ("22·80·443", "+ correo (Mailu)"))
+        self.assertEqual(_puertas([22, 80, 443, 3000, 8080, 9000], {})[0], "6 abiertas")
+        self.assertEqual(_puertas([22, 80, 443, 3000], {"raros": [3000]}), ("22·80·443·3000", "¡3000 expuesto!"))
+
     def test_correo_en_config(self):
         from infobar.servidores import errores_servidores
         base = {"nombre": "a", "ssh": "infobar@203.0.113.9"}
