@@ -87,6 +87,7 @@ class Historial:
     def __init__(self, reloj=time.time):
         self.reloj = reloj
         self.no_antes = 0
+        self.no_antes_panel = 0
         self.no_antes_webs = 0                 # el retroceso del seguimiento de webs es aparte: sus fallos no frenan el historial SSH
         self.ultimo_mantenimiento = 0
         self.firma = None
@@ -132,6 +133,34 @@ class Historial:
         except Exception as e:
             self.no_antes_webs = self.reloj() + RETROCESO_S
             log(f"seguimiento de webs: {type(e).__name__}; no se reintenta hasta dentro de una hora")
+
+    def registrar_panel(self, servidor, r, ahora):
+        """Anota las copias de una lectura buena del panel y devuelve {n, antiguas, sin_buena} de ese servidor (None si no se pudo). Nunca lanza."""
+        if self.reloj() < self.no_antes_panel or not servidor.get("id"):
+            return None
+        try:
+            from . import servidores_copias as sc
+            sid, ahora = servidor["id"], int(ahora)
+            with sh.ESCRITOR:
+                con = sh.abrir()
+                try:
+                    con.execute("BEGIN IMMEDIATE")
+                    try:
+                        sh._alta_servidor(con, sid, servidor["nombre"], ahora)
+                        sc.sincronizar(con, sid, {x["id"] for x in r["servicios"]})
+                        sc.anota(con, sid, r["copias"], ahora)
+                        filas = sc.lista(con, sid, ahora)
+                        con.execute("COMMIT")
+                    except Exception:
+                        sh._rollback(con)
+                        raise
+                finally:
+                    con.close()
+            return {"n": len(filas), "antiguas": sum(1 for f in filas if f["evaluacion"] == "antigua"), "sin_buena": sum(1 for f in filas if f["evaluacion"] == "sin_buena")}
+        except Exception as e:
+            self.no_antes_panel = self.reloj() + RETROCESO_S
+            log(f"copias del panel: {type(e).__name__}; no se reintenta hasta dentro de una hora")
+            return None
 
     def __call__(self, servidores, salida, nuevos, ahora):
         if self.reloj() < self.no_antes:

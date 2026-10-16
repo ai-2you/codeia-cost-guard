@@ -228,6 +228,9 @@ def podar_nombres(entrada):
     t = entrada.get("tarjetas")
     if isinstance(t, dict) and isinstance(t.get("servicios"), dict):
         t["servicios"]["caidos"] = []
+    p = entrada.get("panel")
+    if isinstance(p, dict):                                  # el árbol del panel (proyectos, servicios, dominios) tampoco vive en la caché más de 48 h sin leerse
+        p["servicios"], p["dominios"] = [], []
     return entrada
 
 

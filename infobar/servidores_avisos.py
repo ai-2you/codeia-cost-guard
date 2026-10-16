@@ -7,6 +7,7 @@ certificado a punto de caducar.
 · El texto no lleva nombres, dominios ni IPs (se ve en la pantalla de bloqueo). Solo se da por avisado lo que macOS aceptó; si falla se reintenta unas veces.
 · Con los avisos apagados (global o de un servidor) todo se evalúa igual pero lo presente se anota como avisado, así que al reactivarlos no cae nada acumulado.
 · La primera pasada con datos, un Mac que acaba de despertar y un fichero de estado hostil no generan avisos. Solo escribe el hilo trabajador de la barra."""
+import hashlib
 import json
 import os
 import re
@@ -16,21 +17,29 @@ import tempfile
 import threading
 import time
 
-from . import plataforma, rutas, servidores_historico as sh, servidores_ciclo, webs_sondeo
+from . import plataforma, rutas, servidores_copias, servidores_historico as sh, servidores_ciclo, webs_sondeo
 from .config_y_estado import cfg, log
 from .servidores import servidores_validos
 from .servidores_datos import FueraDeRango, porcentaje
 
 # regla: (confirma_s, rearme_s, enfriamiento_s, crítica)
 REGLAS = {"web_caida": (300, 600, 3600, True), "sin_conexion": (120, 600, 3600, True), "acceso_rechazado": (120, 600, 6 * 3600, True),
-          "bucle": (0, 0, 3600, True), "disco_lleno": (600, 1800, 12 * 3600, False), "certificado": (600, 1800, 12 * 3600, False)}
-CLASE = {"web_caida": "web", "sin_conexion": "conexión", "acceso_rechazado": "acceso", "bucle": "contenedor", "disco_lleno": "disco", "certificado": "certificado"}
+          "bucle": (0, 0, 3600, True), "disco_lleno": (600, 1800, 12 * 3600, False), "certificado": (600, 1800, 12 * 3600, False),
+          "copia_antigua": (3600, 6 * 3600, 24 * 3600, False), "despliegue_fallido": (600, 1800, 12 * 3600, False), "panel_sin_lectura": (6 * 3600, 3600, 24 * 3600, False)}
+CLASE = {"web_caida": "web", "sin_conexion": "conexión", "acceso_rechazado": "acceso", "bucle": "contenedor", "disco_lleno": "disco", "certificado": "certificado", "copia_antigua": "copia",
+         "despliegue_fallido": "despliegue", "panel_sin_lectura": "panel"}
 TEXTO = {"web_caida": "Una web de uno de tus servidores no responde correctamente desde hace más de 5 minutos.",
          "sin_conexion": "Uno de tus servidores no responde desde hace un rato.",
          "acceso_rechazado": "El acceso a uno de tus servidores ha cambiado: la conexión se rechaza.",
          "bucle": "Un contenedor de uno de tus servidores se está reiniciando en bucle.",
          "disco_lleno": "El disco de uno de tus servidores está casi lleno.",
-         "certificado": "El certificado de una web está a punto de caducar."}
+         "certificado": "El certificado de una web está a punto de caducar.",
+         "copia_antigua": "Una copia de seguridad de uno de tus servidores lleva más tiempo del normal sin hacerse.",
+         "despliegue_fallido": "El último despliegue de una aplicación de uno de tus servidores ha fallado.",
+         "panel_sin_lectura": "CostGuard no puede leer el panel de uno de tus servidores."}
+PANEL_REGLAS = frozenset({"copia_antigua", "despliegue_fallido"})
+VENTANA_PANEL_S = 960              # 3 lecturas de 5 minutos y un minuto de margen
+DESPLIEGUE_MIN_S, DESPLIEGUE_MAX_S = 600, 7 * 86400
 BANDA = "banda"             # entre el umbral de aviso y el de rearme: antes de avisar vale «no», después «no sé»
 DISCO_ALTO, DISCO_BAJO = 90, 85
 CERT_ALTO, CERT_BAJO = 7, 14
@@ -42,7 +51,7 @@ TOPE_HORA, TOPE_NO_CRITICAS_HORA = 8, 3
 INTENTOS, REINTENTO_S = 3, 300
 REPOSO_S = 120
 RECHAZOS = ("autenticacion", "clave de host no confiada")
-CLAVE = re.compile(r"(?:web_caida|sin_conexion|acceso_rechazado|bucle|disco_lleno|certificado)\|[0-9a-f]{32}(?:\|[0-9a-f]{32})?")
+CLAVE = re.compile(r"(?:" + "|".join(REGLAS) + r")\|[0-9a-f]{32}(?:\|[0-9a-f]{32})?")
 CAMPOS = ("desde", "avisado", "libre", "ultimo", "reintento_en", "visto")
 
 
@@ -59,7 +68,7 @@ def _t(v, ahora, holgura=0):
 
 def leer(ahora):
     """(estado, existía). Lo ilegible, enorme u hostil se ignora entrada a entrada; un fichero roto se aparta como `.corrupto` y se empieza de cero."""
-    vacio = {"base": False, "envios": [], "entradas": {}}
+    vacio = {"base": False, "envios": [], "entradas": {}, "paneles": []}
     try:
         # sin seguir enlaces y sin bloquearse con un FIFO o un dispositivo: solo se lee un fichero normal de tamaño razonable
         fd = os.open(ruta(), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
@@ -88,7 +97,8 @@ def leer(ahora):
             n["intentos"] = e.get("intentos") if isinstance(e.get("intentos"), int) and not isinstance(e.get("intentos"), bool) and 0 <= e["intentos"] <= 100 else 0
             entradas[k] = n
     envios = [t for t in (_t(x, ahora) for x in (d.get("envios") if isinstance(d.get("envios"), list) else [])[:200]) if t is not None and ahora - t < 3600]
-    return {"base": d.get("base") is True, "envios": envios, "entradas": entradas}, True
+    paneles = [p for p in (d.get("paneles") if isinstance(d.get("paneles"), list) else [])[:200] if isinstance(p, str) and re.fullmatch(r"[0-9a-f]{32}", p)]
+    return {"base": d.get("base") is True, "envios": envios, "entradas": entradas, "paneles": paneles}, True
 
 
 def _guardar(estado):
@@ -178,8 +188,43 @@ def _desde_cache(servidores, cache, ahora, ventana, sin_red):
     return out
 
 
-def _desde_base(servidores, ahora):
-    """Webs (estado confirmado y certificado) y bucles de contenedores. None si la base no se puede leer ahora: entonces no sé nada de ellas."""
+def _clave_despliegue(sid, servicio):
+    return hashlib.sha256(f"{sid}\0despliegue\0{servicio}".encode()).hexdigest()[:32]
+
+
+def _desde_panel(servidores, entradas_cache, ahora):
+    """Frescos {id de servidor: panel} y las condiciones que salen de la caché del panel: despliegue fallido y panel sin lectura."""
+    frescos, out = {}, {}
+    for s in servidores:
+        e = entradas_cache.get(s["nombre"])
+        p = e.get("panel") if isinstance(e, dict) and isinstance(e.get("panel"), dict) else None
+        if p is None:
+            continue
+        ok_en = p.get("ok_en") if isinstance(p.get("ok_en"), (int, float)) and not isinstance(p.get("ok_en"), bool) else None
+        empezo = p.get("empezo_en") if isinstance(p.get("empezo_en"), (int, float)) and not isinstance(p.get("empezo_en"), bool) else None
+        fresco = ok_en is not None and _fresco(ok_en, ahora, VENTANA_PANEL_S) and p.get("error") != "alcance"
+        sin_lectura = ahora - (ok_en if ok_en is not None else (empezo if empezo is not None else ahora))
+        out[("panel_sin_lectura", s["id"])] = True if (sin_lectura > 0 and not fresco and (ok_en is not None or empezo is not None)) else (False if fresco else None)
+        if not fresco:
+            continue
+        frescos[s["id"]] = p
+        for sv in (p.get("servicios") or [])[:2000]:
+            if not isinstance(sv, dict) or not isinstance(sv.get("id"), str) or sv.get("tipo") not in ("application", "compose"):
+                continue
+            d = sv.get("despliegue")
+            edad = ahora - d if isinstance(d, (int, float)) and not isinstance(d, bool) else None
+            if sv.get("estado") == "error" and edad is not None and DESPLIEGUE_MIN_S < edad <= DESPLIEGUE_MAX_S:
+                v = True
+            elif sv.get("estado") in ("done", "running", "idle") or (sv.get("estado") == "error" and edad is not None and edad > DESPLIEGUE_MAX_S):
+                v = False
+            else:
+                v = None                                  # un error de hace menos de 10 minutos o de hace meses no avisa: lo viejo es informativo en la pestaña
+            out[("despliegue_fallido", s["id"], _clave_despliegue(s["id"], sv["id"]))] = v
+    return frescos, out
+
+
+def _desde_base(servidores, ahora, frescos=()):
+    """Webs (estado confirmado y certificado), bucles de contenedores y copias del panel. None si la base no se puede leer ahora: entonces no sé nada de ellas."""
     ids = {s["id"] for s in servidores}
     out = {}
     try:
@@ -197,6 +242,11 @@ def _desde_base(servidores, ahora):
                                                 (ahora - 900, ahora + 60)).fetchall()}
         for sid in ids:
             out[("bucle", sid)] = sid in con_bucle
+        for sid, clave, ultima_ok, intervalo in con.execute("SELECT servidor_id, clave, ultima_ok, intervalo_s FROM copias").fetchall():
+            if sid not in ids:
+                continue
+            ev = servidores_copias.evaluar({"ultima_ok": ultima_ok, "intervalo_s": intervalo}, ahora) if sid in frescos else None
+            out[("copia_antigua", sid, clave)] = True if ev == "antigua" else (False if ev == "al_dia" else None)       # «nunca tuvo copia buena» no avisa
     except Exception:
         return None
     finally:
@@ -299,7 +349,9 @@ class Vigilante:
                 red["v"] = bool(self.sin_red())
             return red["v"]
         conds = _desde_cache(servidores, entradas_cache, ahora, ventana, sin_red)
-        base = _desde_base(servidores, ahora)
+        frescos, de_panel = _desde_panel(servidores, entradas_cache, ahora)
+        conds.update(de_panel)
+        base = _desde_base(servidores, ahora, frescos)
         if base:
             conds.update(base)
         estado, existia = leer(ahora)
@@ -323,6 +375,11 @@ class Vigilante:
             for k, v in conds.items():
                 if v is True:
                     entradas["|".join(k)].update(avisado=ahora, ultimo=ahora)       # línea base: lo que ya está pasando al arrancar no avisa
+        nuevos_paneles = {sid for sid in frescos if sid not in estado["paneles"]}
+        for k, v in conds.items():
+            if v is True and k[0] in PANEL_REGLAS and k[1] in nuevos_paneles:
+                entradas["|".join(k)].update(avisado=ahora, ultimo=ahora)          # línea base de cada panel: lo que ya estaba mal en su primera lectura no avisa
+        estado["paneles"] = sorted(set(estado["paneles"]) | set(frescos))[:200]
         silencio = apagado_global or not estado["base"]
         enviar = []
         for clave, regla, sid in debidas:

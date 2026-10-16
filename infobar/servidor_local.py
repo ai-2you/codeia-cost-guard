@@ -176,10 +176,9 @@ def errores_config(nuevo):
 
 
 def _cuenta_panel(s):
-    """Cuenta del Llavero de la clave del panel (Dokploy/Easypanel) de un servidor, o ''."""
-    from urllib.parse import urlsplit
-    host = urlsplit(str(s.get("panel_url") or "")).netloc if s.get("panel") else ""
-    return f"{s['panel']}:{host}" if host and claves.cuenta_valida(f"{s['panel']}:{host}") else ""
+    """Cuenta del Llavero de la clave del panel (Dokploy) de un servidor, o ''."""
+    from .servidores_panel import cuenta
+    return cuenta(s)
 
 
 def crear_servidor(puerto=PUERTO):

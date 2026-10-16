@@ -7,7 +7,7 @@ cambia imagenes. Una excepcion se registra y el bucle sigue: el hilo no muere.
 """
 import threading, time, traceback
 
-from . import cuota_nan, desplegable_png, permisos, presupuestos, servidores_avisos, servidores_ciclo, webs_sondeo
+from . import cuota_nan, desplegable_png, permisos, presupuestos, servidores_avisos, servidores_ciclo, servidores_panel, webs_sondeo
 from . import servidores_registro, sombra
 from .agregacion import ULTIMOS, informe
 from .config_y_estado import cfg, leer_ui, log
@@ -31,6 +31,7 @@ class Trabajador(threading.Thread):
         self.avisos_servidores = servidores_avisos.Vigilante()      # único escritor de avisos_servidores.json
         self._evento.set()                  # la primera vuelta, nada mas arrancar
         self._webs = threading.Thread(target=self._sondea_webs, name="infobar-webs", daemon=True)
+        self._paneles = threading.Thread(target=self._lee_paneles, name="infobar-paneles", daemon=True)
 
     def _sondea_webs(self):
         """Hilo propio: las webs se sondean con su calendario (5 min; 60 s mientras fallan), sin esperar al ciclo SSH ni frenarlo."""
@@ -43,6 +44,16 @@ class Trabajador(threading.Thread):
                 log("webs: " + traceback.format_exc()[-300:])
             time.sleep(DESPIERTA)
 
+    def _lee_paneles(self):
+        """Hilo propio: la API del panel de cada servidor se lee con su calendario (5 min) sin esperar al ciclo SSH ni frenarlo."""
+        while True:
+            try:
+                if servidores_panel.pasada(self.historial):
+                    self.pide("render")                      # el desplegable enseña lo nuevo (copias, despliegues) sin esperar al ciclo SSH
+            except Exception:
+                log("panel: fallo inesperado")
+            time.sleep(DESPIERTA)
+
     def pide(self, *cosas):
         """'refrescar' (todo ya, servidores incluidos) o 'render' (solo repintar)."""
         with self._cerrojo:
@@ -51,6 +62,7 @@ class Trabajador(threading.Thread):
 
     def run(self):
         self._webs.start()
+        self._paneles.start()
         r, ultimo_scan, ultimo_render, gen_srv = None, 0.0, 0.0, None
         migrado, ultima_purga, ultimo_aviso = False, 0.0, 0.0
         while True:
