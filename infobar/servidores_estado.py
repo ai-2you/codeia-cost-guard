@@ -2,7 +2,7 @@
 
 verde = bien · ambar = mirar · rojo = actuar · gris = sin dato (o dato viejo).
 """
-from .servidores_externo import PUERTOS_PUBLICOS
+from .servidores_externo import PUERTOS_CORREO, PUERTOS_PUBLICOS
 
 ORDEN = {"gris": 0, "verde": 1, "ambar": 2, "rojo": 3}
 
@@ -25,8 +25,10 @@ def _ip_conocida(desde, conocidas):
     return (desde or "").strip() in set(conocidas)
 
 
-def tarjetas(d, webs, expuestos, conocidas=(), permitidos=()):
-    """{tarjeta: {"estado", ...}} a partir de los datos leidos por SSH y desde el Mac."""
+def tarjetas(d, webs, expuestos, conocidas=(), permitidos=(), correo=""):
+    """{tarjeta: {"estado", ...}} a partir de los datos leidos por SSH y desde el Mac.
+
+    `correo`: nombre del servidor de correo cuyos puertos se aceptan ("" si no se aceptan)."""
     t = {}
     if "cpu" in d:
         t["cpu"] = {"estado": _umbral(d["cpu"]["pct"], 80, 95)}
@@ -57,18 +59,20 @@ def tarjetas(d, webs, expuestos, conocidas=(), permitidos=()):
         t["bloqueadas"] = {"estado": "verde" if d["fail2ban"].get("instalado") else "ambar"}
     if expuestos is not None:
         raros = [p for p in expuestos if p not in PUERTOS_PUBLICOS | set(permitidos)]
-        t["puertos"] = {"estado": "rojo" if raros else "verde", "raros": raros}
+        t["puertos"] = {"estado": "rojo" if raros else "verde", "raros": raros, "correo": correo}
     if "actualizaciones" in d:
         a = d["actualizaciones"]
         seg = int((d.get("bastionado") or {}).get("parches_seguridad") or 0)
         t["mantenimiento"] = {"estado": "ambar" if (a["reinicio"] or seg) else "verde"}
     if "servicios" in d:
         caidos = [s["nombre"] for s in d["servicios"] if not s["ok"]]
-        t["servicios"] = {"estado": "rojo" if caidos else "verde", "caidos": caidos}
+        parados = [s["nombre"] for s in d["servicios"] if s["ok"] and s.get("parado")]
+        # caído (debería estar en marcha y no lo está) = rojo; parado a mano (0/0) = ámbar: no es un fallo, pero hay que verlo
+        t["servicios"] = {"estado": "rojo" if caidos else ("ambar" if parados else "verde"), "caidos": caidos, "parados": parados}
     return t
 
 
-def bastionado(d, expuestos, permitidos=()):
+def bastionado(d, expuestos, permitidos=(), correo=""):
     """Lista de comprobaciones {id, ok (True/False/None), texto, arreglo}. None = no se pudo mirar."""
     b = d.get("bastionado") or {}
     root = d.get("con_root")
@@ -102,9 +106,21 @@ def bastionado(d, expuestos, permitidos=()):
          "(o el cortafuegos del proveedor). Ojo: docker publica puertos saltándose ufw")
     if expuestos is not None:
         raros = [p for p in expuestos if p not in PUERTOS_PUBLICOS | set(permitidos)]
-        mete("puertos", not raros, "solo 22/80/443 abiertos a Internet",
-             f"cerrar {', '.join(map(str, raros))}: sudo bash cerrar-puerto-docker.sh <puerto> "
-             "(infobar/remoto; docker se salta ufw) o en el cortafuegos del proveedor")
+        detectado = d.get("correo")
+        de_correo = [p for p in raros if p in PUERTOS_CORREO]
+        if detectado and de_correo and not correo:
+            # hay un servidor de correo, pero en Ajustes se ha dicho que no se acepten sus puertos
+            arreglo = (f"{', '.join(map(str, de_correo))} son del correo ({detectado}): si lo usas, marca «Servidor de correo» en Ajustes > "
+                       "Servidores; si no, ciérralos")
+        elif de_correo and not detectado:
+            arreglo = (f"cerrar {', '.join(map(str, raros))}: infobar no ve ningún servidor de correo en marcha que los use. "
+                       "sudo bash cerrar-puerto-docker.sh <puerto> (infobar/remoto) o el cortafuegos del proveedor")
+        else:
+            arreglo = (f"cerrar {', '.join(map(str, raros))}: sudo bash cerrar-puerto-docker.sh <puerto> "
+                       "(infobar/remoto; docker se salta ufw) o en el cortafuegos del proveedor"
+                       + (". Para el correo bastan 25/465/587/993: 110 y 143 van sin cifrar" if correo and {110, 143} & set(raros) else ""))
+        mete("puertos", not raros,
+             f"solo 22/80/443 y los del correo ({correo}) abiertos a Internet" if correo else "solo 22/80/443 abiertos a Internet", arreglo)
     if "auto_upgrades" in b:
         mete("auto_updates", b.get("auto_upgrades") == "si" and b.get("unattended_instalado") == "si",
              "parches de seguridad automáticos", "apt install unattended-upgrades && dpkg-reconfigure -plow unattended-upgrades")

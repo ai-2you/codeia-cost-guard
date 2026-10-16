@@ -101,8 +101,23 @@ nlin=$(printf '%s\n' "$cuerpo" | grep -c '')
 echo "n $nlin"; printf '%s\n' "$cuerpo"; echo "fin $nlin 0"
 
 echo "### actualizaciones"
-t apt list --upgradable 2>/dev/null | grep -c upgradable
+# pendientes = lo que `apt upgrade` instalaria de verdad (simulado, sin root). Lo demas de `apt list --upgradable` esta
+# en espera: actualizaciones por fases de Ubuntu o paquetes retenidos (p. ej. un salto de version de docker)
+todos=$(t apt list --upgradable 2>/dev/null | grep -c upgradable)
+if sim=$(t apt-get -s -o Debug::NoLocking=1 upgrade); then
+  inst=$(printf '%s\n' "$sim" | grep -c '^Inst ')
+else
+  inst=$todos                                      # sin simulacion: como antes, todo cuenta como pendiente
+fi
+echo "$inst"
 [ -f /var/run/reboot-required ] && echo reinicio || echo sin-reinicio
+echo "en_espera $(( todos > inst ? todos - inst : 0 ))"
+
+echo "### correo"
+# servidor de correo instalado en el sistema (no en docker): sus puertos 25/465/587/993 son legitimos
+for u in postfix dovecot exim4 opensmtpd; do
+  [ "$(t systemctl is-active "$u")" = active ] && echo "$u"
+done
 
 echo "### bastionado"
 # Comprobaciones de buenas practicas que no necesitan root (clave valor). El Mac las convierte en

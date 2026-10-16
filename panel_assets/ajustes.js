@@ -244,6 +244,7 @@
         f("Puerto SSH", "puerto", "22"), h("label", {}, "Panel", panel), f("URL del panel (https)", "panel_url", "https://dokploy.example.com"),
         editorWebs(s)),
       h("label", {style: "display:block;margin-top:6px"}, h("input", {type: "checkbox", "data-s": i, "data-k": "avisos", checked: s.avisos !== false}), " Avisar con una notificación de este servidor (apágalo, por ejemplo, en los de clientes)"),
+      h("label", {style: "display:block;margin-top:6px"}, h("input", {type: "checkbox", "data-s": i, "data-k": "correo", checked: s.correo !== false}), " Servidor de correo: si detecta uno en marcha (Mailu, mailcow, Postfix...), aceptar sus puertos 25, 465, 587, 993 y 995"),
       detectorWebs(s),
       k ? h("div", {}, avisoPanel(), k.fila, s.id && info.clave_guardada ? probarPanel(s) : null) : (s.panel === "easypanel"
         ? h("p", {class: "ayuda"}, "EasyPanel no tiene clave de solo lectura (la clave de su API puede cambiar y borrar cosas), así que por ahora no se lee su API: el estado sale por SSH.")
@@ -444,6 +445,7 @@
         div.querySelectorAll("[data-k]").forEach(i => {
           const k = i.dataset.k, v = i.value.trim();
           if (k === "avisos") { if (i.checked) delete s.avisos; else s.avisos = false; }
+          else if (k === "correo") { if (i.checked) delete s.correo; else s.correo = false; }
           else if (k === "puerto") { if (v) s.puerto = parseInt(v, 10) || v; else delete s.puerto; }
           else if (v || k === "nombre" || k === "ssh") s[k] = v; else delete s[k];
         });

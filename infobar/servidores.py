@@ -8,7 +8,7 @@ import ipaddress, re, urllib.parse
 PANELES = ("dokploy", "easypanel")
 # Campos que puede llevar un servidor en la configuración. Lista CERRADA: cualquier otro (p. ej. «contrasena») invalida la configuración y no se guarda,
 # así que un formulario nuevo nunca puede acabar escribiendo un secreto en servidores.json.
-CAMPOS_SERVIDOR = frozenset({"nombre", "ssh", "ssh_admin", "puerto", "id", "webs", "panel", "panel_url", "guardar_ips", "retencion_ips_dias", "detectar_webs", "avisos"})
+CAMPOS_SERVIDOR = frozenset({"nombre", "ssh", "ssh_admin", "puerto", "id", "webs", "panel", "panel_url", "guardar_ips", "retencion_ips_dias", "detectar_webs", "avisos", "correo"})
 _ID = re.compile(r"^[0-9a-f]{32}$")
 # usuario@host o alias de ~/.ssh/config; sin '-' inicial (seria una opcion de ssh: -oProxyCommand=...)
 _SSH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._-]*(@[A-Za-z0-9._][A-Za-z0-9._-]*)?$")
@@ -102,7 +102,7 @@ def errores_servidores(lista):
         extra = sorted(str(k)[:30] for k in set(s) - CAMPOS_SERVIDOR)
         if extra:
             errores.append(f"{donde}: campo no admitido ({', '.join(extra[:3])})")      # solo los nombres, nunca los valores
-        for campo_bool in ("detectar_webs", "avisos"):
+        for campo_bool in ("detectar_webs", "avisos", "correo"):
             if campo_bool in s and not isinstance(s[campo_bool], bool):
                 errores.append(f"{donde}: {campo_bool} debe ser verdadero o falso")
         nombre = s.get("nombre")
