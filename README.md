@@ -90,8 +90,9 @@ Copia el proyecto a `~/.cost-guard` con su propio entorno virtual (`pillow`, `cr
 La bandeja (`bandeja_windows.py`) hace lo mismo que la barra de macOS salvo el desplegable con imágenes:
 ingesta, copias, servidores, presupuestos y panel local. El icono es un anillo con la parte consumida de
 las 5 h (las cifras salen al pasar el ratón); el clic izquierdo abre el panel en una ventana nativa junto
-al icono y el derecho, un menú con hoy, ritmo, 5 h, «Abrir panel», «Refrescar ahora» y «Salir». Solo
-puede haber una en marcha por sesión.
+al icono (con el marco normal de Windows: se minimiza, se maximiza y se redimensiona, y la X solo la oculta)
+y el derecho, un menú con hoy, ritmo, 5 h, «Abrir panel», «Refrescar ahora» y «Salir». Solo puede haber una
+en marcha por sesión.
 
 Guardar claves de API desde el panel (**Ajustes**) también funciona ya en Windows: se guardan en el
 **Credential Manager** del sistema (antes esto solo estaba soportado en macOS, vía Keychain).

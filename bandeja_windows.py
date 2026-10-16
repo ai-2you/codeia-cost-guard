@@ -3,10 +3,9 @@
 
 Equivalente Windows de barra.py (macOS, AppKit): arranca los mismos hilos (costbar.arrancar_hilos():
 panel local, trabajador de agentes y servidores, ingesta y copias) y pinta lo que el trabajador entrega, con pystray
-(ctypes puro en Windows, sin pywin32) para el icono y un popover nativo (infobar/
-bandeja_windows_popover.py, pywebview/WebView2) que carga el panel SIN navegador -- lo mas
-parecido al desplegable "glass" de macOS que se puede conseguir sin ese PNG renderizado por
-Chrome (fuera de alcance, ver plan). Si pywebview no esta instalado, o si crear/arrancar la
+(ctypes puro en Windows, sin pywin32) para el icono y una ventana nativa con marco (infobar/
+bandeja_windows_popover.py, pywebview/WebView2: minimizar, maximizar y cerrar, y la X la oculta) que
+carga el panel SIN navegador. Si pywebview no esta instalado, o si crear/arrancar la
 ventana falla por cualquier motivo (runtime de WebView2 ausente/roto, por ejemplo), cae a abrir
 el panel con Edge en modo --app (sin pestanas ni barra de direcciones) y, si tampoco hay un
 navegador Chromium, al navegador por defecto a secas.
@@ -128,7 +127,7 @@ def _accion_abrir_panel_navegador(url):
 
     Aqui el ticket de entrada va en la linea de comandos del navegador (en macOS se evita con NSWorkspace). En Windows esa
     linea solo la leen los procesos de tu usuario y los administradores, que ya pueden leer tus credenciales; y el ticket
-    es de un solo uso y caduca a los 60 s. El popover nativo no tiene este problema: la URL no sale del proceso."""
+    es de un solo uso y caduca a los 60 s. La ventana nativa no tiene este problema: la URL no sale del proceso."""
     try:
         navegador = _ruta_navegador_app()
         if navegador:
@@ -196,14 +195,13 @@ def main():
             # roto (imagen de Windows recortada, politica de grupo, etc.): sin este try/except el
             # proceso moria aqui en silencio (pythonw.exe no tiene consola) y sin dejar ni rastro
             # en el log -- hallazgo de la revision adversarial.
-            costbar.log(f"bandeja: ERROR no se pudo crear el popover nativo ({type(e).__name__}: "
+            costbar.log(f"bandeja: ERROR no se pudo crear la ventana nativa ({type(e).__name__}: "
                         f"{e}); cae al navegador para Abrir panel")
             _usa_popover = False
 
     if _usa_popover:
-        popover.iniciar_vigilancia_foco(costbar.log)
         _icon.run_detached()      # spawnea su propio hilo: el principal lo necesita webview.start()
-        costbar.log("bandeja: icono listo, entrando en el bucle (popover nativo)")
+        costbar.log("bandeja: icono listo, entrando en el bucle (ventana nativa)")
         try:
             import webview
             webview.start()       # bloqueante en el hilo principal (lo exige pywebview)
@@ -211,7 +209,7 @@ def main():
                 # la ventana se cerro por otra via (p. ej. un cierre de sesion que otra aplicacion cancelo):
                 # el icono sigue vivo y Abrir panel cae al navegador
                 _usa_popover = False
-                costbar.log("bandeja: el popover se cerro; Abrir panel cae al navegador")
+                costbar.log("bandeja: la ventana se cerro; Abrir panel cae al navegador")
         except Exception as e:
             _usa_popover = False   # el bucle de webview ya no esta vivo: de aqui en mas, navegador
             costbar.log(f"bandeja: ERROR webview.start() {type(e).__name__}: {e}; "
