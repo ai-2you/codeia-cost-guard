@@ -159,6 +159,8 @@ class ServidorAjustes(unittest.TestCase):
         self.assertEqual({p["nombre"]: p["clave_guardada"] for p in d["proveedores"]}, {"NaN": True, "OpenCode Go": False})
         self.assertEqual(d["paneles"]["prod"]["cuenta"], "dokploy:d.example.com")
         self.assertNotIn("x" * 20, json.dumps(d))
+        self.assertIsInstance(d["scripts"]["ultima"], int)          # la versión del script que trae la app, para avisar en cada servidor
+        self.assertIsInstance(d["scripts"]["servidores"], dict)
 
     def test_ajustes_trae_el_estado_de_las_copias(self):
         st, d = self._pide("GET", "/ajustes")

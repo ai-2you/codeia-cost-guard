@@ -186,6 +186,10 @@ class RevisionCodigoTest(unittest.TestCase):
         self.assertEqual(errores_servidores([dict(base, correo=False)]), [])
         self.assertTrue(errores_servidores([dict(base, correo="no")]))
 
+    def test_version_del_script_instalado(self):
+        self.assertEqual(servidores_ssh.interpretar(servidores_ssh.secciones("### version\n3\n")).get("version"), 3)
+        self.assertNotIn("version", servidores_ssh.interpretar(servidores_ssh.secciones("### version\nabc\n")))
+
     def test_paquetes_en_espera_no_son_pendientes(self):
         d = servidores_ssh.interpretar(servidores_ssh.secciones("### actualizaciones\n3\nsin-reinicio\n### espera\ninstalables 0\n"))
         self.assertEqual(d["actualizaciones"], {"pendientes": 0, "reinicio": False, "en_espera": 3})
