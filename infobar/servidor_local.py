@@ -17,7 +17,7 @@ import hmac, json, os, secrets, socket, subprocess, sys, threading, time
 from urllib.parse import parse_qs, urlsplit
 
 from . import ajustes, claves, exportacion, exportacion_csv, guia_web, historico, presupuestos, rutas, servidores_alta, servidores_api, servidores_avisos, servidores_panel, servidores_webs
-from . import cuota_nan
+from . import cuota_nan, servidores_ciclo
 from .agregacion import informe
 from .config_y_estado import cfg, guardar_con_revision, guardar_config, log, olvidar_cache
 from .servidores import _errores_ips_guardadas, errores_ips, errores_servidores, revision_servidores
@@ -366,7 +366,11 @@ def crear_servidor(puerto=PUERTO):
                             paneles[s["nombre"]] = {"cuenta": cuenta, "clave_guardada": bool(claves.leer_clave(cuenta))}
                     self._json(200, {"config": c, "origenes": r.get("origenes", {}), "proyectos": r.get("proyectos_origen", {}),
                                      "proveedores": provs, "paneles": paneles, "keychain": claves.hay_llavero(), "copias": _estado_copias(), "presupuestos": _estado_presupuestos(),
-                                     "alta_servidor": "infobar/remoto/alta-servidor.sh"})
+                                     "alta_servidor": "infobar/remoto/alta-servidor.sh",
+                                     # versión del script de lectura en cada servidor (de la última lectura) y la que trae esta app
+                                     "scripts": {"ultima": servidores_alta.version_script(),
+                                                 "servidores": {n: (e.get("datos") or {}).get("version")
+                                                                for n, e in (servidores_ciclo.leer_cache().get("servidores") or {}).items() if isinstance(e, dict)}}})
                 except Exception as e:
                     self._json(500, {"error": str(e)[:200]})
             elif ruta == "/config.json":

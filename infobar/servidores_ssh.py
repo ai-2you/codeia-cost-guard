@@ -247,6 +247,9 @@ def interpretar(sec, marcadas=frozenset(), ahora=None):
             d["intentos"] = it
         elif "intentos" in marcadas:
             d["intentos_sin_dato"] = True               # el servidor no tiene fuente de intentos: se muestra «sin dato», nunca 0
+    v = (sec.get("version") or [""])[0].strip()
+    if v.isdecimal() and len(v) <= 3:
+        d["version"] = int(v)                      # la del recoger.sh instalado en el servidor (Ajustes avisa si hay una más nueva)
     a = sec.get("actualizaciones") or []
     if a:
         d["actualizaciones"] = {"pendientes": int(_num(a[0])), "reinicio": len(a) > 1 and a[1] == "reinicio"}

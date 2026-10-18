@@ -458,6 +458,17 @@ class InstalacionTest(Base):
         r = self.espera(id_, ("hecho", "error"))
         self.assertEqual((r["estado"], r["codigo"]), ("error", "nombre_repetido"))
 
+    def test_actualizar_un_servidor_ya_instalado_lo_dice_y_no_lo_duplica(self):
+        self.instala()
+        alta._ALTAS.clear()
+        id_, r = self.instala(instalado=True)
+        self.assertEqual((r["estado"], r["codigo"]), ("hecho", "hecho_actualiza"))
+        self.assertEqual(len([s for s in config_y_estado.cfg()["servidores"] if s["nombre"] == "nuevo"]), 1)
+
+    def test_la_version_del_script_que_trae_la_app(self):
+        self.assertIsInstance(alta.version_script(), int)
+        self.assertGreaterEqual(alta.version_script(), 3)
+
     def test_comprobar_tras_el_terminal_prueba_y_guarda(self):
         self.fake({"conocida": True, "diag": "ninguno"})
         id_ = self.diagnostica()

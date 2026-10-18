@@ -85,9 +85,12 @@
 
   /* Alta guiada: comprueba el servidor (solo lectura) y ofrece instalar con tu clave SSH o hacerlo en el Terminal. La contraseña NUNCA pasa por esta página.
      Todo lo que pinta viene de mensajes cerrados del servidor local, aun así va por el DOM. */
-  function altaGuiada(){
-    const nombre = h("input", {class: "ancho", placeholder: "produccion", maxlength: 40}), destino = h("input", {class: "ancho", placeholder: "root@203.0.113.10"});
-    const puerto = h("input", {class: "num-in", placeholder: "22", inputmode: "numeric"});
+  /* `pre` = {nombre, admin, puerto}: actualizar los scripts de un servidor que ya está dado de alta (el mismo camino que el alta: con el
+     mismo nombre, host y puerto no se duplica, solo se reinstalan los scripts) */
+  function altaGuiada(pre){
+    const nombre = h("input", {class: "ancho", placeholder: "produccion", maxlength: 40, value: pre ? pre.nombre : ""});
+    const destino = h("input", {class: "ancho", placeholder: "root@203.0.113.10", value: pre ? pre.admin : ""});
+    const puerto = h("input", {class: "num-in", placeholder: "22", inputmode: "numeric", value: pre ? String(pre.puerto) : ""});
     const salida = h("div", {style: "margin-top:10px"});
     let id = null, reloj = null;
     const parar = () => { if (reloj) { clearTimeout(reloj); reloj = null; } };
@@ -121,19 +124,22 @@
       } else if (r.estado === "terminal" || r.estado === "error") {
         piezas.push(...terminal(r));
       } else if (r.estado === "hecho") {
-        piezas.push(h("div", {}, boton("Ver la lista de servidores", recarga)));
+        if (!pre) piezas.push(h("div", {}, boton("Ver la lista de servidores", recarga)));
       }
       salida.replaceChildren(...piezas);
     }
+    const comprobar = h("div", {style: "margin-top:8px"}, boton("Comprobar servidor", () => {
+        salida.replaceChildren(h("p", {}, "Comprobando…"));
+        envia("diagnostico", {nombre: nombre.value.trim(), ssh: destino.value.trim(), puerto: puerto.value.trim() ? (parseInt(puerto.value, 10) || 0) : 22});
+      }));
+    if (pre) return h("div", {style: "margin-top:8px"},
+      h("p", {class: "ayuda"}, "Entra con tu usuario administrador (no con «infobar», que solo puede leer). Si sudo te pide contraseña, la página te da una línea para el Terminal: la contraseña nunca pasa por aquí."),
+      h("div", {class: "campos"}, h("label", {}, "Tu usuario y servidor", destino)), comprobar, salida);
     return h("div", {class: "prov"},
       h("div", {class: "prov-cab"}, h("strong", {}, "Dar de alta un servidor")),
       h("p", {class: "ayuda"}, "Comprueba el servidor sin tocarlo y te dice si se puede instalar con tu clave SSH o si hay que hacerlo en el Terminal. Crea en él el usuario «infobar» (solo lectura)."),
       h("div", {class: "campos"}, h("label", {}, "Nombre", nombre), h("label", {}, "Usuario y servidor", destino), h("label", {}, "Puerto SSH", puerto)),
-      h("div", {style: "margin-top:8px"}, boton("Comprobar servidor", () => {
-        salida.replaceChildren(h("p", {}, "Comprobando…"));
-        envia("diagnostico", {nombre: nombre.value.trim(), ssh: destino.value.trim(), puerto: puerto.value.trim() ? (parseInt(puerto.value, 10) || 0) : 22});
-      })),
-      salida);
+      comprobar, salida);
   }
 
   /* Webs detectadas en un servidor (por su proxy): se proponen las que apuntan a ese servidor y TÚ marcas las que quieres vigilar. Nada se vigila sin marcarlo.
@@ -246,9 +252,28 @@
       h("label", {style: "display:block;margin-top:6px"}, h("input", {type: "checkbox", "data-s": i, "data-k": "avisos", checked: s.avisos !== false}), " Avisar con una notificación de este servidor (apágalo, por ejemplo, en los de clientes)"),
       h("label", {style: "display:block;margin-top:6px"}, h("input", {type: "checkbox", "data-s": i, "data-k": "correo", checked: s.correo !== false}), " Servidor de correo: si detecta uno en marcha (Mailu, mailcow, Postfix...), aceptar sus puertos 25, 465, 587, 993 y 995"),
       detectorWebs(s),
+      scriptLectura(s),
       k ? h("div", {}, avisoPanel(), k.fila, s.id && info.clave_guardada ? probarPanel(s) : null) : (s.panel === "easypanel"
         ? h("p", {class: "ayuda"}, "EasyPanel no tiene clave de solo lectura (la clave de su API puede cambiar y borrar cosas), así que por ahora no se lee su API: el estado sale por SSH.")
         : s.panel ? h("p", {class: "ayuda"}, "Guarda los ajustes y aquí podrás poner la clave del panel.") : null));
+  }
+
+  /* versión del script de lectura que tiene el servidor y botón para ponerle la que trae la app (sin volver a darlo de alta) */
+  function scriptLectura(s){
+    if (!s.id || !s.ssh) return null;
+    const sc = A.scripts || {}, v = (sc.servidores || {})[s.nombre], ultima = sc.ultima;
+    const viejo = v != null && ultima != null && v < ultima;
+    const host = String(s.ssh).split("@").pop();
+    const zona = h("div");
+    const estado = v == null ? "versión aún sin leer" : "versión " + v + (viejo ? " · hay una nueva (" + ultima + ")" : " · al día");
+    return h("div", {style: "margin-top:8px"},
+      h("div", {style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap"},
+        h("span", {class: "chip" + (viejo ? " aviso" : "")}, "Script de lectura: " + estado),
+        h("button", {onclick: ev => {
+          ev.target.disabled = true;
+          zona.replaceChildren(altaGuiada({nombre: s.nombre, admin: s.ssh_admin || "root@" + host, puerto: parseInt(s.puerto, 10) || 22}));
+        }}, "Actualizar script")),
+      zona);
   }
 
   function avisoPanel(){

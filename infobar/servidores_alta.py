@@ -26,6 +26,18 @@ from .servidores_registro import nuevo_id
 
 REMOTO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "remoto")
 SCRIPTS = ("instalar-en-servidor.sh", "recoger.sh", "recoger-root.sh")
+
+
+def version_script():
+    """Versión del recoger.sh que trae esta app (la línea tras «### version»), o None si no se puede leer."""
+    try:
+        with open(os.path.join(REMOTO, "recoger.sh"), encoding="utf-8") as f:
+            lineas = f.read().splitlines()
+        i = lineas.index('echo "### version"')
+        v = lineas[i + 1].split("#")[0].replace("echo", "").strip()
+        return int(v) if v.isdecimal() else None
+    except (OSError, ValueError, IndexError):
+        return None
 CONOCIDAS = os.path.expanduser("~/.ssh/known_hosts")
 _USUARIO = re.compile(r"[A-Za-z_][A-Za-z0-9._-]{0,31}")
 _HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}")
@@ -57,6 +69,7 @@ MENSAJES = {
     "fallo_prueba": "Se instaló pero la prueba de lectura como «infobar» falló (¿AllowUsers? ¿otro puerto?). El servidor no se ha añadido.",
     "fallo_huella": "No se pudo obtener la huella del servidor.",
     "hecho": "Servidor añadido. La barra lo leerá en el próximo ciclo (unos 5 minutos).",
+    "hecho_actualiza": "Scripts actualizados. La barra usará la versión nueva en la próxima lectura (unos 5 minutos).",
     "nombre_repetido": "Ya hay un servidor con ese nombre.",
     "espera": "Espera unos segundos antes de reintentar (así no se bloquea tu servidor por intentos seguidos).",
     "ocupado": "Ya hay un alta en marcha.",
@@ -304,7 +317,7 @@ def _probar_y_guardar(job):
     if error or "version" not in sec:
         raise AltaError("fallo_prueba")
     _guardar_servidor(job)
-    job.pon("hecho", "hecho")
+    job.pon("hecho", "hecho_actualiza" if job.ya_instalado else "hecho")
 
 
 def _guardar_servidor(job):
