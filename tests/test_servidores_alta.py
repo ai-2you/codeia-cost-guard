@@ -373,14 +373,18 @@ class EntradasHostilesTest(Base):
             self.assertEqual((codigo, r["codigo"]), (400, "entrada_invalida"), m)
         self.assertEqual(self.llamadas(), [])
 
+    def test_ids_desconocidos_no_tocan_nada(self):
+        # sin skipIf: alta.atiende() con un id desconocido es un simple lookup en el dict _ALTAS
+        # (ver _busca() en infobar/servidores_alta.py), no toca ssh/subprocess/filesystem
+        for accion in ("huella", "instalar", "comprobar", "estado"):
+            for cuerpo in ({"id": "no-existe"}, {}, {"id": 5}, None, "x"):
+                self.assertEqual(alta.atiende(accion, cuerpo)[1]["codigo"], "desconocida", (accion, cuerpo))
+
     @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
                      "shebang ejecutados directamente (tecnica POSIX); Windows no "
                      "interpreta el shebang al ejecutar un fichero sin extension, asi "
                      "que estos fakes no sustituyen al binario real aqui")
-    def test_ids_y_pasos_incorrectos(self):
-        for accion in ("huella", "instalar", "comprobar", "estado"):
-            for cuerpo in ({"id": "no-existe"}, {}, {"id": 5}, None, "x"):
-                self.assertEqual(alta.atiende(accion, cuerpo)[1]["codigo"], "desconocida", (accion, cuerpo))
+    def test_pasos_incorrectos_segun_el_estado_del_alta(self):
         id_ = self.diagnostica()
         self.espera(id_)                                                                  # estado «huella»
         self.assertEqual(alta.atiende("instalar", {"id": id_})[1]["codigo"], "estado_incorrecto")
