@@ -226,6 +226,10 @@ input.num-in{width:9.5rem;text-align:right;font-family:var(--mono)} input.ancho,
 select{-webkit-appearance:none;appearance:none;padding-right:30px;cursor:pointer;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 10px center}
+/* las opciones del desplegable son una superposicion nativa del SO, no heredan el --panel-2 translucido
+   de forma fiable (compone mal sin el fondo de la pagina detras): fondo solido explicito para que el
+   texto siempre tenga contraste de verdad (WCAG 2.2), en los dos temas */
+select option{background:var(--fondo);color:var(--texto)}
 #vista-ajustes td,#vista-ajustes th{cursor:default;vertical-align:middle}
 .prov{border-top:1px solid var(--borde-f);padding:16px 0} .prov:first-of-type{border-top:0;padding-top:4px}
 .prov-cab{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
