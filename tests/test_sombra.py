@@ -94,7 +94,8 @@ class TestRegistrar(BaseConsulta):
         self.assertEqual(res["claude"]["dias"], 1)               # ni hoy (abierto) ni hace 40 días
         self.assertEqual(res["claude"]["iguales"], 1)
         ruta = os.path.join(rutas.DATOS, "sombra.jsonl")
-        self.assertEqual(stat.S_IMODE(os.stat(ruta).st_mode), 0o600)
+        if os.name != "nt":                                   # NTFS no tiene bits de permiso POSIX
+            self.assertEqual(stat.S_IMODE(os.stat(ruta).st_mode), 0o600)
         with open(ruta, encoding="utf-8") as f:
             linea = json.loads(f.readline())
         self.assertNotIn("x/y/z", json.dumps(linea))

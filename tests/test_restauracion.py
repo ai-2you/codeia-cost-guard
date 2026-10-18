@@ -93,6 +93,9 @@ class TestRestaurar(Base):
             self.restaura()
         self.assertEqual(claves_de(self.destino), ["claude:vieja"])
 
+    @unittest.skipIf(os.name == "nt", "el test deja adrede una conexión SQLite abierta sobre el -wal huérfano para evitar el checkpoint "
+                     "automático del cierre; en Windows la VFS de SQLite no pide FILE_SHARE_DELETE, así que _borra_wal no puede borrar "
+                     "un fichero con esa conexión todavía abierta (en POSIX sí se puede, por eso el test solo tiene sentido ahí)")
     def test_el_wal_de_la_base_antigua_no_resucita(self):
         # la base antigua tiene una fila que SOLO vive en su -wal (la conexión abierta impide el checkpoint)
         viva = base_con(self.destino, ["claude:vieja-checkpoint"], True)
@@ -117,6 +120,9 @@ class TestRestaurar(Base):
         self.assertFalse(os.path.exists(self.destino + "-wal"))
         con.close()
 
+    @unittest.skipIf(os.name == "nt", "el test deja un lector con una transacción abierta durante toda la restauración; en Windows la "
+                     "VFS de SQLite no pide FILE_SHARE_DELETE, así que no se puede borrar/sustituir la base con ese lector todavía "
+                     "conectado (en POSIX sí, por eso el escenario solo es reproducible ahí)")
     def test_wal_huerfano_con_un_lector_abierto_no_resucita(self):
         # un lector con la lectura abierta impide que el cierre borre el -wal: queda un WAL con filas que no están en la base
         base_con(self.destino, ["claude:vieja"])
@@ -140,7 +146,8 @@ class TestRestaurar(Base):
         r = self.restaura(forzar=True)
         self.assertTrue(r["copia_previa"] and os.path.exists(r["copia_previa"]))
         self.assertEqual(claves_de(r["copia_previa"]), ["claude:vieja"])
-        self.assertEqual(oct(os.stat(r["copia_previa"]).st_mode & 0o777), "0o600")
+        if os.name != "nt":                                   # NTFS no tiene bits de permiso POSIX
+            self.assertEqual(oct(os.stat(r["copia_previa"]).st_mode & 0o777), "0o600")
 
     def test_si_hay_otro_escritor_no_toca_nada(self):
         viva = base_con(self.destino, ["claude:vieja"], True)

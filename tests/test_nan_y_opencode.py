@@ -110,7 +110,11 @@ class OpenCodeTest(unittest.TestCase):
         con.execute("insert into message values ('m9', 's1', ?, ?)", (int(time.time() * 1000), json.dumps(uso)))
         con.commit()
         con.close()
-        os.utime(self.db, None)
+        # tocar con un mtime claramente futuro, no con "ahora": en Windows la resolucion real del
+        # reloj de ficheros puede ser mas gruesa que el tiempo que tarda este test en ejecutarse, y
+        # "ahora" puede coincidir con el mtime que ya capturo la cache de leer_bases() de arriba.
+        futuro = time.time() + 5
+        os.utime(self.db, (futuro, futuro))
         proyectos, _ = lectores_logs.leer_bases()
         self.assertEqual(self._total(proyectos), 2 * (100 + 20 + 50 + 5) + 2)
 

@@ -74,8 +74,10 @@ class TestProcesos(unittest.TestCase):
     def test_argumentos_de_grupo_segun_el_sistema(self):
         with mock.patch.object(plataforma.os, "name", "posix"):
             self.assertEqual(plataforma.grupo_nuevo_kwargs(), {"start_new_session": True})
-        with mock.patch.object(plataforma.os, "name", "nt"), mock.patch.object(plataforma.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True):
-            self.assertEqual(plataforma.grupo_nuevo_kwargs(), {"creationflags": 512})
+        with mock.patch.object(plataforma.os, "name", "nt"), \
+             mock.patch.object(plataforma.subprocess, "CREATE_NEW_PROCESS_GROUP", 512, create=True), \
+             mock.patch.object(plataforma.subprocess, "CREATE_NO_WINDOW", 256, create=True):
+            self.assertEqual(plataforma.grupo_nuevo_kwargs(), {"creationflags": 512 | 256})
 
     def test_en_windows_se_usa_taskkill_con_arbol(self):
         falso = mock.Mock(pid=4242)

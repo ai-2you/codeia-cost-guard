@@ -70,6 +70,7 @@ class EsquemaTest(Base):
         self.con.execute("PRAGMA user_version=99")
         with self.assertRaises(Exception):
             sh.abrir()
+        self.con.close()  # en Windows no se puede borrar un fichero con una conexion abierta sobre el
         os.remove(sh.ruta())
         with self.assertRaises(sh.SinDatos):
             sh.abrir(solo_lectura=True)

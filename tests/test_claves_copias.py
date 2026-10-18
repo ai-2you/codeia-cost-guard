@@ -41,7 +41,8 @@ class TestGenerar(Base):
         ruta = os.path.join(self.fuera, "clave.txt")
         r = claves_copias.generar(ruta, self.copias)
         self.assertTrue(r["publica"].startswith("cgx1"))
-        self.assertEqual(stat.S_IMODE(os.stat(ruta).st_mode), 0o600)
+        if os.name != "nt":   # NTFS no tiene bits de permiso POSIX
+            self.assertEqual(stat.S_IMODE(os.stat(ruta).st_mode), 0o600)
         priv, avisos = claves_copias.cargar_privada(ruta)
         self.assertEqual(cgx.codificar_clave("publica", cgx.publica_de(priv)), r["publica"])
         self.assertEqual(avisos, [])
@@ -86,6 +87,8 @@ class TestGenerar(Base):
 
 
 class TestCargar(Base):
+    @unittest.skipIf(os.name == "nt", "NTFS no tiene bits de permiso POSIX; _permisos_cerrados() ya "
+                     "se salta esta comprobacion en Windows (infobar/claves_copias.py)")
     def test_permisos_abiertos_se_rechazan(self):
         ruta = os.path.join(self.fuera, "clave.txt")
         claves_copias.generar(ruta, self.copias)
@@ -127,8 +130,11 @@ class TestFirmaDelDispositivo(Base):
         a = claves_copias.clave_de_firma()
         b = claves_copias.clave_de_firma()
         self.assertEqual(a, b)
-        self.assertEqual(stat.S_IMODE(os.stat(claves_copias.ruta_firma()).st_mode), 0o600)
+        if os.name != "nt":   # NTFS no tiene bits de permiso POSIX
+            self.assertEqual(stat.S_IMODE(os.stat(claves_copias.ruta_firma()).st_mode), 0o600)
 
+    @unittest.skipIf(os.name == "nt", "NTFS no tiene bits de permiso POSIX; _permisos_cerrados() ya "
+                     "se salta esta comprobacion en Windows (infobar/claves_copias.py)")
     def test_permisos_abiertos_se_rechazan(self):
         claves_copias.clave_de_firma()
         os.chmod(claves_copias.ruta_firma(), 0o644)

@@ -154,6 +154,9 @@ class TestBaseDanadaYBarra(Base):
             almacen.quitar_marcador()
             ing.cierra()
 
+    @unittest.skipIf(os.name == "nt", "el test deja `viva` conectada a la base durante toda la restauración; en Windows la VFS de "
+                     "SQLite no pide FILE_SHARE_DELETE, así que no se puede borrar/sustituir la base con esa conexión todavía abierta "
+                     "(en POSIX sí, por eso el escenario solo es reproducible ahí)")
     def test_espera_a_que_la_barra_suelte_el_puesto(self):
         ruta = self.hace_copia()
         viva = almacen.abrir(rutas.ALMACEN)
@@ -476,6 +479,7 @@ class TestProtecciones(Base):
         cli_copias.main(["--claves-generar", os.path.join(self.fuera, "k.txt")], t)
         self.assertIn("mismo disco", t.todo)
 
+    @unittest.skipIf(os.name == "nt", "os.symlink requiere modo desarrollador o privilegio de administrador en Windows")
     def test_privada_en_la_carpeta_de_copias_con_otro_caso_o_enlace(self):
         enlace = os.path.join(self.dir, "enlace")
         os.symlink(self.carpeta, enlace)

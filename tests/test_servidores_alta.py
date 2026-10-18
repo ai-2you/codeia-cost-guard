@@ -162,6 +162,10 @@ class Base(LimpiaConfig):
 
 
 class DiagnosticoTest(Base):
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_host_desconocido_enseña_la_huella_y_no_se_conecta(self):
         r = self.espera(self.diagnostica())
         self.assertEqual((r["estado"], r["huella"]), ("huella", HUELLA))
@@ -171,6 +175,10 @@ class DiagnosticoTest(Base):
         scan = [c for c in self.llamadas() if c["prog"] == "ssh-keyscan"][0]["args"]
         self.assertIn("ed25519", scan)                                                                            # un solo tipo = una conexión
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_aceptar_la_huella_anade_exactamente_esa_linea_y_sigue(self):
         id_ = self.diagnostica()
         self.espera(id_)
@@ -186,6 +194,10 @@ class DiagnosticoTest(Base):
             self.assertEqual(f.read(), f"srv.example.com ssh-ed25519 {CLAVE_B64}\n")
         self.assertEqual(oct(os.stat(self.conocidas).st_mode & 0o777), "0o600")
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_puerto_distinto_usa_el_formato_corchetes(self):
         id_ = self.diagnostica(puerto=2222)
         self.espera(id_)
@@ -197,6 +209,10 @@ class DiagnosticoTest(Base):
         f_ = [c for c in self.llamadas() if c["prog"] == "ssh-keygen" and "-F" in c["args"]][0]["args"]
         self.assertIn("[srv.example.com]:2222", f_)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_con_huella_conocida_la_orden_ssh_es_la_endurecida(self):
         id_ = self.listo()
         ssh = [c for c in self.llamadas() if c["prog"] == "ssh"][0]["args"]
@@ -206,6 +222,10 @@ class DiagnosticoTest(Base):
         self.assertEqual((ssh[ssh.index("--") + 1], ssh[-1]), ("root@srv.example.com", alta.DIAGNOSTICO))
         self.assertEqual(ssh[ssh.index("-p") + 1], "22")
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_casos_del_diagnostico(self):
         casos = {"root": ("listo", "listo"), "sudo": ("listo", "listo"), "ninguno": ("terminal", "terminal_sudo"), "sin_systemd": ("no_soportado", "no_soportado"),
                  "allowusers": ("terminal", "allowusers")}
@@ -215,6 +235,10 @@ class DiagnosticoTest(Base):
             r = self.espera(self.diagnostica())
             self.assertEqual((r["estado"], r["codigo"]), (estado, codigo), d)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_la_huella_solo_sale_en_su_paso_y_ssh_no_hereda_el_stdin_del_proceso(self):
         r = self.espera(self.diagnostica())
         self.assertIn("huella", r)
@@ -238,6 +262,10 @@ class DiagnosticoTest(Base):
         self.assertNotIn("huella", r)
         self.assertNotIn("comprobar_en_servidor", r)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_se_ignora_el_ssh_config_del_dueño_y_se_usa_su_known_hosts(self):
         self.listo()
         ssh = [c for c in self.llamadas() if c["prog"] == "ssh"][0]["args"]
@@ -245,6 +273,10 @@ class DiagnosticoTest(Base):
         f_ = [c for c in self.llamadas() if c["prog"] == "ssh-keygen" and "-F" in c["args"]][0]["args"]
         self.assertEqual(f_[f_.index("-f") + 1], self.conocidas)                         # y se mira el MISMO known_hosts que usa el monitor
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_sin_sudo_instalado_no_es_soportado_con_su_mensaje(self):
         self.fake({"conocida": True, "sin_visudo": True})
         r = self.espera(self.diagnostica())
@@ -254,11 +286,19 @@ class DiagnosticoTest(Base):
         # `sudo -n true` de un usuario que no está en sudoers deja un «incidente» en el log del servidor y a veces un correo a root
         self.assertIn('grep -qxE "sudo|wheel|admin" && sudo -n true', alta.DIAGNOSTICO)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_ya_instalado_se_avisa(self):
         self.fake({"conocida": True, "instalado": True})
         r = self.espera(self.diagnostica())
         self.assertEqual((r["codigo"], r["ya_instalado"]), ("listo_actualiza", True))
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_terminal_ofrece_la_linea_exacta(self):
         self.fake({"conocida": True, "diag": "ninguno"})
         r = self.espera(self.diagnostica(ssh="admin@srv.example.com", puerto=2222))
@@ -268,6 +308,10 @@ class DiagnosticoTest(Base):
         r = self.espera(self.diagnostica())
         self.assertTrue(r["linea_terminal"].endswith("root@srv.example.com"))
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_errores_de_conexion_son_mensajes_cerrados_y_arman_el_enfriamiento(self):
         for fallo, codigo in (({"sin_auth": True}, "terminal_auth"), ({"cambio_huella": True}, "huella_cambio"), ({"sin_red": True}, "sin_red")):
             alta._ALTAS.clear()
@@ -277,6 +321,10 @@ class DiagnosticoTest(Base):
             self.assertEqual((r["estado"], r["codigo"]), ("error", codigo), fallo)
             self.assertEqual(alta.atiende("diagnostico", {"nombre": "x", "ssh": "root@otro.example.com"})[1]["codigo"], "espera")
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_pasado_el_enfriamiento_se_puede_reintentar(self):
         self.fake({"conocida": True, "sin_red": True})
         self.espera(self.diagnostica())
@@ -285,6 +333,10 @@ class DiagnosticoTest(Base):
         codigo, r = alta.atiende("diagnostico", {"nombre": "x", "ssh": "root@otro.example.com"}, ahora=time.time() + alta.ENFRIAMIENTO_S + 1)
         self.assertEqual(codigo, 200)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_nada_crudo_del_servidor_llega_a_la_respuesta(self):
         for cambios in ({}, {"diag": "ninguno"}, {"sin_auth": True}, {"sin_red": True}, {"instalar_rc": 1}):
             alta._ALTAS.clear()
@@ -298,6 +350,10 @@ class DiagnosticoTest(Base):
             self.assertNotIn(SECRETO, json.dumps(r), cambios)
             self.assertIn(r["codigo"], alta.MENSAJES, cambios)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_escaneo_fallido(self):
         self.fake({"sin_escaneo": True})
         r = self.espera(self.diagnostica())
@@ -317,6 +373,10 @@ class EntradasHostilesTest(Base):
             self.assertEqual((codigo, r["codigo"]), (400, "entrada_invalida"), m)
         self.assertEqual(self.llamadas(), [])
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_ids_y_pasos_incorrectos(self):
         for accion in ("huella", "instalar", "comprobar", "estado"):
             for cuerpo in ({"id": "no-existe"}, {}, {"id": 5}, None, "x"):
@@ -327,6 +387,10 @@ class EntradasHostilesTest(Base):
         self.assertEqual(alta.atiende("comprobar", {"id": id_})[1]["codigo"], "estado_incorrecto")
         self.assertEqual(alta.atiende("rara", {"id": id_})[0], 404)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_un_alta_a_la_vez(self):
         self.fake({"conocida": True, "espera": 1.0})
         id_ = self.diagnostica()
@@ -334,11 +398,19 @@ class EntradasHostilesTest(Base):
         self.assertEqual((codigo, r["codigo"]), (429, "ocupado"))
         self.espera(id_)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_las_altas_viejas_se_olvidan(self):
         id_ = self.listo()
         alta.atiende("estado", {"id": id_}, ahora=time.time() + alta.VIDA_S + 5)
         self.assertEqual(alta.atiende("estado", {"id": id_})[1]["codigo"], "desconocida")
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_una_alta_en_curso_no_se_olvida_por_vieja(self):
         self.fake({"conocida": True, "espera": 1.5})
         id_ = self.diagnostica()
@@ -346,6 +418,10 @@ class EntradasHostilesTest(Base):
         self.assertEqual(alta.atiende("estado", {"id": id_})[1]["estado"], "en_curso")
         self.espera(id_)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_tope_de_altas_guardadas(self):
         for i in range(alta.MAX_ALTAS):
             self.listo()
@@ -365,6 +441,10 @@ class InstalacionTest(Base):
         self.assertEqual(codigo, 200)
         return id_, self.espera(id_, ("hecho", "error"))
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_instala_con_un_tar_por_stdin_prueba_y_guarda(self):
         id_, r = self.instala()
         self.assertEqual((r["estado"], r["codigo"]), ("hecho", "hecho"))
@@ -386,12 +466,20 @@ class InstalacionTest(Base):
         self.assertEqual((servidor["ssh"], len(servidor["id"]), "puerto" in servidor), ("infobar@srv.example.com", 32, False))
         self.assertEqual(len([c for c in self.llamadas() if c["prog"] == "ssh"]), 3)    # diagnóstico, instalación y prueba: tres conexiones en total
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_con_sudo_sin_contrasena_usa_sudo_n(self):
         id_, r = self.instala(diag="sudo")
         self.assertEqual(r["estado"], "hecho")
         orden = [c for c in self.llamadas() if c["prog"] == "ssh" and any("instalar-en-servidor.sh" in a for a in c["args"])][0]["args"][-1]
         self.assertIn('sudo -n bash "$d/instalar-en-servidor.sh"', orden)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_puerto_distinto_se_guarda(self):
         self.fake({"conocida": True})
         id_ = self.diagnostica(puerto=2222)
@@ -401,6 +489,10 @@ class InstalacionTest(Base):
         servidor = [s for s in config_y_estado.cfg()["servidores"] if s["nombre"] == "nuevo"][0]
         self.assertEqual(servidor["puerto"], 2222)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_genera_la_clave_dedicada_si_falta_y_la_valida(self):
         self.assertFalse(os.path.exists(self.clave))
         id_, r = self.instala()
@@ -409,6 +501,10 @@ class InstalacionTest(Base):
         self.assertEqual(oct(os.stat(self.clave).st_mode & 0o777), "0o600")
         self.assertEqual(r["estado"], "hecho")
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_una_clave_publica_rara_no_se_usa(self):
         for publica in ("ssh-rsa AAAA", PUB + "'; rm -rf /; '", "ssh-ed25519 " + CLAVE_B64 + " co mentario", "", "ssh-ed25519 corta"):
             alta._ALTAS.clear()
@@ -422,26 +518,47 @@ class InstalacionTest(Base):
             r = self.espera(id_, ("hecho", "error"))
             self.assertEqual((r["estado"], r["codigo"]), ("error", "sin_clave"), publica)
         self.assertFalse(any("instalar-en-servidor.sh" in " ".join(c["args"]) for c in self.llamadas() if c["prog"] == "ssh"))
+
+    def test_una_clave_con_intento_de_inyeccion_no_genera_comando(self):
+        # sin skipIf: comando_instalacion() solo valida con regex en Python puro, no toca ssh/ssh-keygen
+        # ni el sistema de ficheros, asi que esta comprobacion (que la clave no cuela en el comando remoto)
+        # corre igual en Windows que en POSIX
         with self.assertRaises(alta.AltaError):
             alta.comando_instalacion("ssh-ed25519 x'; id #", True)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_un_255_de_ssh_no_es_un_fallo_de_instalacion(self):
         id_, r = self.instala(instalar_rc=255)
         self.assertEqual((r["estado"], r["codigo"]), ("error", "terminal_auth"))
         self.assertFalse(any(s["nombre"] == "nuevo" for s in config_y_estado.cfg()["servidores"]))
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_si_la_instalacion_falla_no_se_guarda_nada(self):
         antes = json.dumps(config_y_estado.cfg()["servidores"], sort_keys=True)
         id_, r = self.instala(instalar_rc=1)
         self.assertEqual((r["estado"], r["codigo"]), ("error", "fallo_instalacion"))
         self.assertEqual(json.dumps(config_y_estado.cfg()["servidores"], sort_keys=True), antes)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_si_la_prueba_falla_no_se_guarda_nada(self):
         antes = json.dumps(config_y_estado.cfg()["servidores"], sort_keys=True)
         id_, r = self.instala(prueba_ok=False)
         self.assertEqual((r["estado"], r["codigo"]), ("error", "fallo_prueba"))
         self.assertEqual(json.dumps(config_y_estado.cfg()["servidores"], sort_keys=True), antes)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_repetir_el_alta_no_duplica_y_un_nombre_ocupado_se_rechaza(self):
         self.instala()
         alta._ALTAS.clear()
@@ -458,6 +575,10 @@ class InstalacionTest(Base):
         r = self.espera(id_, ("hecho", "error"))
         self.assertEqual((r["estado"], r["codigo"]), ("error", "nombre_repetido"))
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_actualizar_un_servidor_ya_instalado_lo_dice_y_no_lo_duplica(self):
         self.instala()
         alta._ALTAS.clear()
@@ -469,6 +590,10 @@ class InstalacionTest(Base):
         self.assertIsInstance(alta.version_script(), int)
         self.assertGreaterEqual(alta.version_script(), 3)
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_comprobar_tras_el_terminal_prueba_y_guarda(self):
         self.fake({"conocida": True, "diag": "ninguno"})
         id_ = self.diagnostica()
@@ -478,6 +603,10 @@ class InstalacionTest(Base):
         self.assertEqual(self.espera(id_, ("hecho", "error"))["estado"], "hecho")
         self.assertTrue(any(s["nombre"] == "nuevo" for s in config_y_estado.cfg()["servidores"]))
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_comprobar_sin_haber_hecho_el_alta_falla_y_no_guarda(self):
         self.fake({"conocida": True, "diag": "ninguno", "prueba_ok": False})
         id_ = self.diagnostica()
@@ -512,6 +641,10 @@ class ComandoRemotoTest(Base):
         with open(registro) as f:
             return [json.loads(l) for l in f], _re
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_directorio_temporal_aleatorio_privado_y_borrado(self):
         a, _re = self.corre(True)
         b, _ = self.corre(True)
@@ -524,6 +657,10 @@ class ComandoRemotoTest(Base):
             self.assertFalse(os.path.exists(visto["dir"]))                            # y el trap lo borra
         self.assertNotEqual(a[-1]["dir"], b[-1]["dir"])                               # nunca una ruta fija
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_sudo_solo_si_no_es_root_y_se_limpia_aunque_falle(self):
         sudo_log = os.path.join(self.dir, "sudo.log")
         self.corre(True)
@@ -597,6 +734,10 @@ class RutasHttpTest(Base):
         self.assertEqual(self.pide("GET", "/servidores/alta/estado?id=x", cookie=False, tipo=None, origen=False)[0], 401)
         self.assertEqual(self.llamadas(), [])
 
+    @unittest.skipIf(os.name == "nt", "fake ssh/ssh-keygen/ssh-keyscan son scripts con "
+                     "shebang ejecutados directamente (tecnica POSIX); Windows no "
+                     "interpreta el shebang al ejecutar un fichero sin extension, asi "
+                     "que estos fakes no sustituyen al binario real aqui")
     def test_flujo_completo_por_http(self):
         self.fake({"conocida": True})
         codigo, r = self.pide("POST", "/servidores/alta/diagnostico", {"nombre": "web1", "ssh": "root@srv.example.com"})

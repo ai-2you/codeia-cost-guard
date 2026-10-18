@@ -213,6 +213,9 @@ class PlantillaConDockerRealTest(unittest.TestCase):
             self.assertNotIn(prohibido, self.plantilla())
 
 
+@unittest.skipIf(os.name == "nt", "ejecuta recoger-root.sh de verdad con bash, con symlinks a "
+                 "timeout/tac (os.symlink necesita Modo Desarrollador o admin en Windows); el "
+                 "script es para servidores remotos Linux, no para el cliente")
 class ScriptRootInventarioTest(unittest.TestCase):
     """recoger-root.sh de verdad con un `docker` falso: ids, orden por antigüedad, tope de 200, truncado y fuente."""
 

@@ -88,8 +88,14 @@ class ProtocoloTest(unittest.TestCase):
         self.assertEqual(ss.secciones("### disco\n10 5\n### raro\nx\n"), {"disco": ["10 5"]})
 
     def test_ssh_con_salida_enorme_deja_pasar_lo_que_cabe(self):
-        cuerpo = "### version\n2\n### sistema\n0.1 0.1 0.1 1/1 1\n4\n100\n### disco\n" + "x" * (2 * ss.TOPE_BYTES)
-        orden = ["python3", "-c", f"import sys; sys.stdout.write({cuerpo!r})"]
+        prefijo = "### version\n2\n### sistema\n0.1 0.1 0.1 1/1 1\n4\n100\n### disco\n"
+        n = 2 * ss.TOPE_BYTES
+        # sys.executable en vez de "python3": ese nombre no existe tal cual en Windows (y en esta
+        # maquina en concreto resuelve al alias roto de la Microsoft Store), pero el interprete que
+        # ya esta corriendo si esta disponible en los tres sistemas.
+        # El relleno se genera dentro del hijo ('x' * n) en vez de pasarlo como literal: embebido
+        # en el argumento de -c supera el limite de linea de comandos de Windows (WinError 206).
+        orden = [sys.executable, "-c", f"import sys; sys.stdout.write({prefijo!r} + 'x' * {n})"]
         with mock.patch.object(ss, "orden_ssh", return_value=orden):
             salida, error = ss.ejecutar({"nombre": "a", "ssh": "h"})
         self.assertEqual(error, "")
@@ -286,6 +292,9 @@ class ScriptBase(unittest.TestCase):
 
 
 @REQUISITOS
+@unittest.skipIf(os.name == "nt", "ejecuta recoger.sh de verdad con bash contra un journalctl "
+                 "falso (tecnica POSIX); el script es para servidores remotos Linux, no para "
+                 "el cliente, asi que no tiene sentido exigir bash local en Windows")
 class ScriptRealTest(ScriptBase):
     def test_sintaxis(self):
         r = subprocess.run(["bash", "-n", SCRIPT], capture_output=True, text=True)
@@ -445,6 +454,8 @@ class ScriptRealTest(ScriptBase):
 
 
 @REQUISITOS
+@unittest.skipIf(os.name == "nt", "ejecuta recoger.sh de verdad con bash (tecnica POSIX); el "
+                 "script es para servidores remotos Linux, no para el cliente")
 class ScriptLentoTest(ScriptBase):
     """Todo lo lento a la vez: el último escritor del canal ha de cerrarlo antes del tope del Mac menos la conexión."""
     lento_corto = False
@@ -490,6 +501,8 @@ class RootRealTest(unittest.TestCase):
     def ejecuta(self):
         return subprocess.run(["bash", self.script], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL).stdout
 
+    @unittest.skipIf(os.name == "nt", "falso() escribe binarios falsos con shebang sin extension "
+                     "(tecnica POSIX); recoger-root.sh (via bash) no los invoca igual en Windows")
     def test_rapido_declara_cero_omitidos(self):
         for n in ("docker", "sshd", "ufw", "iptables", "systemctl", "fail2ban-client"):
             self.falso(n, 0)
@@ -499,6 +512,8 @@ class RootRealTest(unittest.TestCase):
         self.assertEqual(sec["fin_root"], ["omitidos 0"])
         self.assertFalse(invalidas)
 
+    @unittest.skipIf(os.name == "nt", "falso() escribe binarios falsos con shebang sin extension "
+                     "(tecnica POSIX); recoger-root.sh (via bash) no los invoca igual en Windows")
     def test_lento_declara_omitidos_y_el_mac_descarta_las_secciones_de_root(self):
         for n in ("docker", "sshd", "ufw", "iptables", "systemctl", "fail2ban-client"):
             self.falso(n, 2.5)
@@ -511,6 +526,8 @@ class RootRealTest(unittest.TestCase):
         self.assertFalse(d["con_root"])                                     # sin root: sin comprobaciones de root, no ceros ni alarmas
         self.assertNotIn("fail2ban", d)
 
+    @unittest.skipIf(os.name == "nt", "falso() escribe binarios falsos con shebang sin extension "
+                     "(tecnica POSIX); recoger-root.sh (via bash) no los invoca igual en Windows")
     def test_un_comando_que_agota_su_tiempo_tambien_se_declara(self):
         for n in ("sshd", "ufw", "iptables", "systemctl", "fail2ban-client"):
             self.falso(n, 0)
