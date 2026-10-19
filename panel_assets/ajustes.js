@@ -407,7 +407,14 @@
   }
 
   function pinta(){
-    return secciones().filter(Boolean);
+    // $("vista-ajustes").replaceChildren(...pinta()) reconstruye todos los <details> desde cero: sin esto,
+    // cualquier "Añadir proveedor/servidor/presupuesto" repliega de golpe la seccion que el usuario acaba
+    // de usar. Se lee que estaba abierto en el DOM VIEJO (todavia presente, replaceChildren aun no corrio)
+    // y se reaplica por titulo a los <details> nuevos.
+    const abiertas = new Set([...document.querySelectorAll("#vista-ajustes > details.seccion[open] > summary")].map(s => s.textContent));
+    const nodos = secciones().filter(Boolean);
+    nodos.forEach(n => { if (n.tagName === "DETAILS" && abiertas.has(n.querySelector(":scope > summary").textContent)) n.open = true; });
+    return nodos;
   }
 
   /* vuelca lo escrito en el formulario a A.config */
