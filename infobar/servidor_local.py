@@ -322,7 +322,7 @@ def crear_servidor(puerto=PUERTO):
                     webbrowser.open(f"http://127.0.0.1:{puerto}/entrar?t={t}")
                     self._json(200, {"ok": True})
                 except Exception as e:
-                    self._json(500, {"ok": False, "error": str(e)})
+                    self._json(500, {"ok": False, "error": str(e)[:200]})
             elif ruta == "/guia":
                 try:
                     with open(f"{base}/GUIA.md", encoding="utf-8") as f:

@@ -13,7 +13,10 @@
     return e;
   }
   /* seccion principal de Ajustes, replegada por defecto: <details> nativo (teclado/lector de
-     pantalla gratis), con el mismo aspecto de tarjeta que el resto del panel */
+     pantalla gratis), con el mismo aspecto de tarjeta que el resto del panel. `titulo` debe ser
+     unico y fijo entre pintados: pinta() lo usa para saber que secciones seguian abiertas tras
+     repintar (ver repinta()) -- dos secciones con el mismo titulo, o un titulo que cambie de un
+     pintado a otro (p. ej. con un contador), rompen esa comprobacion en silencio. */
   function seccionReplegable(titulo, ...hijos){ return h("details", {class: "seccion"}, h("summary", {}, titulo), ...hijos); }
   const entero = v => Math.max(0, parseInt(String(v).replace(/[\s._]/g, ""), 10) || 0);
   const lista = t => t.split(",").map(x => x.trim()).filter(Boolean);
@@ -105,7 +108,7 @@
     }
     function recarga(){
       leer();
-      fetch("/ajustes").then(r => r.json()).then(d => { A.config.servidores = (d.config && d.config.servidores) || []; A.config.servidores_rev = d.config && d.config.servidores_rev; $("vista-ajustes").replaceChildren(...pinta()); });
+      fetch("/ajustes").then(r => r.json()).then(d => { A.config.servidores = (d.config && d.config.servidores) || []; A.config.servidores_rev = d.config && d.config.servidores_rev; repinta(); });
     }
     function terminal(r){
       if (!r.linea_terminal) return [];
@@ -159,7 +162,7 @@
         if (r.conflicto) {      // un alta (u otra pestaña) cambió la lista: se trae la actual y se conserva lo demás
           return fetch("/ajustes").then(x => x.json()).then(d => {
             A.config.servidores = (d.config && d.config.servidores) || []; A.config.servidores_rev = d.config && d.config.servidores_rev;
-            $("vista-ajustes").replaceChildren(...pinta());
+            repinta();
           });
         }
         if (!r.ok) { salida.replaceChildren(h("p", {class: "msg err"}, r.mensaje || "No se pudo guardar.")); return; }
@@ -168,7 +171,7 @@
         const actual = (s.webs || []).filter(u => !quita.has(u) && ![...quita].some(q => !q.startsWith("http") && u.split("/")[2] === q));
         for (const u of anade) if (!actual.includes(u)) actual.push(u);
         s.webs = actual.length ? actual : undefined; A.config.servidores_rev = r.servidores_rev;
-        $("vista-ajustes").replaceChildren(...pinta());
+        repinta();
       }).catch(e => salida.replaceChildren(h("p", {class: "msg err"}, "No se pudo hablar con la barra: " + e)));
     }
     function dibuja(r){
@@ -248,7 +251,7 @@
     const k = info ? filaClave({cuenta: info.cuenta}, info, "Clave de miembro de " + (s.panel === "dokploy" ? "Dokploy" : "el panel")) : null;
     return h("div", {class: "prov", "data-servidor": i},
       h("div", {class: "prov-cab"}, h("strong", {}, s.nombre || "(sin nombre)"), k ? k.estado : null,
-        h("button", {onclick: () => { leer(); A.config.servidores.splice(i, 1); $("vista-ajustes").replaceChildren(...pinta()); }}, "Quitar servidor")),
+        h("button", {onclick: () => { leer(); A.config.servidores.splice(i, 1); repinta(); }}, "Quitar servidor")),
       h("div", {class: "campos"}, f("Nombre", "nombre", "produccion"), f("SSH (usuario@IP)", "ssh", "infobar@203.0.113.10"), f("SSH admin (botón Terminal)", "ssh_admin", "tuusuario@203.0.113.10"),
         f("Puerto SSH", "puerto", "22"), h("label", {}, "Panel", panel), f("URL del panel (https)", "panel_url", "https://dokploy.example.com"),
         editorWebs(s)),
@@ -329,7 +332,7 @@
       h("td", {}, h("input", {class: "num-in", "data-pk": "tokens", value: f.tokens || "", inputmode: "numeric", placeholder: "tokens"})),
       h("td", {}, uso, barra),
       h("td", {}, h("button", {onclick: ev => { leer(); const i = [...ev.target.closest("tbody, table").querySelectorAll("[data-pres]")].indexOf(ev.target.closest("tr"));
-        A.config.presupuestos.splice(i, 1); $("vista-ajustes").replaceChildren(...pinta()); }}, "Quitar")));
+        A.config.presupuestos.splice(i, 1); repinta(); }}, "Quitar")));
   }
   function seccionPresupuestos(c){
     const P = A.presupuestos || {disponible: false, motivo: "", estados: []};
@@ -343,7 +346,7 @@
       h("datalist", {id: "nombres-presupuesto"}, ...nombres.map(n => h("option", {value: n}))),
       lista.length ? h("table", {id: "pres-lista"}, h("tr", {}, h("th", {}, "Ámbito"), h("th", {style: "text-align:left"}, "Nombre"), h("th", {}, "Periodo"), h("th", {}, "Tokens"), h("th", {}, "Uso"), h("th", {})),
         ...lista.map(f => filaPresupuesto(f, estado(f)))) : h("p", {class: "vacio", id: "pres-vacio"}, "Aún no hay presupuestos."),
-      h("div", {class: "prov-cab", style: "margin-top:8px"}, h("button", {onclick: () => { leer(); (c.presupuestos = c.presupuestos || []).push({ambito: "proyecto", nombre: "", periodo: "mes", tokens: 0}); $("vista-ajustes").replaceChildren(...pinta()); }}, "Añadir presupuesto"),
+      h("div", {class: "prov-cab", style: "margin-top:8px"}, h("button", {onclick: () => { leer(); (c.presupuestos = c.presupuestos || []).push({ambito: "proyecto", nombre: "", periodo: "mes", tokens: 0}); repinta(); }}, "Añadir presupuesto"),
         h("label", {style: "margin-left:14px"}, h("input", {type: "checkbox", id: "g-avisos", checked: c.avisos_presupuesto !== false}), " Avisar con una notificación del sistema")));
   }
 
@@ -373,7 +376,7 @@
           if (c.proveedores.some(p => p.nombre === n)) { alert("Ya existe ese proveedor."); return; }
           leer(); c.proveedores.push({nombre: n, modelos: [], limite_5h_tokens: 0, limite_semana_tokens: 0});
           A.proveedores.push({nombre: n, clave_guardada: false, api_soportada: n.toLowerCase() === "nan"});
-          $("vista-ajustes").replaceChildren(...pinta());
+          repinta();
         }}, "Añadir proveedor"))),
       seccionReplegable("Origen (según el log) → plan",
         h("p", {class: "ayuda"}, "Lo que dice cada log y a qué plan lo asignas. Se aplica en el siguiente refresco."),
@@ -394,7 +397,7 @@
         h("label", {style: "display:block;margin:6px 0"}, h("input", {type: "checkbox", id: "g-avisos-srv", checked: c.avisos_servidores !== false}), " Avisar con una notificación cuando un servidor tenga un problema (web caída, sin conexión, disco casi lleno, certificado a punto de caducar, contenedor en bucle)"),
         ...(c.servidores || []).map(servidor),
         altaGuiada(),
-        h("div", {class: "prov-cab", style: "margin-top:8px"}, h("button", {onclick: () => { leer(); (c.servidores = c.servidores || []).push({nombre: "", ssh: ""}); $("vista-ajustes").replaceChildren(...pinta()); }}, "Añadir servidor")),
+        h("div", {class: "prov-cab", style: "margin-top:8px"}, h("button", {onclick: () => { leer(); (c.servidores = c.servidores || []).push({nombre: "", ssh: ""}); repinta(); }}, "Añadir servidor")),
         h("div", {class: "campos", style: "margin-top:10px"},
           h("label", {}, "IPs conocidas (coma): una sesión desde otra sale en ámbar", h("input", {class: "ancho", id: "g-ips", value: (c.ips_conocidas || []).join(", ")})),
           h("label", {}, "Revisión normal (s)", h("input", {class: "num-in", id: "g-int-n", value: c.intervalo_normal_s || "", placeholder: "300", inputmode: "numeric"})),
@@ -415,6 +418,16 @@
     const nodos = secciones().filter(Boolean);
     nodos.forEach(n => { if (n.tagName === "DETAILS" && abiertas.has(n.querySelector(":scope > summary").textContent)) n.open = true; });
     return nodos;
+  }
+  /* repinta tras una mutacion (Añadir/Quitar proveedor, servidor, presupuesto...): A.config ya se cambio
+     antes de llamar aqui, asi que un fallo al construir el DOM no debe dejar la vista muda sin aviso
+     (mismo criterio que el catch() de cargar() para el fallo de red inicial) */
+  function repinta(){
+    try {
+      $("vista-ajustes").replaceChildren(...pinta());
+    } catch(e) {
+      $("vista-ajustes").replaceChildren(h("section", {}, h("p", {}, "No se pudo refrescar Ajustes: " + e.message + ". Recarga la página.")));
+    }
   }
 
   /* vuelca lo escrito en el formulario a A.config */
@@ -490,7 +503,7 @@
       if (j.conflicto) {      // un alta (u otra pestaña) cambió la lista de servidores: se trae la actual y se conserva todo lo demás que se haya escrito
         return fetch("/ajustes").then(r => r.json()).then(d => {
           A.config.servidores = (d.config && d.config.servidores) || []; A.config.servidores_rev = d.config && d.config.servidores_rev;
-          $("vista-ajustes").replaceChildren(...pinta());
+          repinta();
           const m2 = $("msg-guardar"); m2.className = "msg err";
           m2.textContent = "La lista de servidores había cambiado (por ejemplo, por un alta): la he actualizado. Revisa los servidores y vuelve a guardar; lo demás que escribiste se conserva.";
         });
