@@ -54,7 +54,10 @@ const ACCIONES = {
   setPeriodoProyecto: v => { periodoProyecto = v; pintarProyectos(); },
   vista: v => { window.vista(v); pintarCab(v); },
   refrescar: () => { const v = location.hash.slice(1); if(v) window.vista(v); else location.reload(); },
-  cambiarTema: () => cambiarTema()};
+  cambiarTema: () => cambiarTema(),
+  // el navegador externo no comparte cookies con esta ventana: el servidor abre el suyo propio con
+  // un ticket nuevo (el mismo mecanismo que usa el icono de la bandeja), no window.open() de esta URL
+  abrirNavegador: () => { fetch("/navegador").catch(() => {}); }};
 document.addEventListener("pointerdown", e => { conMayus = e.shiftKey; });
 document.addEventListener("click", e => {
   const el = e.target.closest("[data-a]");

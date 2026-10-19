@@ -31,11 +31,13 @@ button:hover{border-color:color-mix(in srgb,var(--texto) 25%,transparent)}
 button.on{background:var(--activa);color:var(--texto);border-color:transparent;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.12)}
 button:disabled{opacity:.5;cursor:default}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:2px solid color-mix(in srgb,var(--marca) 70%,transparent);outline-offset:2px}
-.vidrio,section,.tarjeta,.tj,.lista{background:var(--panel);border:1px solid var(--borde);box-shadow:var(--sombra),var(--brillo);
+.vidrio,section,.tarjeta,.tj,.lista,details.seccion{background:var(--panel);border:1px solid var(--borde);box-shadow:var(--sombra),var(--brillo);
   -webkit-backdrop-filter:blur(24px) saturate(1.5);backdrop-filter:blur(24px) saturate(1.5)}
 
 /* --- cabecera: la del desplegable --- */
-.cab{display:flex;align-items:center;gap:13px;flex-wrap:wrap}
+.cab{display:flex;align-items:center;gap:13px;flex-wrap:nowrap}
+.cab-tit{min-width:0;flex:1 1 auto}
+.cab-tit h1,.cab-tit .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .escudo{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;flex:none;background:color-mix(in srgb,var(--verde) 20%,transparent);color:var(--verde)}
 .escudo.ambar{background:color-mix(in srgb,var(--ambar) 20%,transparent);color:var(--ambar)}
 .escudo svg{width:22px;height:22px}
@@ -208,17 +210,18 @@ tr:last-child td{border-bottom:0}
 .grafico-svg .barra-v{fill:var(--marca)}
 .grafico-svg rect{shape-rendering:geometricPrecision}
 
-/* --- ajustes: menú de secciones a la izquierda, una sección a la derecha --- */
-.ajustes{display:grid;grid-template-columns:240px minmax(0,1fr);gap:14px;align-items:start}
-@media (max-width:820px){.ajustes{grid-template-columns:minmax(0,1fr)}}
-.menu-aj{display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:16px;position:sticky;top:16px}
-.menu-aj button{border:0;background:none;box-shadow:none;text-align:left;padding:8px 10px;border-radius:9px;font-size:13px;color:var(--suave);display:flex;align-items:center;gap:9px}
-.menu-aj button svg{width:16px;height:16px;flex:none;opacity:.8}
-.menu-aj button:hover{color:var(--texto)}
-.menu-aj button.on{background:var(--activa);color:var(--texto);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.1)}
-@media (max-width:820px){.menu-aj{flex-direction:row;overflow-x:auto;position:static}.menu-aj button{white-space:nowrap}}
-.aj-cuerpo{display:flex;flex-direction:column;gap:14px;min-width:0}
-#vista-ajustes section{margin-bottom:0}
+/* --- ajustes: cada seccion principal es un <details>, replegado por defecto --- */
+#vista-ajustes{display:flex;flex-direction:column;gap:14px}
+details.seccion{border-radius:16px;padding:14px 16px}
+details.seccion>summary{font-size:10.5px;font-weight:600;color:var(--tenue);text-transform:uppercase;letter-spacing:.13em;
+  cursor:pointer;list-style:none;display:flex;align-items:center;gap:7px}
+details.seccion>summary::-webkit-details-marker{display:none}
+details.seccion>summary::before{content:"";width:0;height:0;flex:none;
+  border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent var(--tenue);
+  transition:transform .15s}
+details.seccion[open]>summary::before{transform:rotate(90deg)}
+details.seccion[open]>summary{margin-bottom:10px}
+details.seccion>summary:hover{color:var(--texto)}
 .ayuda{color:var(--suave);font-size:12.5px;margin:-4px 0 12px}
 input,select,textarea{font:inherit;font-size:13px;padding:7px 10px;border-radius:9px;border:1px solid var(--borde);background:var(--panel-2);color:var(--texto);max-width:100%}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--marca)}

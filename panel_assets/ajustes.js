@@ -12,6 +12,9 @@
     for (const c of hijos.flat()) if (c != null) e.append(c.nodeType ? c : document.createTextNode(c));
     return e;
   }
+  /* seccion principal de Ajustes, replegada por defecto: <details> nativo (teclado/lector de
+     pantalla gratis), con el mismo aspecto de tarjeta que el resto del panel */
+  function seccionReplegable(titulo, ...hijos){ return h("details", {class: "seccion"}, h("summary", {}, titulo), ...hijos); }
   const entero = v => Math.max(0, parseInt(String(v).replace(/[\s._]/g, ""), 10) || 0);
   const lista = t => t.split(",").map(x => x.trim()).filter(Boolean);
   const post = (ruta, cuerpo) => fetch(ruta, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cuerpo)})
@@ -333,7 +336,7 @@
     const lista = c.presupuestos || [];          // no se crea si no existe: guardar una lista vacía impediría la migración de los presupuestos antiguos
     const estado = f => (P.estados || []).find(e => e.clave === f.ambito + "|" + f.nombre + "|" + f.periodo);
     const nombres = [...new Set([...Object.keys(A.proyectos || {}).map(k => ((c.proyectos[k] || {}).alias || k)), ...c.proveedores.map(p => p.nombre)])].sort();
-    return h("section", {}, h("h2", {}, "Presupuestos"),
+    return seccionReplegable("Presupuestos",
       h("p", {class: "ayuda"}, "Un tope de tokens por proyecto o por plan, por mes o por semana natural (de lunes a domingo). Cuentan entrada, salida y caché, como tus cuotas. ",
         "Avisa al llegar al 80 % y al 100 %, una vez por periodo. El nombre es el que ves en el panel (el alias si lo has puesto)."),
       P.disponible ? null : h("p", {class: "ayuda", style: "color:#d68910"}, P.motivo || "Los presupuestos no están disponibles."),
@@ -358,7 +361,11 @@
     const proy = Object.entries(A.proyectos).sort((a, b) => b[1] - a[1]);
     const nuevoProv = h("input", {placeholder: "Nombre del proveedor nuevo", id: "nuevo-prov"});
     return [
-      h("section", {}, h("h2", {}, "Proveedores, planes y claves"),
+      seccionReplegable("General",
+        h("div", {class: "campos"},
+          h("label", {}, "Alerta de ritmo por hora (tokens)", h("input", {class: "num-in", id: "g-hora", value: c.limite_hora_tokens || 0, inputmode: "numeric"})),
+          h("label", {}, "Modelos a ignorar (coma)", h("input", {class: "ancho", id: "g-ignorar", value: (c.ignorar || []).join(", ")})))),
+      seccionReplegable("Proveedores, planes y claves",
         h("p", {class: "ayuda"}, "Cuotas en tokens (0 = sin declarar). Las claves se guardan en el Keychain de macOS, nunca en config.json ni en git."),
         ...c.proveedores.map(proveedor),
         h("div", {class: "prov-cab", style: "margin-top:8px"}, nuevoProv, h("button", {onclick: () => {
@@ -368,12 +375,12 @@
           A.proveedores.push({nombre: n, clave_guardada: false, api_soportada: n.toLowerCase() === "nan"});
           $("vista-ajustes").replaceChildren(...pinta());
         }}, "Añadir proveedor"))),
-      h("section", {}, h("h2", {}, "Origen (según el log) → plan"),
+      seccionReplegable("Origen (según el log) → plan",
         h("p", {class: "ayuda"}, "Lo que dice cada log y a qué plan lo asignas. Se aplica en el siguiente refresco."),
         h("table", {}, h("tr", {}, h("th", {}, "Origen"), h("th", {}, "Tokens 30 d"), h("th", {style: "text-align:left"}, "Plan")),
           ...orig.map(([k, v]) => h("tr", {}, h("td", {}, h("code", {}, k)), h("td", {}, fmt(v)),
             h("td", {}, selectorPlan(k, c.aliases[k] || "")))))),
-      h("section", {}, h("h2", {}, "Proyectos"),
+      seccionReplegable("Proyectos",
         h("p", {class: "ayuda"}, "Renombra o oculta de las listas. Ocultar no cambia los totales. Los presupuestos se ponen en su propia sección."),
         proy.length ? h("table", {}, h("tr", {}, h("th", {}, "Detectado"), h("th", {}, "Tokens 30 d"), h("th", {style: "text-align:left"}, "Nombre a mostrar"), h("th", {}, "Ocultar")),
           ...proy.map(([k, v]) => { const e = c.proyectos[k] || {};
@@ -382,7 +389,7 @@
               h("td", {}, h("input", {type: "checkbox", "data-proy": k, "data-c": "oculto", checked: !!e.oculto}))); }))
           : h("p", {class: "vacio"}, "Aún no hay proyectos detectados.")),
       seccionPresupuestos(c),
-      h("section", {}, h("h2", {}, "Servidores (VPS)"),
+      seccionReplegable("Servidores (VPS)",
         h("p", {class: "ayuda"}, "Monitor por SSH de solo lectura: CPU, memoria, disco, servicios, contenedores, intentos de acceso, fail2ban, puertos abiertos y protección. Para dar de alta uno nuevo usa el formulario de abajo (o, a mano, ", h("code", {}, "infobar/remoto/alta-servidor.sh usuario@IP"), "). Guía: docs/guia-servidores.md."),
         h("label", {style: "display:block;margin:6px 0"}, h("input", {type: "checkbox", id: "g-avisos-srv", checked: c.avisos_servidores !== false}), " Avisar con una notificación cuando un servidor tenga un problema (web caída, sin conexión, disco casi lleno, certificado a punto de caducar, contenedor en bucle)"),
         ...(c.servidores || []).map(servidor),
@@ -392,34 +399,15 @@
           h("label", {}, "IPs conocidas (coma): una sesión desde otra sale en ámbar", h("input", {class: "ancho", id: "g-ips", value: (c.ips_conocidas || []).join(", ")})),
           h("label", {}, "Revisión normal (s)", h("input", {class: "num-in", id: "g-int-n", value: c.intervalo_normal_s || "", placeholder: "300", inputmode: "numeric"})),
           h("label", {}, "Revisión en incidencia (s)", h("input", {class: "num-in", id: "g-int-i", value: c.intervalo_incidencia_s || "", placeholder: "60", inputmode: "numeric"})))),
-      h("section", {}, h("h2", {}, "Copias cifradas"),
+      seccionReplegable("Copias cifradas",
         h("p", {class: "ayuda"}, "Copias diarias de la base de consumo, cifradas con una clave pública. La clave privada no está en este equipo."),
         copias(A.copias)),
-      h("section", {}, h("h2", {}, "General"),
-        h("div", {class: "campos"},
-          h("label", {}, "Alerta de ritmo por hora (tokens)", h("input", {class: "num-in", id: "g-hora", value: c.limite_hora_tokens || 0, inputmode: "numeric"})),
-          h("label", {}, "Modelos a ignorar (coma)", h("input", {class: "ancho", id: "g-ignorar", value: (c.ignorar || []).join(", ")})))),
       h("div", {class: "guardar"}, h("button", {class: "primario", onclick: guardar}, "Guardar ajustes"), h("span", {id: "msg-guardar", class: "msg"}))
     ];
   }
 
-  /* Ajustes en dos columnas: menú de secciones a la izquierda y una sección cada vez a la derecha, con su título fuera
-     de la tarjeta como en el resto del panel. Las secciones ocultas siguen en la página: leer() recoge todos los campos. */
-  let seccionActiva = null;
-  const ICONO_SECCION = {"Proveedores, planes y claves": "moneda", "Origen (según el log) → plan": "ruta", "Proyectos": "carpeta", "Presupuestos": "hucha",
-    "Servidores (VPS)": "servidor", "Copias cifradas": "copia", "General": "ajustes"};
-  const iconoDom = n => new DOMParser().parseFromString(icono(n).replace("<svg ", "<svg xmlns=\"http://www.w3.org/2000/svg\" "), "image/svg+xml").documentElement;
   function pinta(){
-    const nodos = secciones().filter(Boolean);
-    const secs = nodos.filter(n => n.tagName === "SECTION"), barraGuardar = nodos.find(n => n.classList && n.classList.contains("guardar"));
-    const sueltos = nodos.filter(n => n.tagName !== "SECTION" && n !== barraGuardar);
-    const titulos = secs.map(sec => { const t = sec.querySelector(":scope > h2"), txt = t ? t.textContent : "Ajustes"; if (t) t.remove(); return txt; });
-    if (!titulos.includes(seccionActiva)) seccionActiva = titulos[0];
-    const bloques = secs.map((sec, i) => h("div", {class: "col-f", hidden: titulos[i] !== seccionActiva}, h("div", {class: "sec"}, h("span", {}, titulos[i])), sec));
-    const menu = h("nav", {class: "menu-aj vidrio", "aria-label": "Secciones de ajustes"}, ...titulos.map((t, i) => h("button", {class: t === seccionActiva ? "on" : "", onclick: () => {
-      seccionActiva = t; menu.querySelectorAll("button").forEach((b, j) => b.classList.toggle("on", j === i)); bloques.forEach((b, j) => { b.hidden = j !== i; });
-    }}, iconoDom(ICONO_SECCION[t] || "ajustes"), t)));
-    return [h("div", {class: "ajustes"}, menu, h("div", {class: "aj-cuerpo"}, ...bloques, barraGuardar)), ...sueltos];
+    return secciones().filter(Boolean);
   }
 
   /* vuelca lo escrito en el formulario a A.config */
