@@ -143,6 +143,9 @@ class TestRestaurar(Base):
         lector.close()
         self.assertEqual(claves_de(self.destino), ["claude:nueva-1", "claude:nueva-2"])
 
+    @unittest.skipIf(os.name != "nt", "solo tiene sentido en Windows: en POSIX unlink() nunca falla "
+                      "por tener el fichero abierto, asi que os.remove() de _borra_wal acertaria a la "
+                      "primera, time.sleep no se llamaria nunca, e intentos se quedaria vacio")
     def test_un_lector_transitorio_no_aborta_la_restauracion(self):
         # mismo montaje que test_wal_huerfano_con_un_lector_abierto_no_resucita (lector + escritor con
         # autocheckpoint=0), pero aqui el lector suelta el -wal DURANTE el reintento de _borra_wal

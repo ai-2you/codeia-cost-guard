@@ -115,9 +115,10 @@ class Base(LimpiaConfig):
                 # en Windows, lanzar un nombre pelado (p.ej. "ssh") solo encuentra un .exe (nunca un
                 # fichero sin extension con shebang, aunque este antes en el PATH): la logica va en un
                 # .py de verdad (el shebang de la primera linea es un comentario inofensivo para
-                # python) y plataforma.resuelve_programa() lo encuentra y lanza con el interprete
-                # actual, sin pasar por un .cmd/cmd.exe (que reparsearia mal un comando remoto con
-                # caracteres especiales dentro, p.ej. el diagnostico que ssh manda al servidor)
+                # python); plataforma.resuelve_programa() lo encuentra via COSTGUARD_FAKES_DIR (mas
+                # abajo) y lo lanza con el interprete actual, sin pasar por un .cmd/cmd.exe (que
+                # reparsearia mal un comando remoto con caracteres especiales dentro, p.ej. el
+                # diagnostico que ssh manda al servidor)
                 with open(os.path.join(self.bin, nombre + ".py"), "w") as f:
                     f.write(fuente)
             else:
@@ -129,7 +130,8 @@ class Base(LimpiaConfig):
         self.conocidas = os.path.join(self.dir, "known_hosts")
         self.clave = os.path.join(self.dir, "infobar_ed25519")
         self.fake({})
-        for p in (mock.patch.dict(os.environ, {"PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_CFG": self.cfg_ruta, "FAKE_LOG": self.log_ruta, "FAKE_TAR": self.tar_ruta}),
+        for p in (mock.patch.dict(os.environ, {"PATH": self.bin + os.pathsep + os.environ["PATH"], "COSTGUARD_FAKES_DIR": self.bin,
+                                               "FAKE_CFG": self.cfg_ruta, "FAKE_LOG": self.log_ruta, "FAKE_TAR": self.tar_ruta}),
                   mock.patch.object(alta, "CONOCIDAS", self.conocidas), mock.patch.object(servidores_ssh, "CLAVE", self.clave)):
             p.start()
             self.addCleanup(p.stop)
