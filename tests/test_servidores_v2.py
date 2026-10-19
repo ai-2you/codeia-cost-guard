@@ -88,8 +88,12 @@ class ProtocoloTest(unittest.TestCase):
         self.assertEqual(ss.secciones("### disco\n10 5\n### raro\nx\n"), {"disco": ["10 5"]})
 
     def test_ssh_con_salida_enorme_deja_pasar_lo_que_cabe(self):
-        cuerpo = "### version\n2\n### sistema\n0.1 0.1 0.1 1/1 1\n4\n100\n### disco\n" + "x" * (2 * ss.TOPE_BYTES)
-        orden = ["python3", "-c", f"import sys; sys.stdout.write({cuerpo!r})"]
+        # la "x" se genera DENTRO del subproceso, no se pasa entera por la linea de comandos: en
+        # Windows CreateProcess tiene un tope de ~32K por linea (WinError 206 por encima de eso).
+        preambulo = "### version\n2\n### sistema\n0.1 0.1 0.1 1/1 1\n4\n100\n### disco\n"
+        # sys.executable, no "python3": en Windows ese nombre puede resolver al alias roto de la
+        # Microsoft Store (no es un interprete real) en vez de al PATH de verdad.
+        orden = [sys.executable, "-c", f"import sys; sys.stdout.write({preambulo!r} + 'x' * {2 * ss.TOPE_BYTES})"]
         with mock.patch.object(ss, "orden_ssh", return_value=orden):
             salida, error = ss.ejecutar({"nombre": "a", "ssh": "h"})
         self.assertEqual(error, "")
@@ -258,9 +262,11 @@ class ScriptBase(unittest.TestCase):
         with open(SCRIPT) as f:
             s = f.read()
         self.assertIn("export LC_ALL=C PATH=", s)
-        s = s.replace("export LC_ALL=C PATH=", f"export LC_ALL=C PATH={self.dir}:{os.path.dirname(shutil.which('timeout'))}:", 1)
+        dir_timeout = aislamiento.ruta_bash(os.path.dirname(shutil.which('timeout')))
+        # comillas: en Windows el directorio de timeout.exe trae espacios ("Program Files")
+        s = s.replace("export LC_ALL=C PATH=", f'export LC_ALL=C PATH={aislamiento.ruta_bash(self.dir)}:"{dir_timeout}":', 1)
         self.cgroup = os.path.join(self.dir, "cgroup")
-        s = s.replace("/proc/self/cgroup", self.cgroup)
+        s = s.replace("/proc/self/cgroup", aislamiento.ruta_bash(self.cgroup))
         if self.lento_corto:
             s = s.replace('[ "$lim" -gt 5 ] && lim=5;', "lim=1;")
         self.script = os.path.join(self.dir, "recoger.sh")
@@ -277,7 +283,7 @@ class ScriptBase(unittest.TestCase):
 
     def ejecuta(self, **env):
         e = dict(os.environ, **env)
-        r = subprocess.run(["bash", self.script], capture_output=True, text=True, timeout=60, env=e, stdin=subprocess.DEVNULL)
+        r = subprocess.run([aislamiento.BASH, aislamiento.ruta_bash(self.script)], capture_output=True, text=True, timeout=60, env=e, stdin=subprocess.DEVNULL)
         return r.stdout
 
     def intentos(self, salida):
@@ -288,7 +294,7 @@ class ScriptBase(unittest.TestCase):
 @REQUISITOS
 class ScriptRealTest(ScriptBase):
     def test_sintaxis(self):
-        r = subprocess.run(["bash", "-n", SCRIPT], capture_output=True, text=True)
+        r = subprocess.run([aislamiento.BASH, "-n", aislamiento.ruta_bash(SCRIPT)], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_cuenta_solo_lineas_canonicas_y_la_ip_del_ultimo_port(self):
@@ -456,7 +462,7 @@ class ScriptLentoTest(ScriptBase):
             os.chmod(os.path.join(self.dir, nombre), 0o755)
         with open(self.script) as f:
             texto = f.read()
-        texto = texto.replace("/usr/local/lib/infobar/recoger-root", os.path.join(self.dir, "raiz"))
+        texto = texto.replace("/usr/local/lib/infobar/recoger-root", aislamiento.ruta_bash(os.path.join(self.dir, "raiz")))
         with open(self.script, "w") as f:
             f.write(texto)
         t0 = time.time()
@@ -476,7 +482,9 @@ class RootRealTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir, True)
         with open(os.path.join(RAIZ, "infobar", "remoto", "recoger-root.sh")) as f:
             texto = f.read()
-        texto = texto.replace("export LC_ALL=C PATH=", f"export LC_ALL=C PATH={self.dir}:{os.path.dirname(shutil.which('timeout'))}:", 1)
+        dir_timeout = aislamiento.ruta_bash(os.path.dirname(shutil.which('timeout')))
+        # comillas: en Windows el directorio de timeout.exe trae espacios ("Program Files")
+        texto = texto.replace("export LC_ALL=C PATH=", f'export LC_ALL=C PATH={aislamiento.ruta_bash(self.dir)}:"{dir_timeout}":', 1)
         self.script = os.path.join(self.dir, "recoger-root.sh")
         with open(self.script, "w") as f:
             f.write(texto)
@@ -488,7 +496,7 @@ class RootRealTest(unittest.TestCase):
         os.chmod(ruta, 0o755)
 
     def ejecuta(self):
-        return subprocess.run(["bash", self.script], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL).stdout
+        return subprocess.run([aislamiento.BASH, aislamiento.ruta_bash(self.script)], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL).stdout
 
     def test_rapido_declara_cero_omitidos(self):
         for n in ("docker", "sshd", "ufw", "iptables", "systemctl", "fail2ban-client"):

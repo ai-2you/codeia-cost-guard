@@ -133,6 +133,10 @@ class TestRevision(Base):
         self.assertEqual(r["fallos"], 1)
         self.assertFalse(self.n_turnos()[1])
 
+    @unittest.skipIf(os.name == "nt", "simula borrar la base MIENTRAS self.ing mantiene su conexion abierta (el "
+                      "propio os.remove de este test): en Windows no se puede borrar un fichero abierto por este "
+                      "mismo proceso sin cerrar antes esa conexion, lo que cambiaria lo que se prueba (\"con la "
+                      "barra en marcha\")")
     def test_base_borrada_con_la_barra_en_marcha_se_recrea(self):
         self.fichero("a.jsonl", [linea("msg_01AAAAAAAAAAAAAAAA")])
         self.ing.vuelta()

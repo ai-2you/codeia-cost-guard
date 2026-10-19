@@ -240,7 +240,8 @@ class OpenCodeTest(BaseOC):
         self.origen = sqlite3.connect(self.ruta)
 
     def test_ruta_con_caracteres_especiales(self):
-        raro = os.path.join(os.path.dirname(self.ruta), "a#b?c d.db")
+        # "!" no "?": NTFS prohibe "?" en nombres de fichero (OSError 22, Invalid argument)
+        raro = os.path.join(os.path.dirname(self.ruta), "a#b!c d.db")
         shutil.copy(self.ruta, raro)
         self.inserta("msg_aaaa1111", datos())
         shutil.copy(self.ruta, raro)

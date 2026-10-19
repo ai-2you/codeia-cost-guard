@@ -9,6 +9,7 @@ cada sistema, separados del código y de la configuración:
 """
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 
@@ -97,6 +98,24 @@ def avisar(titulo, texto):
 
 
 # ---------------------------------------------------------------- procesos y cerrojos portables
+
+def resuelve_programa(orden):
+    """`orden` con el programa (primer elemento) resuelto a su ruta completa via PATH. En Windows, lanzar un
+    nombre pelado (sin ruta) solo encuentra `.exe` (nunca `.cmd`/`.bat` ni un fichero sin extensión, aunque
+    exista antes en el PATH); resolver primero con shutil.which deja que subprocess lance cualquiera de esos
+    correctamente. En POSIX no cambia nada (ya funciona con el nombre pelado).
+
+    Un `.py` homónimo en el PATH (p.ej. para sustituir el programa por uno de pega en los tests) se lanza
+    con el interprete actual en vez de intentar ejecutarlo directo: a diferencia de un `.cmd`, evita que
+    cmd.exe reparse argumentos con caracteres especiales (un comando remoto con `&&`/`|` dentro, como el
+    que ssh manda al servidor, rompe el `%*` de un `.cmd` - cmd.exe los interpreta como sintaxis propia)."""
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        candidato = os.path.join(d, orden[0] + ".py")
+        if os.path.isfile(candidato):
+            return [sys.executable, candidato, *orden[1:]]
+    ruta = shutil.which(orden[0])
+    return [ruta, *orden[1:]] if ruta else orden
+
 
 def sin_ventana_kwargs():
     """Argumentos de subprocess para que un programa de consola (ssh, taskkill) no abra su propia ventana en Windows: la bandeja
