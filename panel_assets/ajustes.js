@@ -115,6 +115,15 @@
               h("div", {}, boton("Copiar la línea", () => navigator.clipboard && navigator.clipboard.writeText(r.linea_terminal)), " ",
                 boton("Comprobar conexión", () => envia("comprobar", {id})))];
     }
+    /* tras un fallo la barra no vuelve a conectar en 60 s (así fail2ban no bloquea tu IP): el botón cuenta atrás en vez de contestar «espera» */
+    function botonEspera(texto, f){
+      const b = boton(texto + " (60 s)", f, {disabled: true});
+      let quedan = 60;
+      const tic = () => { if (!b.isConnected) return; quedan--; if (quedan > 0) { b.textContent = texto + " (" + quedan + " s)"; setTimeout(tic, 1000); } else { b.disabled = false; b.textContent = texto; } };
+      setTimeout(tic, 1000);
+      return b;
+    }
+    const PAUSA = "Tras un fallo hay una pausa de un minuto antes de volver a probar, para que el servidor no bloquee tu IP.";
     /* la clave no entra: línea para autorizar la clave PÚBLICA del dueño desde dentro del servidor (consola web del proveedor o una sesión abierta) */
     function autoriza(r){
       const a = r.autorizar;
@@ -124,11 +133,11 @@
         h("p", {class: "ayuda"}, a.motivo === "sin_pub_elegida"
           ? "La clave elegida no tiene su .pub al lado en ~/.ssh, así que no puedo darte la línea para autorizarla. Elige otra o crea una personal en el Terminal de tu Mac con: ssh-keygen -t ed25519"
           : "No encuentro tu clave SSH personal en ~/.ssh. Créala en el Terminal de tu Mac con: ssh-keygen -t ed25519 (Intro a todo; la frase es opcional) y vuelve a comprobar."),
-        h("div", {}, boton("Comprobar de nuevo", diagnostica))];
+        h("p", {class: "ayuda"}, PAUSA), h("div", {}, botonEspera("Comprobar de nuevo", diagnostica))];
       return [h("p", {}, h("strong", {}, "Autoriza tu clave en el servidor")),
         h("p", {class: "ayuda"}, "Si el servidor solo admite contraseña o tu clave no está autorizada: ejecuta esta línea DENTRO del servidor (la consola web de tu proveedor o una sesión ya abierta), como «" + usuario + "». Añade tu clave pública (" + a.fichero + ") sin duplicarla; después pulsa «Comprobar de nuevo»."),
         h("pre", {style: "user-select:all;white-space:pre-wrap;word-break:break-all"}, a.linea),
-        h("div", {}, boton("Copiar", () => navigator.clipboard && navigator.clipboard.writeText(a.linea)), " ", boton("Comprobar de nuevo", diagnostica))];
+        h("div", {}, boton("Copiar", () => navigator.clipboard && navigator.clipboard.writeText(a.linea)), " ", botonEspera("Comprobar de nuevo", diagnostica)), h("p", {class: "ayuda"}, PAUSA)];
     }
     function dibuja(r){
       parar();

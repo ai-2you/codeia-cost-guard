@@ -30,7 +30,7 @@ a = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as f:
     f.write(json.dumps({"prog": "ssh", "args": a}) + "\n")
 if "-O" in a:
-    sys.exit(0)
+    sys.exit(255 if "check" in a and os.environ.get("FAKE_SIN_MAESTRA") else 0)
 def opcion(nombre):
     for i, x in enumerate(a[:-1]):
         if x == "-o" and a[i + 1].startswith(nombre + "="):
@@ -141,7 +141,7 @@ class FlujoTest(AltaServidorSh):
         m = maestras[0]
         ctl = m[m.index("-o", m.index("-M")) + 1].split("=", 1)[1]
         self.assertTrue(ctl.startswith("/tmp/cg-alta."))
-        self.assertIn("ControlPersist=120", m)
+        self.assertIn("ControlPersist=yes", m)                                     # dura hasta el «-O exit» del final
         admin = [c["args"] for c in ssh if "-M" not in c["args"] and "-O" not in c["args"] and c["args"][c["args"].index("--") + 1] == "root@srv.example.com"]
         self.assertGreaterEqual(len(admin), 3)                                         # permisos, carpeta, instalación
         for a in admin:
@@ -190,6 +190,29 @@ class FlujoTest(AltaServidorSh):
         self.assertTrue(any("instalar-en-servidor.sh" in c["args"][-1] for c in self.llamadas("ssh")))
         self.assertIn("Lo instalado queda bien", out)
         self.assertIn('{"nombre": "web1", "ssh": "infobar@srv.example.com"}', out)
+
+    def test_la_prueba_final_es_la_de_la_app(self):
+        rc, out = self.corre("root@srv.example.com")
+        self.assertEqual(rc, 0, out)
+        prueba = [c["args"] for c in self.llamadas("ssh") if c["args"][-1] == "infobar@srv.example.com"]
+        self.assertEqual(len(prueba), 1)
+        for opcion in ("BatchMode=yes", "StrictHostKeyChecking=yes", "ProxyCommand=none", "IdentitiesOnly=yes", "ControlPath=none"):
+            self.assertIn(opcion, prueba[0])
+        self.assertEqual(prueba[0][prueba[0].index("-i") + 1], os.path.join(self.home, ".ssh", "infobar_ed25519"))
+
+    def test_sin_python_la_prueba_ignora_el_ssh_config_y_la_ficha_es_json_valido(self):
+        venv = os.path.join(self.home, ".cost-guard", "venv", "bin")
+        os.makedirs(venv)
+        with open(os.path.join(venv, "python"), "w") as f:
+            f.write("#!/bin/sh\nexit 1\n")
+        os.chmod(os.path.join(venv, "python"), 0o755)
+        rc, out = self.corre("--nombre", 'web "1" \\ x', "root@srv.example.com", "2222")
+        self.assertEqual(rc, 1)
+        prueba = [c["args"] for c in self.llamadas("ssh") if c["args"][-1] == "infobar@srv.example.com"][0]
+        self.assertEqual(prueba[prueba.index("-F") + 1], "/dev/null")
+        self.assertIn("StrictHostKeyChecking=yes", prueba)
+        ficha = out[out.index("servidores.json:") + len("servidores.json:"):].strip().splitlines()[0]
+        self.assertEqual(json.loads(ficha), {"nombre": 'web "1" \\ x', "ssh": "infobar@srv.example.com", "puerto": 2222})
 
     def test_la_prueba_como_infobar_falla_y_no_se_registra(self):
         rc, out = self.corre("root@srv.example.com", FAKE_PRUEBA_MAL="1")
@@ -242,14 +265,46 @@ class ErroresTest(AltaServidorSh):
         self.assertIn("ssh-keygen -t ed25519", out)
         self.assertNotIn("grep -qxF", out)
 
-    def test_fuera_del_mac_lo_dice_claramente(self):
-        solo = os.path.join(self.dir, "servidor", "infobar", "remoto")
+    def como_linux(self):
+        with open(os.path.join(self.bin, "uname"), "w") as f:
+            f.write("#!/bin/sh\necho Linux\n")
+        os.chmod(os.path.join(self.bin, "uname"), 0o755)
+
+    def copia_suelta(self):
+        solo = os.path.join(self.dir, "suelta", "infobar", "remoto")
         os.makedirs(solo)
         shutil.copy(self.script, solo)
-        rc, out = self.corre("root@srv.example.com", script=os.path.join(solo, "alta-servidor.sh"))
-        self.assertEqual(rc, 1)
-        self.assertIn("Este script se ejecuta en el Terminal de tu Mac, no dentro del servidor", out)
+        return os.path.join(solo, "alta-servidor.sh")
+
+    def test_dentro_del_servidor_lo_dice_claramente(self):
+        self.como_linux()
+        for script, extra in ((self.script, {"SSH_CONNECTION": "203.0.113.5 50000 203.0.113.10 22"}), (self.copia_suelta(), {})):
+            rc, out = self.corre("root@srv.example.com", script=script, **extra)
+            self.assertEqual(rc, 1)
+            self.assertIn("Este script se ejecuta en el Terminal de tu Mac, no dentro del servidor", out)
         self.assertEqual(self.llamadas(), [])
+
+    def test_una_copia_suelta_en_el_mac_dice_que_le_falta_la_app(self):
+        rc, out = self.corre("root@srv.example.com", script=self.copia_suelta())
+        self.assertEqual(rc, 1)
+        self.assertIn("no tiene la app CostGuard al lado", out)
+        self.assertNotIn("dentro del servidor", out)
+        self.assertEqual(self.llamadas(), [])
+
+    def test_host_con_las_reglas_de_la_app(self):
+        for destino in ("root@srv_x.example.com", "root@-srv.example.com", "1root@srv.example.com", "root@" + "a" * 254):
+            rc, out = self.corre(destino)
+            self.assertEqual(rc, 1, destino)
+            self.assertIn("no es un usuario@host válido", out)
+            self.assertNotIn("nombre", out)                                              # no culpa al nombre
+        self.assertEqual(self.llamadas(), [])
+
+    def test_si_la_maestra_muere_no_se_conecta_por_su_cuenta(self):
+        rc, out = self.corre("root@srv.example.com", FAKE_SIN_MAESTRA="1")
+        self.assertEqual(rc, 1)
+        self.assertIn("Se perdió la conexión con el servidor", out)
+        self.assertFalse(any("instalar-en-servidor.sh" in c["args"][-1] or "id -u" in c["args"][-1] for c in self.llamadas("ssh")))
+        self.assertEqual(self.llamadas("scp"), [])
 
     def test_entradas_malas(self):
         for args in ((), ("root@srv.example.com", "0"), ("root@srv.example.com", "22", "extra"), ("-x", "root@srv.example.com"), ("root@host;id",), ("-i",)):
@@ -267,6 +322,14 @@ class ClaveElegidaTest(AltaServidorSh):
         m = [c["args"] for c in self.llamadas("ssh") if "-M" in c["args"]][0]
         self.assertEqual(m[m.index("-i") + 1], ruta)
         self.assertIn("IdentitiesOnly=yes", m)
+        self.assertIn("ControlPersist=yes", m)
+        # todas las órdenes de admin y la copia llevan la misma clave: si la maestra cayera, no entrarían con otras
+        admin = [c["args"] for c in self.llamadas("ssh") if "-M" not in c["args"] and "-O" not in c["args"]
+                 and c["args"][c["args"].index("--") + 1] == "root@srv.example.com"] + [c["args"] for c in self.llamadas("scp")]
+        self.assertGreaterEqual(len(admin), 4)
+        for a in admin:
+            self.assertEqual(a[a.index("-i") + 1], ruta)
+            self.assertIn("IdentitiesOnly=yes", a)
 
     def test_i_rechaza_la_de_infobar_una_pub_y_una_que_no_existe(self):
         self.pon_personal()

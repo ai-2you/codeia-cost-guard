@@ -26,6 +26,22 @@ def _cabecera_privada(ruta):
     return primera.startswith(b"-----BEGIN ") and primera.rstrip().endswith(b"PRIVATE KEY-----")
 
 
+def _tipo_y_base64(ruta_pub):
+    """«tipo base64» del .pub (sin comentario), o None si no se puede leer."""
+    try:
+        with open(ruta_pub, encoding="ascii") as f:
+            partes = f.read(16384).split()
+    except (OSError, UnicodeDecodeError):
+        return None
+    return " ".join(partes[:2]) if len(partes) >= 2 else None
+
+
+def _es_la_de_infobar(ruta_pub):
+    """True si ese .pub es la clave dedicada de infobar copiada con otro nombre (mismo tipo y base64): nunca se ofrece para un administrador."""
+    propia = _tipo_y_base64(ruta_pub)
+    return propia is not None and propia == _tipo_y_base64(os.path.join(DIR_SSH, "infobar_ed25519.pub"))
+
+
 def listar():
     """Nombres de las claves privadas de ~/.ssh: las que tienen su .pub al lado y las .pem/.key con cabecera de clave privada. Ordenados."""
     try:
@@ -40,7 +56,10 @@ def listar():
         ruta = os.path.join(DIR_SSH, n)
         if not os.path.isfile(ruta):
             continue
-        if os.path.isfile(ruta + ".pub") or (n.endswith((".pem", ".key")) and _cabecera_privada(ruta)):
+        if os.path.isfile(ruta + ".pub"):
+            if not _es_la_de_infobar(ruta + ".pub"):
+                salida.append(n)
+        elif n.endswith((".pem", ".key")) and _cabecera_privada(ruta):
             salida.append(n)
     return sorted(salida)
 
@@ -90,7 +109,7 @@ def autorizar(nombre=None):
     {"linea": None, "motivo": "sin_pub_elegida" | "sin_clave"} si no hay ninguna válida."""
     candidatos = [nombre + ".pub"] if nombre else [p + ".pub" for p in PERSONALES]
     for f in candidatos:
-        if not _FICHERO.fullmatch(f) or f.startswith("infobar_ed25519"):
+        if not _FICHERO.fullmatch(f) or f.startswith("infobar_ed25519") or _es_la_de_infobar(os.path.join(DIR_SSH, f)):
             continue
         try:
             with open(os.path.join(DIR_SSH, f), encoding="ascii") as fh:

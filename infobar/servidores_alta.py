@@ -339,10 +339,15 @@ def _instalar(job, como_root):
     _probar_y_guardar(job)
 
 
-def _probar_y_guardar(job):
-    salida, error = servidores_ssh.ejecutar({"nombre": job.nombre, "ssh": f"infobar@{job.host}", "puerto": job.puerto})
+def lee_como_infobar(nombre, host, puerto):
+    """True si la app puede leer el servidor como `infobar`: la MISMA orden que el monitor (clave dedicada y OPCIONES_SEGURAS)."""
+    salida, error = servidores_ssh.ejecutar({"nombre": nombre, "ssh": f"infobar@{host}", "puerto": puerto})
     sec, _, _, _ = servidores_ssh.analizar(salida)
-    if error or "version" not in sec:
+    return not error and "version" in sec
+
+
+def _probar_y_guardar(job):
+    if not lee_como_infobar(job.nombre, job.host, job.puerto):
         raise AltaError("fallo_prueba")
     _guardar_servidor(job)
     job.pon("hecho", "hecho_actualiza" if job.ya_instalado else "hecho")
@@ -484,30 +489,34 @@ def _instalar_con_privilegio(job):
 
 # ---------------------------------------------------------------- punto de entrada para alta-servidor.sh
 
-USO = "uso: python3 -m infobar.servidores_alta registrar [--comprobar] <nombre> <host> <puerto>"
+USO = "uso: python3 -m infobar.servidores_alta registrar [--comprobar | --probar] <nombre> <host> <puerto>"
 # código de salida → lo que significa (el script de alta enseña su propio mensaje para cada uno)
-SALIDA = {"anadido": 0, "ya_estaba": 4, "entrada_invalida": 2, "nombre_repetido": 3, "interno": 1}
+SALIDA = {"anadido": 0, "ya_estaba": 4, "entrada_invalida": 2, "nombre_repetido": 3, "fallo_prueba": 5, "destino_invalido": 6, "interno": 1}
 _TEXTO_CLI = {"anadido": "Servidor añadido.", "ya_estaba": "El servidor ya estaba en la lista (no se duplica).", "comprobado": "Se puede añadir.",
-              "entrada_invalida": "Datos no válidos: " + USO, "nombre_repetido": MENSAJES["nombre_repetido"], "interno": MENSAJES["interno"]}
+              "entrada_invalida": "Datos no válidos: " + USO, "destino_invalido": "Host o puerto no válidos: " + USO,
+              "nombre_repetido": MENSAJES["nombre_repetido"], "fallo_prueba": MENSAJES["fallo_prueba"], "interno": MENSAJES["interno"]}
 
 
 def main(argv):
     """`registrar <nombre> <host> <puerto>` añade el servidor como lo haría el alta de la página (no duplica; rechaza un nombre de otro servidor).
-    Con `--comprobar` solo dice si se podría, sin escribir nada. Devuelve el código de salida (ver SALIDA)."""
+    Con `--comprobar` solo dice si se podría, sin escribir nada; con `--probar`, antes de guardarlo comprueba que la app lo lee como `infobar` con
+    la misma orden que el monitor (como «Comprobar conexión» en la página). Devuelve el código de salida (ver SALIDA)."""
     args = list(argv)
-    comprobar = len(args) > 1 and args[1] == "--comprobar"
-    if comprobar:
-        del args[1]
+    modo = args.pop(1) if len(args) > 1 and args[1] in ("--comprobar", "--probar") else ""
     try:
         if len(args) != 4 or args[0] != "registrar":
             raise AltaError("entrada_invalida")
         nombre, host, puerto = args[1], args[2], args[3]
-        if not (_NOMBRE.fullmatch(nombre) and _HOST.fullmatch(host) and puerto.isascii() and puerto.isdigit() and len(puerto) <= 5 and 0 < int(puerto) < 65536):
+        if not (_HOST.fullmatch(host) and puerto.isascii() and puerto.isdigit() and len(puerto) <= 5 and 0 < int(puerto) < 65536):
+            raise AltaError("destino_invalido")
+        if not _NOMBRE.fullmatch(nombre):
             raise AltaError("entrada_invalida")
-        if comprobar:
+        if modo == "--comprobar":
             _ya_esta(servidores_actuales(), _ficha(nombre, host, int(puerto)))
             print(_TEXTO_CLI["comprobado"])
             return 0
+        if modo == "--probar" and not lee_como_infobar(nombre, host, int(puerto)):
+            raise AltaError("fallo_prueba")
         clave = "anadido" if guardar_servidor(nombre, host, int(puerto)) else "ya_estaba"
     except AltaError as e:
         clave = e.clave if e.clave in SALIDA else "interno"

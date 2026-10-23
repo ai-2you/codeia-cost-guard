@@ -96,11 +96,16 @@ sys.stdout.write("# " + host + ":" + puerto + " SSH-2.0-OpenSSH\n" + nombre + " 
 '''
 
 
+def _borra_servidores():
+    for ruta in (rutas.CONFIG_SERVIDORES, rutas.CONFIG_SERVIDORES + ".lock"):
+        if os.path.exists(ruta):
+            os.remove(ruta)
+
+
 class Base(LimpiaConfig):
     def setUp(self):
-        for ruta in (rutas.CONFIG_SERVIDORES, rutas.CONFIG_SERVIDORES + ".lock"):
-            if os.path.exists(ruta):
-                os.remove(ruta)
+        _borra_servidores()
+        self.addCleanup(_borra_servidores)          # lo que escribe un alta no puede llegar a los tests que vienen después
         super().setUp()
         config_y_estado.cfg()
         self.dir = tempfile.mkdtemp(prefix="cg-alta-")

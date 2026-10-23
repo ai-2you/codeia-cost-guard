@@ -19,12 +19,13 @@ from infobar import config_y_estado, servidor_local, servidores_alta as alta, se
 from test_servidores_alta import Base  # noqa: E402
 
 
-def blob(tipo, n=32):
+def blob(tipo, n=32, relleno=b"\x01"):
     t = tipo.encode()
-    return base64.b64encode(struct.pack(">I", len(t)) + t + struct.pack(">I", n) + b"\x01" * n).decode()
+    return base64.b64encode(struct.pack(">I", len(t)) + t + struct.pack(">I", n) + relleno * n).decode()
 
 
 ED = "ssh-ed25519 " + blob("ssh-ed25519")
+ED_INFOBAR = "ssh-ed25519 " + blob("ssh-ed25519", relleno=b"\x07")                     # la dedicada: otra clave
 ECDSA = "ecdsa-sha2-nistp256 " + blob("ecdsa-sha2-nistp256", 65)
 RSA = "ssh-rsa " + blob("ssh-rsa", 257)
 
@@ -47,8 +48,9 @@ class ListaDeClavesTest(ConClaves):
     def test_solo_claves_privadas_y_nunca_la_de_infobar_ni_ficheros_de_ssh(self):
         for n in ("id_ed25519", "infobar_ed25519", "solo_privada", ".oculta", "con espacio"):
             self.pon(n)
-        for n in ("id_ed25519.pub", "infobar_ed25519.pub", ".oculta.pub", "con espacio.pub", "known_hosts", "known_hosts.old", "config", "authorized_keys"):
+        for n in ("id_ed25519.pub", ".oculta.pub", "con espacio.pub", "known_hosts", "known_hosts.old", "config", "authorized_keys"):
             self.pon(n, ED + " x\n")
+        self.pon("infobar_ed25519.pub", ED_INFOBAR + " infobar\n")
         self.pon("known_hosts.pub", ED)                                                   # aunque tenga .pub al lado
         self.pon("aws.pem", "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n")
         self.pon("otra.key", "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n")
@@ -56,6 +58,22 @@ class ListaDeClavesTest(ConClaves):
         os.mkdir(os.path.join(self.ssh_dir, "carpeta"))
         self.pon("carpeta.pub", ED)
         self.assertEqual(claves_ssh.listar(), ["aws.pem", "id_ed25519", "otra.key"])
+
+    def test_una_copia_de_la_clave_de_infobar_con_otro_nombre_no_se_lista_ni_se_ofrece(self):
+        self.pon("infobar_ed25519")
+        self.pon("infobar_ed25519.pub", ED + " infobar")
+        self.pon("copia")
+        self.pon("copia.pub", ED + " otro-comentario")                                  # mismo tipo y base64, otro nombre y comentario
+        self.pon("id_ed25519")
+        self.pon("id_ed25519.pub", ED + " x")                                            # también entre las de siempre
+        self.pon("buena")
+        self.pon("buena.pub", RSA)
+        self.assertEqual(claves_ssh.listar(), ["buena"])
+        self.assertIsNone(claves_ssh.ruta("copia"))
+        self.assertEqual(claves_ssh.autorizar("copia"), {"linea": None, "motivo": "sin_pub_elegida"})
+        self.assertEqual(claves_ssh.autorizar(), {"linea": None, "motivo": "sin_clave"})
+        self.pon("id_rsa.pub", RSA)
+        self.assertEqual(claves_ssh.autorizar()["fichero"], "id_rsa.pub")
 
     def test_sin_carpeta_ssh_la_lista_esta_vacia(self):
         with mock.patch.object(claves_ssh, "DIR_SSH", os.path.join(self.dir, "no-existe")):
@@ -95,7 +113,7 @@ class ClavePublicaTest(ConClaves):
 
     def test_de_que_pub_sale_la_clave(self):
         self.assertEqual(claves_ssh.autorizar(), {"linea": None, "motivo": "sin_clave"})
-        self.pon("infobar_ed25519.pub", ED)
+        self.pon("infobar_ed25519.pub", ED_INFOBAR)
         self.assertEqual(claves_ssh.autorizar()["motivo"], "sin_clave")                    # la de infobar nunca
         self.assertIsNone(claves_ssh.autorizar("infobar_ed25519")["linea"])
         self.pon("id_rsa.pub", RSA)
@@ -198,6 +216,18 @@ class RegistroCliTest(Base):
         self.assertEqual(self.cli(["registrar", "web2", "srv.example.com", "2222"]), 0)
         self.assertEqual(self.servidores("web2")[0]["puerto"], 2222)
 
+    def test_probar_lee_como_la_app_antes_de_guardar(self):
+        self.fake({"prueba_ok": False})
+        self.assertEqual(self.cli(["registrar", "--probar", "web1", "203.0.113.10", "2222"]), 5)
+        self.assertEqual(self.servidores("web1"), [])                                       # sin lectura no se guarda
+        prueba = [c["args"] for c in self.llamadas() if c["prog"] == "ssh"][-1]
+        for opcion in ("BatchMode=yes", "StrictHostKeyChecking=yes", "ProxyCommand=none", "IdentitiesOnly=yes"):
+            self.assertIn(opcion, prueba)                                                   # la MISMA orden que el monitor
+        self.assertEqual((prueba[prueba.index("-i") + 1], prueba[prueba.index("-p") + 1], prueba[-1]), (self.clave, "2222", "infobar@203.0.113.10"))
+        self.fake({})
+        self.assertEqual(self.cli(["registrar", "--probar", "web1", "203.0.113.10", "2222"]), 0)
+        self.assertEqual(len(self.servidores("web1")), 1)
+
     def test_comprobar_no_escribe_nada(self):
         antes = json.dumps(config_y_estado.servidores_actuales(), sort_keys=True)
         self.assertEqual(self.cli(["registrar", "--comprobar", "web1", "203.0.113.10", "22"]), 0)
@@ -208,11 +238,14 @@ class RegistroCliTest(Base):
 
     def test_entradas_malas(self):
         antes = json.dumps(config_y_estado.servidores_actuales(), sort_keys=True)
-        for args in ([], ["otra"], ["registrar"], ["registrar", "web1", "203.0.113.10"], ["registrar", "web1", "203.0.113.10", "0"],
-                     ["registrar", "web1", "203.0.113.10", "70000"], ["registrar", "web1", "203.0.113.10", "２２"], ["registrar", "a/b", "203.0.113.10", "22"],
-                     ["registrar", "", "203.0.113.10", "22"], ["registrar", "web1", "-oProxyCommand=x", "22"], ["registrar", "web1", "h;id", "22"],
-                     ["registrar", "web1", "203.0.113.10", "22", "extra"], ["registrar", "--otra", "web1", "203.0.113.10", "22"]):
+        for args in ([], ["otra"], ["registrar"], ["registrar", "web1", "203.0.113.10"], ["registrar", "a/b", "203.0.113.10", "22"],
+                     ["registrar", "", "203.0.113.10", "22"], ["registrar", "web1", "203.0.113.10", "22", "extra"], ["registrar", "--otra", "web1", "203.0.113.10", "22"]):
             self.assertEqual(self.cli(args), 2, args)
+        # un host o un puerto malos tienen su propio código: el script no culpa al nombre
+        for args in (["registrar", "web1", "203.0.113.10", "0"], ["registrar", "web1", "203.0.113.10", "70000"], ["registrar", "web1", "203.0.113.10", "２２"],
+                     ["registrar", "web1", "-oProxyCommand=x", "22"], ["registrar", "web1", "h;id", "22"], ["registrar", "web1", "ñandú.example.com", "22"],
+                     ["registrar", "--comprobar", "web1", "h_x", "22"]):
+            self.assertEqual(self.cli(args), 6, args)
         self.assertEqual(json.dumps(config_y_estado.servidores_actuales(), sort_keys=True), antes)
 
 
@@ -241,7 +274,7 @@ class PaginaTest(unittest.TestCase):
             js = f.read()
         js = js[js.index("function altaGuiada("):js.index("function detectorWebs(")]                # el alta guiada entera
         for marca in ("A.claves_ssh", "clave: claveSel.value", "Las de siempre", "en el Terminal de tu Mac (no dentro del servidor)",
-                      "Autoriza tu clave en el servidor", "DENTRO del servidor", "Comprobar de nuevo", "ssh-keygen -t ed25519"):
+                      "Autoriza tu clave en el servidor", "DENTRO del servidor", "Comprobar de nuevo", "botonEspera(\"Comprobar de nuevo\"", "pausa de un minuto", "ssh-keygen -t ed25519"):
             self.assertIn(marca, js)
         for malo in ("innerHTML", "insertAdjacentHTML", "document.write", "outerHTML"):
             self.assertNotIn(malo, js)

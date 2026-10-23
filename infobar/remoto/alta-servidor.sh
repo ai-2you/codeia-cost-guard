@@ -18,15 +18,23 @@ set -euo pipefail
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP="$(cd "$AQUI/../.." && pwd)"
 
-fuera_del_mac() {
+dentro_del_servidor() {
   echo "Este script se ejecuta en el Terminal de tu Mac, no dentro del servidor."
-  echo "Sal del servidor (exit) y lánzalo en tu Mac con: infobar/remoto/alta-servidor.sh usuario@host [puerto]"
+  echo "Sal del servidor (exit) y lánzalo en tu Mac con: ~/.cost-guard/infobar/remoto/alta-servidor.sh usuario@host [puerto]"
   echo "(en Ajustes -> Servidores tienes la línea exacta para copiar)."
   exit 1
 }
-# junto al script tiene que estar la app (para darlo de alta); en un servidor al que entraste por ssh no la hay
-[ -f "$APP/infobar/servidores_alta.py" ] || fuera_del_mac
-if [ "$(uname -s)" = Linux ] && [ -n "${SSH_CONNECTION:-}" ] && [ ! -d "$HOME/.cost-guard" ]; then fuera_del_mac; fi
+sin_la_app() {
+  echo "Este script no tiene la app CostGuard al lado (parece una copia suelta) y la necesita para dar de alta el servidor."
+  echo "Lánzalo desde la carpeta de la app: ~/.cost-guard/infobar/remoto/alta-servidor.sh usuario@host [puerto]"
+  echo "(en Ajustes -> Servidores tienes la línea exacta para copiar)."
+  exit 1
+}
+# en Linux, por SSH o sin la app al lado y sin instalación de CostGuard: casi seguro que es el propio servidor (sesión ssh o consola web)
+TIENE_APP=0; [ -f "$APP/infobar/servidores_alta.py" ] && TIENE_APP=1
+if [ "$(uname -s)" = Linux ] && [ ! -d "$HOME/.cost-guard" ] && { [ -n "${SSH_CONNECTION:-}" ] || [ "$TIENE_APP" = 0 ]; }; then dentro_del_servidor; fi
+# junto al script tiene que estar la app (para darlo de alta)
+[ "$TIENE_APP" = 1 ] || sin_la_app
 
 uso() { echo "uso: $0 [-i ruta_de_tu_clave] [--nombre NOMBRE] usuario@host [puerto]"; exit 1; }
 CLAVE_ADMIN=""; NOMBRE=""; DESTINO=""; PUERTO=""
@@ -39,7 +47,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 PUERTO="${PUERTO:-22}"
-[[ "$DESTINO" =~ ^[A-Za-z0-9._][A-Za-z0-9._-]*@[A-Za-z0-9._][A-Za-z0-9._-]*$ ]] || uso
+[ -n "$DESTINO" ] || uso
+# las mismas reglas que la app (_USUARIO y _HOST de servidores_alta.py)
+[[ "$DESTINO" =~ ^[A-Za-z_][A-Za-z0-9._-]{0,31}@[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]] || {
+  echo "«${DESTINO}» no es un usuario@host válido (host: letras, números, puntos y guiones; sin espacios ni _)."; exit 1; }
 [[ "$PUERTO" =~ ^[0-9]{1,5}$ ]] && [ "$((10#$PUERTO))" -gt 0 ] && [ "$((10#$PUERTO))" -lt 65536 ] || { echo "puerto no valido"; exit 1; }
 PUERTO="$((10#$PUERTO))"
 USUARIO="${DESTINO%%@*}"; HOST="${DESTINO#*@}"
@@ -58,7 +69,8 @@ fi
 # --- registro en la app: el mismo codigo que usa Ajustes, con el Python de la instalación
 PY="$HOME/.cost-guard/venv/bin/python"
 [ -x "$PY" ] || PY="$(command -v python3 || true)"
-registro() {   # registrar [--comprobar] nombre host puerto -> 0 hecho/se puede, 4 ya estaba, 2 datos, 3 nombre de otro servidor
+registro() {   # registrar [--comprobar|--probar] nombre host puerto -> 0 hecho/se puede, 4 ya estaba, 2 nombre no válido,
+               # 3 nombre de otro servidor, 5 la app no lo lee como infobar, 6 host o puerto no válidos
   [ -n "$PY" ] || return 127
   (cd "$APP" && PYTHONPATH="$APP" "$PY" -m infobar.servidores_alta registrar "$@" >/dev/null 2>&1)
 }
@@ -69,6 +81,7 @@ case "$RC" in
   0) ;;
   3) echo "Ya hay otro servidor llamado «${NOMBRE}» en la app. Elige otro nombre con --nombre OTRO."; exit 1 ;;
   2) echo "El nombre «${NOMBRE}» no vale (hasta 40 letras, números, espacios, puntos, guiones o _). Elige otro con --nombre."; exit 1 ;;
+  6) echo "La app no acepta el host «${HOST}» o el puerto $PUERTO (host: letras, números, puntos y guiones)."; exit 1 ;;
   *) echo "Aviso: no pude consultar la lista de servidores de la app (Python: ${PY:-no encontrado}). Instalo igual y al final te digo cómo añadirlo."
      SIN_REGISTRO=1 ;;
 esac
@@ -115,8 +128,14 @@ CTL="$(mktemp -d /tmp/cg-alta.XXXXXX)"
 chmod 700 "$CTL"
 SOCK="$CTL/s"
 REMOTO=""
-OPC_MAESTRA=(-o "ControlPath=$SOCK" -o ControlMaster=no -p "$PUERTO")
+# la clave elegida va también aquí: si la maestra muriera, ssh no debe entrar por su cuenta con otras claves (además se comprueba antes de cada paso)
+OPC_MAESTRA=(-o "ControlPath=$SOCK" -o ControlMaster=no -p "$PUERTO" ${OPC_CLAVE[@]+"${OPC_CLAVE[@]}"})
 admin() { ssh -T "${OPC_MAESTRA[@]}" -- "$DESTINO" "$@" </dev/null; }
+exige_maestra() {
+  ssh -o "ControlPath=$SOCK" -O check -- "$DESTINO" >/dev/null 2>&1 || {
+    echo "Se perdió la conexión con el servidor (la conexión abierta al principio ya no está). Vuelve a lanzar el script: repetirlo no duplica nada."
+    exit 1; }
+}
 cierra() {
   if [ -e "$SOCK" ]; then
     # si la instalación no llegó a borrar su carpeta temporal, se borra aquí (solo una ruta de mktemp exacta)
@@ -185,7 +204,7 @@ explica_conexion() {
 
 echo "-> entrando como $DESTINO (si te pide contraseña, es la de ese usuario en el servidor; solo esta vez)"
 # LogLevel=VERBOSE: ssh dice en su salida de errores con que método entro («Authenticated to ... using "password"»)
-if ! ssh -M -f -N -o "ControlPath=$SOCK" -o ControlPersist=120 -o ConnectTimeout=10 -o LogLevel=VERBOSE \
+if ! ssh -M -f -N -o "ControlPath=$SOCK" -o ControlPersist=yes -o ConnectTimeout=10 -o LogLevel=VERBOSE \
      -p "$PUERTO" ${OPC_CLAVE[@]+"${OPC_CLAVE[@]}"} -- "$DESTINO" 2>"$CTL/err"; then
   explica_conexion "$CTL/err"
   exit 1
@@ -201,11 +220,13 @@ autoriza_clave() {
     return 0
   fi
   local tb; tb="$(cut -d' ' -f1-2 <<<"$PERSONAL")"
+  exige_maestra
   if admin "grep -qF '$tb' ~/.ssh/authorized_keys 2>/dev/null" >/dev/null 2>&1; then return 0; fi    # ya estaba autorizada
   [ -t 0 ] || return 0
   local r=""
   read -r -p "¿Autorizo tu clave en el servidor para no volver a pedirte la contraseña? [s/N] " r </dev/tty || r=""
   case "$r" in s|S|si|Si|SI|sí|Sí|y|Y) ;; *) return 0 ;; esac
+  exige_maestra                                   # el dueño pudo tardar en contestar
   if admin "umask 077; $(linea_autorizar "$PERSONAL")" >/dev/null 2>&1; then
     echo "-> tu clave ($(basename "$PERSONAL_PUB")) queda autorizada para $USUARIO"
   else
@@ -215,6 +236,7 @@ autoriza_clave() {
 autoriza_clave
 
 # --- privilegios: root, sudo sin contraseña o sudo con contraseña (en un terminal)
+exige_maestra
 PRIV="$(admin 'if [ "$(id -u)" = 0 ]; then echo root; elif ! command -v sudo >/dev/null 2>&1; then echo sin_sudo;
   elif ! id -nG | tr " " "\n" | grep -qxE "sudo|wheel|admin"; then echo sin_grupo; elif sudo -n true 2>/dev/null; then echo sudo_n; else echo sudo_pide; fi' \
   2>/dev/null | tail -n 1 || true)"
@@ -229,14 +251,17 @@ if [ "$PRIV" = sudo_pide ] || [ "$PRIV" = sin_grupo ]; then
 fi
 
 echo "-> copiando scripts a $DESTINO"
+exige_maestra
 REMOTO="$(admin 'mktemp -d /tmp/infobar-alta.XXXXXX' 2>/dev/null | tail -n 1 || true)"
 # lo que sigue se usa con sudo y rm -rf: solo una ruta de mktemp exacta
 [[ "$REMOTO" =~ ^/tmp/infobar-alta\.[A-Za-z0-9]{6}$ ]] || { echo "respuesta inesperada del servidor al crear la carpeta temporal"; REMOTO=""; exit 1; }
-if ! scp -q -o "ControlPath=$SOCK" -o ControlMaster=no -P "$PUERTO" "$AQUI/instalar-en-servidor.sh" "$AQUI/recoger.sh" "$AQUI/recoger-root.sh" "$DESTINO:$REMOTO/"; then
+exige_maestra
+if ! scp -q -o "ControlPath=$SOCK" -o ControlMaster=no -P "$PUERTO" ${OPC_CLAVE[@]+"${OPC_CLAVE[@]}"} "$AQUI/instalar-en-servidor.sh" "$AQUI/recoger.sh" "$AQUI/recoger-root.sh" "$DESTINO:$REMOTO/"; then
   echo "No se pudieron copiar los scripts (¿disco lleno o /tmp de solo lectura en el servidor?)."; exit 1
 fi
 
 ORDEN="bash $REMOTO/instalar-en-servidor.sh '$PUB'; rc=\$?; rm -rf $REMOTO; exit \$rc"
+exige_maestra
 RC=0
 case "$PRIV" in
   root) echo "-> instalando"; admin "$ORDEN" || RC=$? ;;
@@ -256,19 +281,27 @@ if [ "$RC" -ne 0 ]; then
   exit 1
 fi
 
-echo "-> probando como infobar"
-# la salida se guarda antes de buscar en ella: con pipefail, un grep -q que corta la tuberia
-# haria fallar a ssh (SIGPIPE) aunque la conexión fuera bien
-PRUEBA="$(ssh -T -p "$PUERTO" -i "$CLAVE" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8 -o ControlPath=none \
-     -- "infobar@$HOST" </dev/null || true)"
-if ! grep -q '^### version' <<<"$PRUEBA"; then
+prueba_fallida() {
   echo ""
   echo "Se instaló, pero la prueba como infobar falló: revisa los avisos de arriba (¿AllowUsers/AllowGroups en sshd?"
   echo "¿otro puerto para usuarios normales?). El servidor no se ha añadido a la app."
   exit 1
+}
+echo "-> probando como infobar"
+if [ "$SIN_REGISTRO" = 1 ]; then
+  # sin Python no hay registro: se prueba con las opciones del monitor (sin el ~/.ssh/config del dueño, huella estricta)
+  # la salida se guarda antes de buscar en ella: con pipefail, un grep -q que corta la tubería haría fallar a ssh (SIGPIPE)
+  PRUEBA="$(ssh -F /dev/null -T -p "$PUERTO" -i "$CLAVE" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=yes \
+       -o ProxyCommand=none -o ControlMaster=no -o ControlPath=none -- "infobar@$HOST" </dev/null || true)"
+  grep -q '^### version' <<<"$PRUEBA" || prueba_fallida
 fi
 
-FICHA="{\"nombre\": \"$NOMBRE\", \"ssh\": \"infobar@$HOST\"}"
+json_texto() {   # el nombre dentro de una cadena JSON: sin caracteres de control, con \ y " escapados
+  local t; t="$(printf '%s' "$1" | tr -d '[:cntrl:]')"
+  t="${t//\\/\\\\}"; t="${t//\"/\\\"}"
+  printf '%s' "$t"
+}
+FICHA="{\"nombre\": \"$(json_texto "$NOMBRE")\", \"ssh\": \"infobar@$HOST\"}"
 [ "$PUERTO" = 22 ] || FICHA="${FICHA%\}}, \"puerto\": $PUERTO}"
 no_registrado() {
   echo "Lo instalado queda bien; solo falta añadirlo a la app. Hazlo en Ajustes -> Servidores (Dar de alta, con «${NOMBRE}»"
@@ -280,8 +313,10 @@ echo ""
 if [ "$SIN_REGISTRO" = 1 ]; then
   echo "La lectura funciona."; no_registrado; exit 1
 fi
-RC=0; registro "$NOMBRE" "$HOST" "$PUERTO" || RC=$?
+# --probar: la app lo lee con su misma orden (la del monitor) y solo entonces lo guarda
+RC=0; registro --probar "$NOMBRE" "$HOST" "$PUERTO" || RC=$?
 case "$RC" in
+  5) prueba_fallida ;;
   0) echo "OK. Servidor «${NOMBRE}» añadido a la app: la barra lo leerá en el próximo ciclo (unos 5 minutos)." ;;
   4) echo "OK. «${NOMBRE}» ya estaba en la app: scripts actualizados, la barra usará la versión nueva en la próxima lectura." ;;
   3) echo "La lectura funciona, pero otro servidor se llama ya «${NOMBRE}» (se dio de alta mientras tanto). Añádelo con otro nombre:"
