@@ -262,7 +262,8 @@ class DiagnosticoTest(Base):
     def test_terminal_ofrece_la_linea_exacta(self):
         self.fake({"conocida": True, "diag": "ninguno"})
         r = self.espera(self.diagnostica(ssh="admin@srv.example.com", puerto=2222))
-        self.assertEqual(r["linea_terminal"], f"bash {os.path.join(alta.REMOTO, 'alta-servidor.sh')} admin@srv.example.com 2222")
+        # con --nombre el script da de alta con el mismo nombre que la página: «Comprobar conexión» después no lo duplica
+        self.assertEqual(r["linea_terminal"], f"bash {os.path.join(alta.REMOTO, 'alta-servidor.sh')} --nombre nuevo admin@srv.example.com 2222")
         self.fake({"conocida": True, "diag": "ninguno"})
         alta._ALTAS.clear()
         r = self.espera(self.diagnostica())

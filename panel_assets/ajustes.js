@@ -86,11 +86,15 @@
   /* Alta guiada: comprueba el servidor (solo lectura) y ofrece instalar con tu clave SSH o hacerlo en el Terminal. La contraseña NUNCA pasa por esta página.
      Todo lo que pinta viene de mensajes cerrados del servidor local, aun así va por el DOM. */
   /* `pre` = {nombre, admin, puerto}: actualizar los scripts de un servidor que ya está dado de alta (el mismo camino que el alta: con el
-     mismo nombre, host y puerto no se duplica, solo se reinstalan los scripts) */
+     mismo nombre, host y puerto no se duplica, solo se reinstalan los scripts).
+     «Clave SSH»: las de siempre o una de ~/.ssh (la página solo ve NOMBRES de fichero; la barra los valida contra la lista real). */
   function altaGuiada(pre){
     const nombre = h("input", {class: "ancho", placeholder: "produccion", maxlength: 40, value: pre ? pre.nombre : ""});
     const destino = h("input", {class: "ancho", placeholder: "root@203.0.113.10", value: pre ? pre.admin : ""});
     const puerto = h("input", {class: "num-in", placeholder: "22", inputmode: "numeric", value: pre ? String(pre.puerto) : ""});
+    const claveSel = h("select", {"aria-label": "Clave SSH con la que entras"}, h("option", {value: ""}, "Las de siempre"),
+      ...(A.claves_ssh || []).map(n => h("option", {value: n}, n)));
+    const campoClave = h("label", {}, "Clave SSH", claveSel);
     const salida = h("div", {style: "margin-top:10px"});
     let id = null, reloj = null;
     const parar = () => { if (reloj) { clearTimeout(reloj); reloj = null; } };
@@ -106,10 +110,25 @@
     }
     function terminal(r){
       if (!r.linea_terminal) return [];
-      return [h("p", {class: "ayuda"}, "O hazlo en el Terminal de tu Mac (ahí es donde tecleas tu contraseña, no aquí):"),
+      return [h("p", {class: "ayuda"}, "O hazlo en el Terminal de tu Mac (no dentro del servidor): pega allí esta línea; ahí es donde tecleas tu contraseña, no en esta página."),
               h("pre", {style: "user-select:all;white-space:pre-wrap;word-break:break-all"}, r.linea_terminal),
               h("div", {}, boton("Copiar la línea", () => navigator.clipboard && navigator.clipboard.writeText(r.linea_terminal)), " ",
                 boton("Comprobar conexión", () => envia("comprobar", {id})))];
+    }
+    /* la clave no entra: línea para autorizar la clave PÚBLICA del dueño desde dentro del servidor (consola web del proveedor o una sesión abierta) */
+    function autoriza(r){
+      const a = r.autorizar;
+      if (!a) return [];
+      const usuario = destino.value.trim().split("@")[0] || "tu usuario";
+      if (!a.linea) return [h("p", {}, h("strong", {}, "Autoriza tu clave en el servidor")),
+        h("p", {class: "ayuda"}, a.motivo === "sin_pub_elegida"
+          ? "La clave elegida no tiene su .pub al lado en ~/.ssh, así que no puedo darte la línea para autorizarla. Elige otra o crea una personal en el Terminal de tu Mac con: ssh-keygen -t ed25519"
+          : "No encuentro tu clave SSH personal en ~/.ssh. Créala en el Terminal de tu Mac con: ssh-keygen -t ed25519 (Intro a todo; la frase es opcional) y vuelve a comprobar."),
+        h("div", {}, boton("Comprobar de nuevo", diagnostica))];
+      return [h("p", {}, h("strong", {}, "Autoriza tu clave en el servidor")),
+        h("p", {class: "ayuda"}, "Si el servidor solo admite contraseña o tu clave no está autorizada: ejecuta esta línea DENTRO del servidor (la consola web de tu proveedor o una sesión ya abierta), como «" + usuario + "». Añade tu clave pública (" + a.fichero + ") sin duplicarla; después pulsa «Comprobar de nuevo»."),
+        h("pre", {style: "user-select:all;white-space:pre-wrap;word-break:break-all"}, a.linea),
+        h("div", {}, boton("Copiar", () => navigator.clipboard && navigator.clipboard.writeText(a.linea)), " ", boton("Comprobar de nuevo", diagnostica))];
     }
     function dibuja(r){
       parar();
@@ -122,23 +141,24 @@
       } else if (r.estado === "listo") {
         piezas.push(h("div", {}, boton(r.ya_instalado ? "Actualizar con mi clave" : "Instalar con mi clave", () => envia("instalar", {id}))), ...terminal(r));
       } else if (r.estado === "terminal" || r.estado === "error") {
-        piezas.push(...terminal(r));
+        piezas.push(...autoriza(r), ...terminal(r));
       } else if (r.estado === "hecho") {
         if (!pre) piezas.push(h("div", {}, boton("Ver la lista de servidores", recarga)));
       }
       salida.replaceChildren(...piezas);
     }
-    const comprobar = h("div", {style: "margin-top:8px"}, boton("Comprobar servidor", () => {
-        salida.replaceChildren(h("p", {}, "Comprobando…"));
-        envia("diagnostico", {nombre: nombre.value.trim(), ssh: destino.value.trim(), puerto: puerto.value.trim() ? (parseInt(puerto.value, 10) || 0) : 22});
-      }));
+    function diagnostica(){
+      salida.replaceChildren(h("p", {}, "Comprobando…"));
+      envia("diagnostico", {nombre: nombre.value.trim(), ssh: destino.value.trim(), puerto: puerto.value.trim() ? (parseInt(puerto.value, 10) || 0) : 22, clave: claveSel.value});
+    }
+    const comprobar = h("div", {style: "margin-top:8px"}, boton("Comprobar servidor", diagnostica));
     if (pre) return h("div", {style: "margin-top:8px"},
       h("p", {class: "ayuda"}, "Entra con tu usuario administrador (no con «infobar», que solo puede leer). Si sudo te pide contraseña, la página te da una línea para el Terminal: la contraseña nunca pasa por aquí."),
-      h("div", {class: "campos"}, h("label", {}, "Tu usuario y servidor", destino)), comprobar, salida);
+      h("div", {class: "campos"}, h("label", {}, "Tu usuario y servidor", destino), campoClave), comprobar, salida);
     return h("div", {class: "prov"},
       h("div", {class: "prov-cab"}, h("strong", {}, "Dar de alta un servidor")),
       h("p", {class: "ayuda"}, "Comprueba el servidor sin tocarlo y te dice si se puede instalar con tu clave SSH o si hay que hacerlo en el Terminal. Crea en él el usuario «infobar» (solo lectura)."),
-      h("div", {class: "campos"}, h("label", {}, "Nombre", nombre), h("label", {}, "Usuario y servidor", destino), h("label", {}, "Puerto SSH", puerto)),
+      h("div", {class: "campos"}, h("label", {}, "Nombre", nombre), h("label", {}, "Usuario y servidor", destino), h("label", {}, "Puerto SSH", puerto), campoClave),
       comprobar, salida);
   }
 
