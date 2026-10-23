@@ -204,7 +204,7 @@ explica_conexion() {
 
 echo "-> entrando como $DESTINO (si te pide contraseña, es la de ese usuario en el servidor; solo esta vez)"
 # LogLevel=VERBOSE: ssh dice en su salida de errores con que método entro («Authenticated to ... using "password"»)
-if ! ssh -M -f -N -o "ControlPath=$SOCK" -o ControlPersist=yes -o ConnectTimeout=10 -o LogLevel=VERBOSE \
+if ! ssh -M -f -N -o "ControlPath=$SOCK" -o ControlPersist=30m -o ConnectTimeout=10 -o LogLevel=VERBOSE \
      -p "$PUERTO" ${OPC_CLAVE[@]+"${OPC_CLAVE[@]}"} -- "$DESTINO" 2>"$CTL/err"; then
   explica_conexion "$CTL/err"
   exit 1

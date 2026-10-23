@@ -141,7 +141,7 @@ class FlujoTest(AltaServidorSh):
         m = maestras[0]
         ctl = m[m.index("-o", m.index("-M")) + 1].split("=", 1)[1]
         self.assertTrue(ctl.startswith("/tmp/cg-alta."))
-        self.assertIn("ControlPersist=yes", m)                                     # dura hasta el «-O exit» del final
+        self.assertIn("ControlPersist=30m", m)                                     # la cierra el «-O exit» del final; si el script muere de golpe, caduca sola
         admin = [c["args"] for c in ssh if "-M" not in c["args"] and "-O" not in c["args"] and c["args"][c["args"].index("--") + 1] == "root@srv.example.com"]
         self.assertGreaterEqual(len(admin), 3)                                         # permisos, carpeta, instalación
         for a in admin:
@@ -322,7 +322,7 @@ class ClaveElegidaTest(AltaServidorSh):
         m = [c["args"] for c in self.llamadas("ssh") if "-M" in c["args"]][0]
         self.assertEqual(m[m.index("-i") + 1], ruta)
         self.assertIn("IdentitiesOnly=yes", m)
-        self.assertIn("ControlPersist=yes", m)
+        self.assertIn("ControlPersist=30m", m)
         # todas las órdenes de admin y la copia llevan la misma clave: si la maestra cayera, no entrarían con otras
         admin = [c["args"] for c in self.llamadas("ssh") if "-M" not in c["args"] and "-O" not in c["args"]
                  and c["args"][c["args"].index("--") + 1] == "root@srv.example.com"] + [c["args"] for c in self.llamadas("scp")]
