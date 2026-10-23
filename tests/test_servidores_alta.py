@@ -96,11 +96,16 @@ sys.stdout.write("# " + host + ":" + puerto + " SSH-2.0-OpenSSH\n" + nombre + " 
 '''
 
 
+def _borra_servidores():
+    for ruta in (rutas.CONFIG_SERVIDORES, rutas.CONFIG_SERVIDORES + ".lock"):
+        if os.path.exists(ruta):
+            os.remove(ruta)
+
+
 class Base(LimpiaConfig):
     def setUp(self):
-        for ruta in (rutas.CONFIG_SERVIDORES, rutas.CONFIG_SERVIDORES + ".lock"):
-            if os.path.exists(ruta):
-                os.remove(ruta)
+        _borra_servidores()
+        self.addCleanup(_borra_servidores)          # lo que escribe un alta no puede llegar a los tests que vienen después
         super().setUp()
         config_y_estado.cfg()
         self.dir = tempfile.mkdtemp(prefix="cg-alta-")
@@ -262,7 +267,8 @@ class DiagnosticoTest(Base):
     def test_terminal_ofrece_la_linea_exacta(self):
         self.fake({"conocida": True, "diag": "ninguno"})
         r = self.espera(self.diagnostica(ssh="admin@srv.example.com", puerto=2222))
-        self.assertEqual(r["linea_terminal"], f"bash {os.path.join(alta.REMOTO, 'alta-servidor.sh')} admin@srv.example.com 2222")
+        # con --nombre el script da de alta con el mismo nombre que la página: «Comprobar conexión» después no lo duplica
+        self.assertEqual(r["linea_terminal"], f"bash {os.path.join(alta.REMOTO, 'alta-servidor.sh')} --nombre nuevo admin@srv.example.com 2222")
         self.fake({"conocida": True, "diag": "ninguno"})
         alta._ALTAS.clear()
         r = self.espera(self.diagnostica())

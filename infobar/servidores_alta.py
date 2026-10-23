@@ -8,19 +8,25 @@ El dueño elige el camino que el propio servidor permite:
   · «terminal» → la página enseña la línea de `alta-servidor.sh` para pegar en el Terminal (ahí tecleará su contraseña de sudo) y un botón «Comprobar conexión».
 La huella del servidor (primera conexión) NO se acepta sola: se enseña y el dueño confirma; todas las conexiones llevan `StrictHostKeyChecking=yes`.
 Nada de lo que dice el servidor llega a la página: solo mensajes de un conjunto cerrado y la huella. Un alta a la vez, y un enfriamiento tras un fallo para no hacer saltar
-fail2ban en el servidor del dueño."""
+fail2ban en el servidor del dueño.
+El dueño puede elegir con qué clave de ~/.ssh entra (solo se manejan NOMBRES de fichero, validados contra la lista real) y, si su clave no está autorizada,
+la página le da la línea para autorizarla desde la consola del proveedor.
+
+También es un punto de entrada mínimo para `alta-servidor.sh`, que da de alta el servidor con la MISMA regla que la página:
+  python3 -m infobar.servidores_alta registrar [--comprobar] <nombre> <host> <puerto>"""
 import io
 import os
 import re
 import secrets
 import shlex
 import subprocess
+import sys
 import tarfile
 import threading
 import time
 
-from . import plataforma, servidores_ssh
-from .config_y_estado import log, modificar_servidores
+from . import plataforma, servidores_alta_claves as claves_ssh, servidores_ssh
+from .config_y_estado import log, modificar_servidores, servidores_actuales
 from .servidores import servidores_validos
 from .servidores_registro import nuevo_id
 
@@ -77,6 +83,7 @@ MENSAJES = {
     "desconocida": "Esa alta ya no existe: empieza de nuevo.",
     "estado_incorrecto": "Esa alta no está en el paso que se pide.",
     "sin_clave": "No se pudo preparar la clave SSH dedicada.",
+    "clave_invalida": "Esa clave SSH no está en tu carpeta ~/.ssh: elige otra de la lista.",
     "interno": "Fallo interno del alta (queda anotado en el log).",
 }
 
@@ -109,9 +116,10 @@ class AltaError(Exception):
 
 
 class Alta:
-    def __init__(self, nombre, usuario, host, puerto):
+    def __init__(self, nombre, usuario, host, puerto, clave=None):
         self.id = secrets.token_urlsafe(12)
         self.nombre, self.usuario, self.host, self.puerto = nombre, usuario, host, puerto
+        self.clave = clave                                      # NOMBRE de una clave de ~/.ssh (ya validado) o None = las de siempre
         self.estado, self.mensaje = "en_curso", "diagnosticando"
         self.huella, self.linea_host, self.ya_instalado, self.como_root = None, None, False, False
         self.creado = self.actualizado = time.time()
@@ -127,11 +135,17 @@ class Alta:
             d["comprobar_en_servidor"] = "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
         if self.estado in ("terminal", "listo", "error"):
             d["linea_terminal"] = self.linea_terminal()
+        if self.mensaje == "terminal_auth":
+            # la clave PÚBLICA del dueño (de su propio ~/.ssh, validada con regex): nada de esto viene del servidor
+            d["autorizar"] = claves_ssh.autorizar(self.clave)
         return d
 
     def linea_terminal(self):
         destino = f"{self.usuario}@{self.host}"
-        return f"bash {shlex.quote(os.path.join(REMOTO, 'alta-servidor.sh'))} {destino}" + (f" {self.puerto}" if self.puerto != 22 else "")
+        clave = claves_ssh.ruta(self.clave) if self.clave else None
+        # --nombre: el script da de alta con el MISMO nombre que la página, así «Comprobar conexión» después no lo duplica
+        return (f"bash {shlex.quote(os.path.join(REMOTO, 'alta-servidor.sh'))}" + (f" -i {shlex.quote(clave)}" if clave else "")
+                + f" --nombre {shlex.quote(self.nombre)} {destino}" + (f" {self.puerto}" if self.puerto != 22 else ""))
 
 
 # ---------------------------------------------------------------- utilidades
@@ -153,6 +167,10 @@ def _orden_ssh(job, comando, usuario=None, clave=None):
     # -F /dev/null: se ignora el ~/.ssh/config del dueño (alias, ProxyJump, Match exec, otro known_hosts...). Así la huella que se enseña es EXACTAMENTE la que ssh aplica
     # y nada de esa configuración puede cambiar a dónde se conecta; si el servidor necesita esa configuración, el camino del Terminal sigue usándola.
     base = ["ssh", "-F", os.devnull, "-T", "-p", str(job.puerto), *servidores_ssh.OPCIONES_SEGURAS]
+    if clave is None and usuario is None and job.clave:
+        clave = claves_ssh.ruta(job.clave)                    # se revalida al usarla: si ya no está en ~/.ssh, no se usa otra cosa
+        if not clave:
+            raise AltaError("clave_invalida")
     if clave:
         base += ["-i", clave, "-o", "IdentitiesOnly=yes"]
     return base + ["--", f"{usuario or job.usuario}@{job.host}", comando]
@@ -244,6 +262,16 @@ def _destino_valido(cuerpo):
     return nombre, usuario, host, puerto
 
 
+def _clave_valida(cuerpo):
+    """Nombre de la clave elegida (de la lista real de ~/.ssh) o None para las de siempre."""
+    clave = cuerpo.get("clave")
+    if clave in (None, ""):
+        return None
+    if not claves_ssh.ruta(clave):
+        raise AltaError("clave_invalida")
+    return clave
+
+
 # ---------------------------------------------------------------- pasos (cada uno en el hilo del alta)
 
 def _diagnostico(job):
@@ -311,30 +339,55 @@ def _instalar(job, como_root):
     _probar_y_guardar(job)
 
 
-def _probar_y_guardar(job):
-    salida, error = servidores_ssh.ejecutar({"nombre": job.nombre, "ssh": f"infobar@{job.host}", "puerto": job.puerto})
+def lee_como_infobar(nombre, host, puerto):
+    """True si la app puede leer el servidor como `infobar`: la MISMA orden que el monitor (clave dedicada y OPCIONES_SEGURAS)."""
+    salida, error = servidores_ssh.ejecutar({"nombre": nombre, "ssh": f"infobar@{host}", "puerto": puerto})
     sec, _, _, _ = servidores_ssh.analizar(salida)
-    if error or "version" not in sec:
+    return not error and "version" in sec
+
+
+def _probar_y_guardar(job):
+    if not lee_como_infobar(job.nombre, job.host, job.puerto):
         raise AltaError("fallo_prueba")
     _guardar_servidor(job)
     job.pon("hecho", "hecho_actualiza" if job.ya_instalado else "hecho")
 
 
-def _guardar_servidor(job):
-    nuevo = {"nombre": job.nombre, "ssh": f"infobar@{job.host}", "id": nuevo_id()}
-    if job.puerto != 22:
-        nuevo["puerto"] = job.puerto
+def _ficha(nombre, host, puerto):
+    nuevo = {"nombre": nombre, "ssh": f"infobar@{host}", "id": nuevo_id()}
+    if puerto != 22:
+        nuevo["puerto"] = puerto
     if not servidores_validos([nuevo]):
         raise AltaError("entrada_invalida")
+    return nuevo
+
+
+def _ya_esta(lista, nuevo):
+    """True si el servidor ya está (mismo nombre, ssh y puerto); AltaError si su nombre lo usa otro servidor; False si es nuevo."""
+    for s in lista:
+        if isinstance(s, dict) and s.get("nombre") == nuevo["nombre"]:
+            if s.get("ssh") == nuevo["ssh"] and int(s.get("puerto") or 22) == int(nuevo.get("puerto") or 22):
+                return True                            # ya estaba: repetir el alta no lo duplica
+            raise AltaError("nombre_repetido")
+    return False
+
+
+def guardar_servidor(nombre, host, puerto):
+    """Añade el servidor a la lista (bajo el cerrojo de servidores.json). True si lo añade, False si ya estaba; AltaError si no se puede."""
+    nuevo = _ficha(nombre, host, puerto)
+    anadido = [False]
 
     def anadir(lista):
-        for s in lista:
-            if isinstance(s, dict) and s.get("nombre") == job.nombre:
-                if s.get("ssh") == nuevo["ssh"] and int(s.get("puerto") or 22) == job.puerto:
-                    return lista                       # ya estaba: repetir el alta no lo duplica
-                raise AltaError("nombre_repetido")
+        if _ya_esta(lista, nuevo):
+            return lista
+        anadido[0] = True
         return lista + [nuevo]
     modificar_servidores(anadir)
+    return anadido[0]
+
+
+def _guardar_servidor(job):
+    guardar_servidor(job.nombre, job.host, job.puerto)
 
 
 def _corre(job, paso, *args):
@@ -384,13 +437,14 @@ def atiende(accion, cuerpo, ahora=None):
             _limpia(ahora)
             if accion == "diagnostico":
                 nombre, usuario, host, puerto = _destino_valido(cuerpo)
+                clave = _clave_valida(cuerpo)
                 if any(a.estado == "en_curso" for a in _ALTAS.values()):
                     raise AltaError("ocupado")
                 if ahora < _ENFRIA_HASTA[0]:
                     raise AltaError("espera")
                 if sum(1 for x in _ALTAS.values() if x.estado in ("en_curso", "huella", "listo", "terminal")) >= MAX_ALTAS:
                     raise AltaError("demasiadas")                # las terminadas (hecho, error, no soportado) no cuentan
-                a = Alta(nombre, usuario, host, puerto)
+                a = Alta(nombre, usuario, host, puerto, clave)
                 _ALTAS[a.id] = a
                 _corre(a, _diagnostico)
                 return _respuesta(a)
@@ -431,3 +485,47 @@ def _acepta_huella(job):
 
 def _instalar_con_privilegio(job):
     _instalar(job, como_root=job.como_root)
+
+
+# ---------------------------------------------------------------- punto de entrada para alta-servidor.sh
+
+USO = "uso: python3 -m infobar.servidores_alta registrar [--comprobar | --probar] <nombre> <host> <puerto>"
+# código de salida → lo que significa (el script de alta enseña su propio mensaje para cada uno)
+SALIDA = {"anadido": 0, "ya_estaba": 4, "entrada_invalida": 2, "nombre_repetido": 3, "fallo_prueba": 5, "destino_invalido": 6, "interno": 1}
+_TEXTO_CLI = {"anadido": "Servidor añadido.", "ya_estaba": "El servidor ya estaba en la lista (no se duplica).", "comprobado": "Se puede añadir.",
+              "entrada_invalida": "Datos no válidos: " + USO, "destino_invalido": "Host o puerto no válidos: " + USO,
+              "nombre_repetido": MENSAJES["nombre_repetido"], "fallo_prueba": MENSAJES["fallo_prueba"], "interno": MENSAJES["interno"]}
+
+
+def main(argv):
+    """`registrar <nombre> <host> <puerto>` añade el servidor como lo haría el alta de la página (no duplica; rechaza un nombre de otro servidor).
+    Con `--comprobar` solo dice si se podría, sin escribir nada; con `--probar`, antes de guardarlo comprueba que la app lo lee como `infobar` con
+    la misma orden que el monitor (como «Comprobar conexión» en la página). Devuelve el código de salida (ver SALIDA)."""
+    args = list(argv)
+    modo = args.pop(1) if len(args) > 1 and args[1] in ("--comprobar", "--probar") else ""
+    try:
+        if len(args) != 4 or args[0] != "registrar":
+            raise AltaError("entrada_invalida")
+        nombre, host, puerto = args[1], args[2], args[3]
+        if not (_HOST.fullmatch(host) and puerto.isascii() and puerto.isdigit() and len(puerto) <= 5 and 0 < int(puerto) < 65536):
+            raise AltaError("destino_invalido")
+        if not _NOMBRE.fullmatch(nombre):
+            raise AltaError("entrada_invalida")
+        if modo == "--comprobar":
+            _ya_esta(servidores_actuales(), _ficha(nombre, host, int(puerto)))
+            print(_TEXTO_CLI["comprobado"])
+            return 0
+        if modo == "--probar" and not lee_como_infobar(nombre, host, int(puerto)):
+            raise AltaError("fallo_prueba")
+        clave = "anadido" if guardar_servidor(nombre, host, int(puerto)) else "ya_estaba"
+    except AltaError as e:
+        clave = e.clave if e.clave in SALIDA else "interno"
+    except Exception as e:                              # el script explica qué hacer: aquí solo el tipo, como en el resto del alta
+        log(f"alta de servidor (terminal): fallo interno ({type(e).__name__})")
+        clave = "interno"
+    print(_TEXTO_CLI[clave], file=sys.stdout if SALIDA[clave] in (0, 4) else sys.stderr)
+    return SALIDA[clave]
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
