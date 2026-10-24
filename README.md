@@ -336,7 +336,9 @@ Si un servidor no tiene registro de sshd en el journal, la tarjeta dice «sin da
   de siempre): ¿entra?, ¿root o `sudo` sin contraseña?, ¿Debian/Ubuntu con systemd?, ¿`AllowUsers`?, ¿ya instalado? Si es la primera conexión te enseña la **huella** del servidor y
   hasta que no confirmas que es la suya no se guarda en `known_hosts` (nunca hay un botón para sustituir una huella que cambió). Con «listo», «Instalar con mi clave» manda los tres scripts
   por stdin en una sola conexión, prueba la lectura como `infobar` y solo entonces guarda el servidor. Si el servidor pide contraseña de sudo, te da la línea de `alta-servidor.sh` para pegar
-  en el Terminal (ahí tecleas tu contraseña) y un botón «Comprobar conexión». Un alta a la vez, 60 s de enfriamiento tras un fallo, y nada crudo del servidor llega a la página.
+  en el Terminal de tu Mac (no dentro del servidor; ahí tecleas tu contraseña) y un botón «Comprobar conexión». Un alta a la vez, 60 s de enfriamiento tras un fallo, y nada crudo del
+  servidor llega a la página. «Clave SSH» deja elegir con qué clave de `~/.ssh` entras (la página solo ve nombres de fichero) y, si tu clave no entra, te da la línea para
+  autorizar tu clave pública desde la consola web del proveedor y un botón «Comprobar de nuevo».
   `infobar/remoto/desinstalar-del-servidor.sh` (como root en el servidor) lo deshace.
 - **Detección de webs.** Con el script de root v2, el servidor dice qué dominios sirve su proxy (Traefik de Dokploy, EasyPanel y Coolify: etiquetas de los servicios de Swarm y de los
   contenedores y los ficheros dinámicos del proxy); solo salen los nombres dentro de `Host(...)`, nunca el resto de las etiquetas ni de los ficheros (pueden llevar hashes de

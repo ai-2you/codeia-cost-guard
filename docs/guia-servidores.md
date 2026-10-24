@@ -19,23 +19,35 @@ que suele salir. Pensada para Ubuntu (24.04) con Dokploy, Easypanel o docker a s
 
 ## Dar de alta un servidor
 
-Requisitos: entras por SSH con tu usuario (p. ej. `victor`) y ese usuario puede usar `sudo`.
+Requisitos: entras por SSH con tu usuario (p. ej. `victor`) y ese usuario puede usar `sudo` (o entras
+como `root`). Lo más cómodo es **Ajustes → Servidores → «Dar de alta un servidor»**; a mano, en el
+**Terminal de tu Mac** (no dentro del servidor):
 
 ```bash
-cd infobar        # la carpeta donde clonaste el repo
+cd ~/.cost-guard   # o la carpeta donde clonaste el repo
 infobar/remoto/alta-servidor.sh victor@IP_DEL_SERVIDOR        # [puerto] si no es el 22
+infobar/remoto/alta-servidor.sh -i ~/.ssh/mi_clave.pem --nombre produccion victor@IP   # otra clave y otro nombre
 ```
 
 El script:
 1. crea la primera vez la clave `~/.ssh/infobar_ed25519` (sin passphrase, para que la app arranque
    sola);
-2. copia los scripts al servidor y ejecuta `instalar-en-servidor.sh` con `sudo`, que crea el
-   usuario `infobar`, instala los scripts, la regla de `sudo` y la clave limitada (léelo antes si
-   quieres; no toca nada más);
-3. prueba la conexión y te dice qué línea añadir.
+2. entra **una sola vez** como tu usuario (conexión maestra de ssh: si hace falta contraseña, se pide
+   solo ahí) y por esa misma conexión copia los scripts y ejecuta `instalar-en-servidor.sh` con
+   `sudo`, que crea el usuario `infobar`, instala los scripts, la regla de `sudo` y la clave limitada
+   (léelo antes si quieres; no toca nada más);
+3. si entraste con contraseña, te pregunta si autoriza tu clave personal (`~/.ssh/id_ed25519.pub` o la
+   `.pub` de la que pasaste con `-i`; nunca la de infobar) para no volver a pedírtela;
+4. prueba la conexión como `infobar` y **da de alta el servidor en la app** (con el host como nombre
+   si no pasas `--nombre`). Repetirlo no lo duplica; un nombre que ya usa otro servidor se rechaza.
 
-Después añádelo desde el panel → **Ajustes → Servidores**, o a mano en **`~/.cost-guard/servidores.json`**
-(fuera de git: lleva hosts y usuarios; la plantilla es `servidores.example.json`):
+Si algo falla te dice el motivo en castellano (solo admite claves y la tuya no está autorizada,
+contraseña incorrecta o `PermitRootLogin`, puerto cerrado, huella cambiada, sin `sudo`...). Si el
+servidor solo admite claves y la tuya no está, ejecuta dentro del servidor (consola web del proveedor)
+la línea que te da el script o Ajustes para autorizarla y repite.
+
+Para retocar un servidor ya dado de alta (panel, webs...) usa **Ajustes → Servidores** o edítalo en
+**`~/.cost-guard/servidores.json`** (fuera de git: lleva hosts y usuarios; la plantilla es `servidores.example.json`):
 
 ```json
 "servidores": [

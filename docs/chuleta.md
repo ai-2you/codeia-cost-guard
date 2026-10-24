@@ -26,7 +26,7 @@ cd infobar        # la carpeta donde clonaste el repo
 python3 costbar.py --clave nan             # guardar o cambiar la clave de NaN (sin eco)
 python3 costbar.py --print                 # informe de tokens en la terminal
 python3 analizar_gasto.py 7                # informe de los ultimos 7 dias
-infobar/remoto/alta-servidor.sh victor@IP  # dar de alta un servidor
+infobar/remoto/alta-servidor.sh victor@IP  # dar de alta un servidor (en el Mac; -i CLAVE, --nombre N)
 python3 -m unittest discover tests         # tests
 ```
 
