@@ -386,7 +386,8 @@ class RelojYFicheroTest(Base):
         self.assertTrue(os.path.exists(sa.ruta() + ".corrupto"))
         self.assertTrue(self.estado()["base"])
 
-    @unittest.skipIf(os.name == "nt", "os.symlink pide un privilegio que no siempre hay en Windows")
+    @unittest.skipIf(os.name == "nt", "os.symlink necesita Modo Desarrollador o admin en Windows, "
+                     "no se puede dar por hecho en la maquina de un usuario")
     def test_un_enlace_simbolico_no_se_sigue(self):
         destino = os.path.join(self.dir, "otro.json")
         with open(destino, "w") as f:

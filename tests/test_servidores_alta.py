@@ -337,10 +337,14 @@ class EntradasHostilesTest(Base):
             self.assertEqual((codigo, r["codigo"]), (400, "entrada_invalida"), m)
         self.assertEqual(self.llamadas(), [])
 
-    def test_ids_y_pasos_incorrectos(self):
+    def test_ids_desconocidos_no_tocan_nada(self):
+        # sin skipIf: alta.atiende() con un id desconocido es un simple lookup en el dict _ALTAS
+        # (ver _busca() en infobar/servidores_alta.py), no toca ssh/subprocess/filesystem
         for accion in ("huella", "instalar", "comprobar", "estado"):
             for cuerpo in ({"id": "no-existe"}, {}, {"id": 5}, None, "x"):
                 self.assertEqual(alta.atiende(accion, cuerpo)[1]["codigo"], "desconocida", (accion, cuerpo))
+
+    def test_pasos_incorrectos_segun_el_estado_del_alta(self):
         id_ = self.diagnostica()
         self.espera(id_)                                                                  # estado «huella»
         self.assertEqual(alta.atiende("instalar", {"id": id_})[1]["codigo"], "estado_incorrecto")
@@ -443,6 +447,11 @@ class InstalacionTest(Base):
             r = self.espera(id_, ("hecho", "error"))
             self.assertEqual((r["estado"], r["codigo"]), ("error", "sin_clave"), publica)
         self.assertFalse(any("instalar-en-servidor.sh" in " ".join(c["args"]) for c in self.llamadas() if c["prog"] == "ssh"))
+
+    def test_una_clave_con_intento_de_inyeccion_no_genera_comando(self):
+        # sin skipIf: comando_instalacion() solo valida con regex en Python puro, no toca ssh/ssh-keygen
+        # ni el sistema de ficheros, asi que esta comprobacion (que la clave no cuela en el comando remoto)
+        # corre igual en Windows que en POSIX
         with self.assertRaises(alta.AltaError):
             alta.comando_instalacion("ssh-ed25519 x'; id #", True)
 

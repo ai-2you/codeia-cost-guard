@@ -243,6 +243,9 @@ class VolumenTest(unittest.TestCase):
               "/dev/disk4s1 on /Volumes/EVO990 (apfs, local, nodev, nosuid, journaled, noowners)\n"
               "/dev/disk3s5 on /System/Volumes/Data (apfs, local, journaled, protect)\n")
 
+    @unittest.skipIf(os.name == "nt", "os.path.realpath() de una ruta estilo POSIX se reescribe con la "
+                     "unidad actual en Windows (no coincide con los puntos de montaje de SALIDA); la "
+                     "funcion ya esta documentada y gateada como exclusiva de macOS (noowners)")
     def test_externo_sin_propietarios(self):
         self.assertTrue(plataforma.volumen_sin_propietarios("/Volumes/EVO990/x/consumo.sqlite", self.SALIDA))
 
@@ -292,15 +295,17 @@ class HallazgosRevisionTest(Base):
         self.assertEqual(self.horas_reales(), self.horas_esperadas())
 
     def test_ruta_de_solo_lectura_con_caracteres_especiales(self):
-        # "!" en vez de "?": SQLite trata el "?" como delimitador de cadena de consulta incluso sin
-        # uri=True en algunas compilaciones (confirmado en la de Windows), rompiendo la apertura.
-        for nombre in ("a#b.sqlite", "a!b=c.sqlite", "a b%20c.sqlite"):
+        # "?" es un caracter reservado/ilegal en nombres de fichero de Windows (junto con < > : " / \ |):
+        # no se puede crear ese fichero ahi, asi que en Windows se cambia por otro caracter especial
+        # valido alli pero que tambien tiene significado reservado en una URI (igual que "?").
+        segundo = "a?b=c.sqlite" if os.name != "nt" else "a;b=c.sqlite"
+        for nombre in ("a#b.sqlite", segundo, "a b%20c.sqlite"):
             ruta = os.path.join(self.dir, nombre)
             almacen.abrir(ruta).close()
             con = almacen.abrir(ruta, solo_lectura=True)
             self.assertEqual(con.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='turnos'").fetchone()[0], 1, nombre)
             con.close()
-        self.assertEqual(sorted(f for f in os.listdir(self.dir) if f.endswith(".sqlite")), ["a b%20c.sqlite", "a!b=c.sqlite", "a#b.sqlite"])
+        self.assertEqual(sorted(f for f in os.listdir(self.dir) if f.endswith(".sqlite")), sorted(["a b%20c.sqlite", "a#b.sqlite", segundo]))
 
     def test_solo_lectura_es_mode_ro_aunque_se_quite_query_only(self):
         con = almacen.abrir(self.ruta, solo_lectura=True)

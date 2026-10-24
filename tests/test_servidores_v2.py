@@ -292,6 +292,9 @@ class ScriptBase(unittest.TestCase):
 
 
 @REQUISITOS
+@unittest.skipIf(os.name == "nt", "ejecuta recoger.sh de verdad con bash contra un journalctl "
+                 "falso (tecnica POSIX); el script es para servidores remotos Linux, no para "
+                 "el cliente, asi que no tiene sentido exigir bash local en Windows")
 class ScriptRealTest(ScriptBase):
     def test_sintaxis(self):
         r = subprocess.run([aislamiento.BASH, "-n", aislamiento.ruta_bash(SCRIPT)], capture_output=True, text=True)
@@ -451,6 +454,8 @@ class ScriptRealTest(ScriptBase):
 
 
 @REQUISITOS
+@unittest.skipIf(os.name == "nt", "ejecuta recoger.sh de verdad con bash (tecnica POSIX); el "
+                 "script es para servidores remotos Linux, no para el cliente")
 class ScriptLentoTest(ScriptBase):
     """Todo lo lento a la vez: el último escritor del canal ha de cerrarlo antes del tope del Mac menos la conexión."""
     lento_corto = False
@@ -498,6 +503,8 @@ class RootRealTest(unittest.TestCase):
     def ejecuta(self):
         return subprocess.run([aislamiento.BASH, aislamiento.ruta_bash(self.script)], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL).stdout
 
+    @unittest.skipIf(os.name == "nt", "falso() escribe binarios falsos con shebang sin extension "
+                     "(tecnica POSIX); recoger-root.sh (via bash) no los invoca igual en Windows")
     def test_rapido_declara_cero_omitidos(self):
         for n in ("docker", "sshd", "ufw", "iptables", "systemctl", "fail2ban-client"):
             self.falso(n, 0)
@@ -507,6 +514,8 @@ class RootRealTest(unittest.TestCase):
         self.assertEqual(sec["fin_root"], ["omitidos 0"])
         self.assertFalse(invalidas)
 
+    @unittest.skipIf(os.name == "nt", "falso() escribe binarios falsos con shebang sin extension "
+                     "(tecnica POSIX); recoger-root.sh (via bash) no los invoca igual en Windows")
     def test_lento_declara_omitidos_y_el_mac_descarta_las_secciones_de_root(self):
         for n in ("docker", "sshd", "ufw", "iptables", "systemctl", "fail2ban-client"):
             self.falso(n, 2.5)
@@ -519,6 +528,8 @@ class RootRealTest(unittest.TestCase):
         self.assertFalse(d["con_root"])                                     # sin root: sin comprobaciones de root, no ceros ni alarmas
         self.assertNotIn("fail2ban", d)
 
+    @unittest.skipIf(os.name == "nt", "falso() escribe binarios falsos con shebang sin extension "
+                     "(tecnica POSIX); recoger-root.sh (via bash) no los invoca igual en Windows")
     def test_un_comando_que_agota_su_tiempo_tambien_se_declara(self):
         for n in ("sshd", "ufw", "iptables", "systemctl", "fail2ban-client"):
             self.falso(n, 0)

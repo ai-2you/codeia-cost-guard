@@ -55,7 +55,10 @@ class TestComparar(unittest.TestCase):
 
     def test_dias_cerrados_en_cambio_de_hora(self):
         from zoneinfo import ZoneInfo
-        z = ZoneInfo("Europe/Madrid")
+        try:
+            z = ZoneInfo("Europe/Madrid")
+        except Exception as e:          # falta tzdata (tipico en Windows sin el paquete)
+            self.skipTest(f"falta tzdata para zoneinfo ({e}); instala con: pip install tzdata")
         import datetime as dt
         ahora = int(dt.datetime(2026, 10, 25, 23, 30, tzinfo=z).timestamp())
         self.assertNotIn("2026-10-25", sombra.dias_cerrados(ahora, z))

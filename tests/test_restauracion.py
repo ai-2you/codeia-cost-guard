@@ -93,10 +93,10 @@ class TestRestaurar(Base):
             self.restaura()
         self.assertEqual(claves_de(self.destino), ["claude:vieja"])
 
-    @unittest.skipIf(os.name == "nt", "requiere borrar un -wal con una conexion abierta (con) todo el rato: en "
-                      "Windows eso bloquea el borrado (no hay unlink-con-fd-abierto como en POSIX); no se puede "
-                      "cerrar `con` antes porque CIERRA->checkpoint borraria el WAL huerfano que el test necesita "
-                      "crear a mano (verificado: Connection.close() hace checkpoint final aunque wal_autocheckpoint=0)")
+    @unittest.skipIf(os.name == "nt", "requiere borrar un -wal con una conexion abierta (con) todo el rato: en Windows la VFS de "
+                      "SQLite no pide FILE_SHARE_DELETE, asi que eso bloquea el borrado (no hay unlink-con-fd-abierto como en "
+                      "POSIX); no se puede cerrar `con` antes porque CIERRA->checkpoint borraria el WAL huerfano que el test "
+                      "necesita crear a mano (verificado: Connection.close() hace checkpoint final aunque wal_autocheckpoint=0)")
     def test_el_wal_de_la_base_antigua_no_resucita(self):
         # la base antigua tiene una fila que SOLO vive en su -wal (la conexión abierta impide el checkpoint)
         viva = base_con(self.destino, ["claude:vieja-checkpoint"], True)
@@ -121,10 +121,10 @@ class TestRestaurar(Base):
         self.assertFalse(os.path.exists(self.destino + "-wal"))
         con.close()
 
-    @unittest.skipIf(os.name == "nt", "lector se mantiene abierto a proposito durante TODA la llamada (no es un "
-                      "bloqueo transitorio que el reintento de _borra_wal pueda esperar): en Windows esto bloquea "
-                      "el borrado del -wal sin remedio, ver test_un_lector_transitorio_no_aborta_la_restauracion "
-                      "para el caso equivalente con un lector que SI suelta a tiempo")
+    @unittest.skipIf(os.name == "nt", "lector se mantiene abierto a proposito durante TODA la llamada (no es un bloqueo transitorio "
+                      "que el reintento de _borra_wal pueda esperar): en Windows la VFS de SQLite no pide FILE_SHARE_DELETE, asi que "
+                      "esto bloquea el borrado del -wal sin remedio, ver test_un_lector_transitorio_no_aborta_la_restauracion para "
+                      "el caso equivalente con un lector que SI suelta a tiempo")
     def test_wal_huerfano_con_un_lector_abierto_no_resucita(self):
         # un lector con la lectura abierta impide que el cierre borre el -wal: queda un WAL con filas que no están en la base
         base_con(self.destino, ["claude:vieja"])
@@ -175,7 +175,6 @@ class TestRestaurar(Base):
             r = self.restaura(forzar=True)
         self.assertGreaterEqual(len(intentos), 2)          # de verdad reintento, no paso a la primera
         self.assertTrue(r["sustituyo"])
-        self.assertEqual(claves_de(self.destino), ["claude:nueva-1", "claude:nueva-2"])
         self.assertEqual(claves_de(self.destino), ["claude:nueva-1", "claude:nueva-2"])
 
     def test_guarda_copia_previa_de_la_base_actual(self):

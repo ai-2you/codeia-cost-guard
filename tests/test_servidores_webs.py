@@ -73,6 +73,9 @@ class ParseoTest(unittest.TestCase):
         self.assertEqual(r["descartados"], 50)
 
 
+@unittest.skipIf(os.name == "nt", "ejecuta recoger-root.sh de verdad con bash, con symlinks a "
+                 "timeout/tac (os.symlink necesita Modo Desarrollador o admin en Windows); el "
+                 "script es para servidores remotos Linux, no para el cliente")
 class ScriptRootWebsTest(unittest.TestCase):
     """La sección `webs` de recoger-root.sh de verdad, con un `docker` falso y ficheros de proxy de prueba."""
 
